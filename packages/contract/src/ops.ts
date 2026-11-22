@@ -21,6 +21,7 @@ import type {
   Team,
   TeamDetail,
   Topic,
+  TranscriptLine,
   TranscriptSegment,
   WikiPage,
   WikiPageSummary,
@@ -196,6 +197,27 @@ export const opInputs = {
     segmentId: id,
     text: z.string().max(20000).optional(),
     speaker: z.string().trim().max(80).optional(),
+  }),
+  'transcript.find': z.object({
+    sessionId: id,
+    pattern: z.string().min(1).max(500),
+    regex: z.boolean().default(false),
+    fromSec: sec.optional(),
+    toSec: sec.optional(),
+    limit: z.number().int().min(1).max(2000).default(500),
+  }),
+  'transcript.updateSegments': z.object({
+    sessionId: id,
+    updates: z
+      .array(
+        z.object({
+          segmentId: id,
+          text: z.string().max(20000).optional(),
+          speaker: z.string().trim().max(80).optional(),
+        }),
+      )
+      .min(1)
+      .max(500),
   }),
   'transcript.renameSpeaker': z.object({
     sessionId: id,
@@ -374,6 +396,8 @@ export interface OpOutputs {
   'transcript.get': TranscriptSegment[];
   'transcript.text': { text: string; segments: number };
   'transcript.updateSegment': TranscriptSegment;
+  'transcript.find': TranscriptLine[];
+  'transcript.updateSegments': { updated: number; segments: TranscriptLine[] };
   'transcript.renameSpeaker': { updated: number };
   'topics.list': Topic[];
   'topics.create': Topic;

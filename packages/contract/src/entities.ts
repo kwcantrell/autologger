@@ -171,6 +171,16 @@ export interface TranscriptSegment {
   edited: boolean;
 }
 
+/** A transcript segment without word timings — the compact shape agents search and edit. */
+export interface TranscriptLine {
+  id: string;
+  startSec: number;
+  endSec: number;
+  speaker: string;
+  text: string;
+  edited: boolean;
+}
+
 export interface Topic {
   id: string;
   sessionId: string;
