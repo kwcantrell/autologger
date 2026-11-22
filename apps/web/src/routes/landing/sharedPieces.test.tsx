@@ -12,7 +12,8 @@ import { PlaylistResult } from '@/routes/PlaylistResult';
 import { BacklinksSection, WikiPageHeader } from '@/routes/wiki/WikiPageParts';
 import { StatWidget, TimelineWidget, WidgetFrame } from '@/session/dashboards/WidgetParts';
 import { ExportOptions } from '@/session/tabs/ExportOptions';
-import { CompileMock, DashboardMock, ExportMock, ImportMock, WikiMock } from './mocks';
+import { DashboardMock, ExportMock, ImportMock } from './mocks';
+import { CompileMock, WikiMock } from './wikiMocks';
 
 // wouter's Link reads the location; give it one outside a browser.
 const html = (n: ReactNode) =>

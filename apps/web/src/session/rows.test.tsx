@@ -5,13 +5,8 @@ import type { Change, SessionEvent, Topic, TranscriptSegment } from '@autologger
 import type { ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import {
-  AgentsMock,
-  LoggingMock,
-  TopicsMock,
-  TranscriptMock,
-  WorkspaceMock,
-} from '@/routes/landing/mocks';
+import { WorkspaceMock } from '@/routes/landing/heroMock';
+import { AgentsMock, LoggingMock, TopicsMock, TranscriptMock } from '@/routes/landing/mocks';
 import { LogButton } from './LogButton';
 import { ChangeRow } from './tabs/ChangeRow';
 import { EventRow } from './tabs/EventRow';
