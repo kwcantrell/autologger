@@ -1,13 +1,17 @@
-// A wiki page body rendered as Markdown into React elements. Raw HTML is skipped, never parsed.
+// A wiki page body rendered as GitHub-flavoured Markdown (tables, strikethrough, task lists) into
+// React elements. Raw HTML is skipped, never parsed.
 // Only http(s) links, in-app paths (/wiki/…, /sessions/…) and [[Title]] / [[Title|label]] wiki
 // links stay clickable: `urlTransform` blanks every other URL and the `a` renderer shows a blank
 // link as its text. Images render as their alt text. [[…]] links resolve against the show's page
-// titles and aliases; an unknown title renders dim with a "No page named …" tooltip.
+// titles and aliases; an unknown title renders dim with a "No page named …" tooltip. Inside a table
+// cell an aliased link escapes its pipe, as GFM requires: [[Title\|label]].
 
 import type { ReactNode } from 'react';
 import Markdown, { type Components, type UrlTransform } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Link } from 'wouter';
 import { cn } from '@/shared/lib/utils';
+import { markdownTableComponents } from '@/shared/ui/markdownTable';
 import { Tooltip } from '@/shared/ui/Tooltip';
 import { type WikiResolver, wikiHref } from './wikiShared';
 
@@ -105,6 +109,7 @@ function components(resolve: WikiResolver): Components {
     img({ alt }) {
       return <>{alt ?? ''}</>;
     },
+    ...markdownTableComponents,
   };
 }
 
@@ -131,7 +136,8 @@ const PROSE_CLASS = [
   '[&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5',
   '[&_blockquote]:border-l-2 [&_blockquote]:border-(--si-line-strong) [&_blockquote]:pl-3 [&_blockquote]:text-si-muted',
   '[&_code]:font-mono [&_code]:text-[0.85em] [&_pre]:overflow-x-auto [&_pre]:rounded-ctl [&_pre]:bg-si-panel-2 [&_pre]:p-3',
-  '[&_hr]:my-4 [&_hr]:border-si-line',
+  '[&_hr]:my-4 [&_hr]:border-si-line [&_del]:text-si-muted',
+  '[&_.contains-task-list]:list-none [&_.contains-task-list]:pl-1 [&_.task-list-item_input]:mr-1.5',
 ].join(' ');
 
 export function WikiMarkdown({
@@ -149,7 +155,7 @@ export function WikiMarkdown({
         skipHtml
         urlTransform={urlTransform}
         // biome-ignore lint/suspicious/noExplicitAny: a minimal local mdast shape instead of a types dep
-        remarkPlugins={[remarkWikiLinks as any]}
+        remarkPlugins={[remarkGfm, remarkWikiLinks as any]}
         components={components(resolve)}
       >
         {body}
