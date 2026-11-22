@@ -16,6 +16,7 @@ import type {
   Me,
   SearchHit,
   Session,
+  SessionDetail,
   SessionEvent,
   Show,
   Team,
@@ -556,7 +557,7 @@ export interface OpOutputs {
   'categories.list': Category[];
   'categories.save': Category[];
   'sessions.list': Session[];
-  'sessions.get': Session;
+  'sessions.get': SessionDetail;
   'sessions.create': Session;
   'sessions.update': Session;
   'sessions.archive': Session;

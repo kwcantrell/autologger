@@ -119,6 +119,11 @@ export interface Session {
   access: ShowAccess;
 }
 
+/** sessions.get: a session plus its unfinished transcription work. */
+export interface SessionDetail extends Session {
+  transcriptJob: TranscriptJob | null;
+}
+
 export type EventSource = 'operator' | 'companion' | 'agent' | 'import';
 
 export interface SessionEvent {
@@ -374,10 +379,26 @@ export interface Job {
   sessionTitle?: string;
   /** Queued jobs only (jobs.list): jobs ahead of this one in the worker queue, 0 = next. */
   queuePosition?: number;
+  /**
+   * Queued and running jobs (jobs.list): rough estimate of seconds until the job finishes, from
+   * recent finished jobs of the same kind. Absent when there is no history to estimate from.
+   */
+  etaSec?: number;
   error: string | null;
   progress: string | null;
+  /** When the current (or last) attempt started; null while queued. */
+  startedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** sessions.get: the queued or running job that will produce the session's transcript. */
+export interface TranscriptJob {
+  id: string;
+  kind: string;
+  status: 'queued' | 'running';
+  queuePosition?: number;
+  etaSec?: number;
 }
 
 export interface AdminUser {
