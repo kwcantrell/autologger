@@ -5,9 +5,15 @@
 // - `sessions/<id>/` prefixes whose session no longer exists, and `shows/<id>/` objects whose show
 //   or compilation no longer exists. Deletes remove these after commit, best effort (#124); a
 //   crash, an S3 outage or a job still uploading for a deleted session leaves them behind.
+// - Objects under a live session's prefix that no `audio_segments.object_key` / `peaks_key` of
+//   that session points at (an import that crashed between upload and insert, a failed
+//   best-effort delete in media.deleteSegment, peaks stored for a segment deleted meanwhile).
+//   Listing every live session is a full bucket scan, so each run checks at most
+//   MEDIA_SWEEP_LIVE_SESSIONS of them, continuing after the last session the previous run of this
+//   process checked (in id order, wrapping around).
 //
-// Never touches objects of an existing session; under an existing show, only compilation MP4s
-// whose compilation row is gone. Orphans are removed only when the newest object under them is
+// Under an existing session, only objects no segment row points at; under an existing show, only
+// compilation MP4s whose compilation row is gone. Orphans are removed only when the newest object under them is
 // older than the grace period, so an in-flight import or compile is not hit. Workers run it on an
 // interval (src/worker/main.ts); a transaction-level advisory lock lets only one at a time sweep.
 
@@ -32,6 +38,10 @@ export interface SweepOptions {
   orphanGraceMs?: number;
   /** Log what would be removed; delete nothing. */
   dryRun?: boolean;
+  /** Live sessions whose objects are checked against their segment rows this run (0: none). */
+  liveSessionsPerRun?: number;
+  /** Check live sessions with ids after this one ('' starts over); default: where the last run stopped. */
+  liveCursor?: string;
   now?: Date;
 }
 
@@ -45,9 +55,20 @@ export interface SweepResult {
   prefixes: string[];
   /** Single objects removed: compilation MP4s of deleted compilations under a live show. */
   objects: string[];
+  /** Live sessions whose objects were checked against their segment rows. */
+  liveSessionsChecked: number;
+  /** Objects under live sessions removed because no segment row points at them. */
+  liveObjects: string[];
+  /** Last live session checked ('' after wrapping around); the next run continues after it. */
+  liveCursor: string;
   /** Orphan prefixes and objects kept because something under them is newer than the grace. */
   withinGrace: number;
+  /** Live sessions there were to check (the rotation's length). */
+  liveSessionsTotal: number;
 }
+
+/** Where the previous run of this process stopped in the live-session rotation. */
+let lastLiveCursor = '';
 
 export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> {
   const now = opts.now ?? new Date();
@@ -61,12 +82,17 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
     opts.orphanGraceMs ?? env.mediaSweep.orphanGraceHours * HOUR_MS,
   );
   const tag = dryRun ? 'media sweep (dry run): would remove' : 'media sweep: removed';
+  const livePerRun = Math.max(0, opts.liveSessionsPerRun ?? env.mediaSweep.liveSessionsPerRun);
   const result: SweepResult = {
     ran: false,
     dryRun,
     uploads: [],
     prefixes: [],
     objects: [],
+    liveSessionsChecked: 0,
+    liveObjects: [],
+    liveCursor: opts.liveCursor ?? lastLiveCursor,
+    liveSessionsTotal: 0,
     withinGrace: 0,
   };
   const started = Date.now();
@@ -136,6 +162,7 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
     };
 
     // 2. Prefixes of sessions that no longer exist.
+    const liveSessionIds: string[] = [];
     for (const batch of chunks(idsUnder(await listChildPrefixes('sessions/')), ID_BATCH)) {
       const live = new Set(
         (
@@ -144,6 +171,41 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
       );
       for (const id of batch)
         if (!live.has(id)) await removePrefix(`sessions/${id}/`, 'session no longer exists');
+        else liveSessionIds.push(id);
+    }
+
+    // 2b. Objects under live sessions that no segment row points at, for the next
+    //     `livePerRun` sessions of the rotation.
+    liveSessionIds.sort();
+    result.liveSessionsTotal = liveSessionIds.length;
+    const after = liveSessionIds.filter((id) => id > result.liveCursor);
+    const turn = (after.length ? after : liveSessionIds).slice(0, livePerRun);
+    if (turn.length) {
+      const referenced = new Set(
+        (
+          await tx
+            .select({ objectKey: audioSegments.objectKey, peaksKey: audioSegments.peaksKey })
+            .from(audioSegments)
+            .where(inArray(audioSegments.sessionId, turn))
+        ).flatMap((r) => (r.peaksKey ? [r.objectKey, r.peaksKey] : [r.objectKey])),
+      );
+      for (const id of turn) {
+        for (const o of await listObjects(`sessions/${id}/`)) {
+          if (referenced.has(o.key) || o.lastModified.getTime() >= cutoff) continue;
+          if (!dryRun) {
+            try {
+              await deleteObject(o.key);
+            } catch (e) {
+              console.warn(`media sweep: could not delete ${o.key}: ${(e as Error).message}`);
+              continue;
+            }
+          }
+          result.liveObjects.push(o.key);
+          console.log(`${tag} ${o.key} (no audio segment points at it)`);
+        }
+      }
+      result.liveSessionsChecked = turn.length;
+      result.liveCursor = turn.at(-1) === liveSessionIds.at(-1) ? '' : turn.at(-1)!;
     }
 
     // 3. Show prefixes: the whole prefix of a deleted show; under a live show, compilation
@@ -198,6 +260,7 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
     }
   });
 
+  if (result.ran) lastLiveCursor = result.liveCursor;
   console.log(summaryLine(result, Date.now() - started));
   for (const seg of removed)
     publish(`session:${seg.sessionId}`, changeMessage('audio_segment', 'delete', seg.id));
@@ -217,11 +280,20 @@ export function summaryLine(r: SweepResult, elapsedMs: number): string {
     n(r.uploads.length, 'stuck upload', 'stuck uploads'),
     n(r.prefixes.length, 'orphan prefix', 'orphan prefixes'),
     n(r.objects.length, 'compilation object', 'compilation objects'),
+    n(
+      r.liveObjects.length,
+      'unreferenced live-session object',
+      'unreferenced live-session objects',
+    ),
   ].join(', ')} ${r.dryRun ? 'would be removed' : 'removed'}; ${n(
     r.withinGrace,
     'orphan',
     'orphans',
-  )} within grace; ${Math.round(elapsedMs / 1000)} s`;
+  )} within grace; checked ${r.liveSessionsChecked} of ${n(
+    r.liveSessionsTotal,
+    'live session',
+    'live sessions',
+  )}; ${Math.round(elapsedMs / 1000)} s`;
 }
 
 /** `sessions/<id>/` → `<id>`; anything not shaped like an id folder is ignored. */

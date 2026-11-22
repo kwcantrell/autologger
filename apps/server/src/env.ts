@@ -95,6 +95,11 @@ export const env = {
     uploadAgeHours: nonNegative('MEDIA_SWEEP_UPLOAD_AGE_HOURS', 24),
     /** Orphan objects are removed only when the newest one under the prefix is this old. */
     orphanGraceHours: nonNegative('MEDIA_SWEEP_ORPHAN_GRACE_HOURS', 24),
+    /**
+     * Live sessions per run whose objects are checked against their segment rows (one listing
+     * each; the sweep rotates through all of them over successive runs). 0 turns that part off.
+     */
+    liveSessionsPerRun: nonNegative('MEDIA_SWEEP_LIVE_SESSIONS', 50),
     dryRun: str('MEDIA_SWEEP_DRY_RUN') === '1',
   },
 };
