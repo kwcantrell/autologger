@@ -101,7 +101,7 @@ async function transcriptJob(ctx: Ctx, sessionId: string): Promise<TranscriptJob
     .from(jobs)
     .where(and(eq(jobs.sessionId, sessionId), inArray(jobs.status, ['queued', 'running'])));
   if (!rows.length) return null;
-  const list = await withJobEstimates(ctx.db, rows.map(toJob));
+  const list = await withJobEstimates(ctx.db, rows.map(toJob), { untilTranscript: true });
   // No estimate (no history, or waiting out a retry) sorts as the latest.
   const last = list.reduce((a, b) =>
     (b.etaSec ?? Number.POSITIVE_INFINITY) > (a.etaSec ?? Number.POSITIVE_INFINITY) ? b : a,
@@ -166,7 +166,7 @@ defineOp({
 defineOp({
   name: 'sessions.get',
   description:
-    'One session: metadata, transport state, frame rate, event count and transcript status. transcriptJob is the queued or running background job that will produce the transcript, or null when none is (then transcriptStatus is final: done, partial, failed or none): {id, kind, status, queuePosition?, etaSec?}. kind is "transcribe", or "youtube_import" while a YouTube import is still downloading (its transcription is queued when the download finishes, so etaSec covers the download only). With several (one per audio segment) it is the one expected to finish last. queuePosition and etaSec mean the same as in jobs.list (etaSec is a rough estimate in seconds); wait for the job with jobs.list (sessionId, waitSec).',
+    'One session: metadata, transport state, frame rate, event count and transcript status. transcriptJob is the queued or running background job that will produce the transcript, or null when none is (then transcriptStatus is final: done, partial, failed or none): {id, kind, status, queuePosition?, etaSec?}. kind is "transcribe", or "youtube_import" while a YouTube import is still downloading (its transcription is queued when the download finishes). With several (one per audio segment) it is the one expected to finish last. queuePosition means the same as in jobs.list; etaSec is a rough estimate in seconds until the transcript is ready: for a youtube_import it includes the expected transcription time when the video length is known (playlist imports), otherwise (media.importYoutube) it covers the download only, an underestimate; wait for the job with jobs.list (sessionId, waitSec).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId }): Promise<SessionDetail> {

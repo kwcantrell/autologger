@@ -19,7 +19,9 @@ export function setupDb(): Promise<void> {
 
 /** Wipe all data between tests (keeps schema). */
 export async function resetDb(): Promise<void> {
-  await db.execute(sql`truncate users, teams, oauth_clients, jobs restart identity cascade`);
+  await db.execute(
+    sql`truncate users, teams, oauth_clients, jobs, workers restart identity cascade`,
+  );
 }
 
 export async function makeUser(

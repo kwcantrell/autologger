@@ -62,7 +62,7 @@ async function parse<T>(res: Response): Promise<T> {
   );
 }
 
-async function post<T>(url: string, input: unknown): Promise<T> {
+async function post<T>(url: string, input: unknown, signal?: AbortSignal): Promise<T> {
   let res: Response;
   try {
     res = await fetch(url, {
@@ -70,6 +70,7 @@ async function post<T>(url: string, input: unknown): Promise<T> {
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input ?? {}),
+      signal,
     });
   } catch {
     throw new RpcError(
@@ -80,12 +81,16 @@ async function post<T>(url: string, input: unknown): Promise<T> {
   return parse<T>(res);
 }
 
-/** Calls op `name`; the result type follows the input (compact or full, see OpResult). */
+/**
+ * Calls op `name`; the result type follows the input (compact or full, see OpResult). Aborting
+ * `signal` drops the request (the server stops a long-poll's wait when the client goes away).
+ */
 export function rpc<N extends OpName, I extends OpInput<N> = OpInput<N>>(
   name: N,
   input: I,
+  signal?: AbortSignal,
 ): Promise<OpResult<N, I>> {
-  return post<OpResult<N, I>>(`/api/rpc/${name}`, input);
+  return post<OpResult<N, I>>(`/api/rpc/${name}`, input, signal);
 }
 
 export async function getCapabilities(): Promise<Capabilities> {

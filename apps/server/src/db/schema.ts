@@ -522,3 +522,17 @@ export const jobs = pgTable(
     index('jobs_finished').on(t.kind, t.status, t.updatedAt),
   ],
 );
+
+/**
+ * Running worker processes (heartbeat). Each worker inserts its row on start, bumps last_seen_at
+ * every WORKER_HEARTBEAT_SEC and deletes it on clean shutdown; rows not seen for
+ * WORKER_STALE_SEC are ignored (jobs.list etaSec sums the live ones' concurrency).
+ */
+export const workers = pgTable('workers', {
+  id: text('id').primaryKey(),
+  concurrency: integer('concurrency').notNull(),
+  /** Per job kind slot caps (WORKER_CONCURRENCY_<KIND>). */
+  kindConcurrency: jsonb('kind_concurrency').notNull().default({}),
+  startedAt: ts('started_at').notNull().defaultNow(),
+  lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
+});

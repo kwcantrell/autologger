@@ -50,6 +50,20 @@
       "when": 1795337296415,
       "tag": "0006_change_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795338746565,
+      "tag": "0007_backfill_change_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795339785850,
+      "tag": "0008_workers",
+      "breakpoints": true
     }
   ]
 }

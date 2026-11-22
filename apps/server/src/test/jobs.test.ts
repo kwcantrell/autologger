@@ -5,7 +5,7 @@ import { executeOp } from '../core/op.ts';
 import { db, schema } from '../db/client.ts';
 import { env } from '../env.ts';
 import { enqueueJob } from '../media/jobs.ts';
-import { claimJob, completeJob, setProgress } from '../worker/queue.ts';
+import { beatWorker, claimJob, completeJob, removeWorker, setProgress } from '../worker/queue.ts';
 import { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
 
 beforeAll(setupDb);
@@ -197,6 +197,28 @@ describe('job queue order', () => {
     expect((await claimJob())?.id).toBe(transcribe.id);
     expect(imports.map((j) => j.id)).toContain((await claimJob())?.id);
   });
+
+  it('skips kinds with no free slot and claims the next job of another kind', async () => {
+    const { owner, session } = await studio();
+    const imp = await enqueueJob(db, {
+      kind: 'youtube_import',
+      sessionId: session.id,
+      actorId: owner.user.id,
+      payload: { url: 'https://youtu.be/x' },
+    });
+    const transcribe = await enqueueJob(db, {
+      kind: 'transcribe',
+      sessionId: session.id,
+      actorId: null,
+      payload: { segmentId: 'aud_x' },
+    });
+
+    expect(await claimJob(['youtube_import', 'transcribe'])).toBeNull();
+    // The import is first in line, but its kind is full: the transcription runs instead.
+    expect((await claimJob(['youtube_import']))?.id).toBe(transcribe.id);
+    expect(await claimJob(['youtube_import'])).toBeNull();
+    expect((await claimJob())?.id).toBe(imp.id);
+  });
 });
 
 describe('job timing', () => {
@@ -260,7 +282,8 @@ describe('job timing', () => {
     const pending = { sessionId: session.id, status: ['queued' as const, 'running' as const] };
     const queued = await call(agent, 'jobs.list', pending);
     const byId = new Map(queued.map((j) => [j.id, j]));
-    // Own duration: 1200 s of audio × 0.1. Import: 30 s + 1 job ahead × median 45 s ÷ concurrency.
+    // Own duration: 1200 s of audio × 0.1. Import: 30 s; no live worker row, so the slots are
+    // WORKER_CONCURRENCY: it waits (the 45 s median of the job ahead) only when that is 1.
     expect(byId.get(transcribe.id)).toMatchObject({
       queuePosition: 0,
       etaSec: 120,
@@ -268,7 +291,7 @@ describe('job timing', () => {
     });
     expect(byId.get(imp.id)).toMatchObject({
       queuePosition: 1,
-      etaSec: Math.round(30 + 45 / env.workerConcurrency),
+      etaSec: env.workerConcurrency > 1 ? 30 : 75,
     });
     // The job expected to finish last.
     expect((await call(agent, 'sessions.get', { sessionId: session.id })).transcriptJob).toEqual({
@@ -295,5 +318,152 @@ describe('job timing', () => {
     await completeJob(claimed);
     await completeJob((await claimJob())!);
     expect((await call(agent, 'sessions.get', { sessionId: session.id })).transcriptJob).toBeNull();
+  });
+
+  it('sessions.get etaSec for an unfinished import includes the transcription when the length is known', async () => {
+    const { owner, session } = await studio();
+    const agent = asAgent(owner);
+    // History: transcriptions take 0.1 s per audio second, imports 30 s.
+    const ago = (sec: number) => new Date(Date.now() - sec * 1000);
+    const segmentId = newId('aud');
+    await db.insert(schema.audioSegments).values({
+      id: segmentId,
+      sessionId: session.id,
+      ordinal: 0,
+      durationSec: 600,
+      mimeType: 'audio/mpeg',
+      origin: 'file',
+      objectKey: `test/${segmentId}`,
+      status: 'ready',
+    });
+    await db.insert(schema.jobs).values([
+      {
+        id: newId('job'),
+        kind: 'transcribe',
+        status: 'done',
+        sessionId: session.id,
+        payload: { segmentId },
+        startedAt: ago(1000),
+        updatedAt: ago(940),
+      },
+      {
+        id: newId('job'),
+        kind: 'youtube_import',
+        status: 'done',
+        sessionId: session.id,
+        payload: { url: 'https://youtu.be/x' },
+        startedAt: ago(1000),
+        updatedAt: ago(970),
+      },
+    ]);
+    const imp = await enqueueJob(db, {
+      kind: 'youtube_import',
+      sessionId: session.id,
+      actorId: owner.user.id,
+      payload: { url: 'https://youtu.be/y', durationSec: 1200 },
+    });
+    // jobs.list: the download only. sessions.get: download + 1200 s × 0.1 of transcription.
+    const [listed] = await call(agent, 'jobs.list', { sessionId: session.id, status: ['queued'] });
+    expect(listed).toMatchObject({ id: imp.id, queuePosition: 0, etaSec: 30 });
+    const get = () => call(agent, 'sessions.get', { sessionId: session.id });
+    expect((await get()).transcriptJob).toMatchObject({ id: imp.id, etaSec: 150 });
+
+    // Unknown length (media.importYoutube): the download only.
+    await db
+      .update(schema.jobs)
+      .set({ payload: { url: 'https://youtu.be/y' } })
+      .where(eq(schema.jobs.id, imp.id));
+    expect((await get()).transcriptJob).toMatchObject({ id: imp.id, etaSec: 30 });
+
+    const outsider = asAgent(await makeUser('outsider@example.com'));
+    await failsWith(call(outsider, 'sessions.get', { sessionId: session.id }), 'not_found');
+  });
+
+  it('queued etaSec waits for the soonest running job when the live workers’ slots are busy', async () => {
+    const { owner, session } = await studio();
+    const agent = asAgent(owner);
+    const ago = (sec: number) => new Date(Date.now() - sec * 1000);
+    const segmentId = newId('aud');
+    await db.insert(schema.audioSegments).values({
+      id: segmentId,
+      sessionId: session.id,
+      ordinal: 0,
+      durationSec: 1200,
+      mimeType: 'audio/mpeg',
+      origin: 'file',
+      objectKey: `test/${segmentId}`,
+      status: 'ready',
+    });
+    const done = { status: 'done' as const, sessionId: session.id, startedAt: ago(1000) };
+    await db.insert(schema.jobs).values([
+      // History: transcriptions 0.1 s per audio second, imports 30 s.
+      {
+        ...done,
+        id: newId('job'),
+        kind: 'transcribe',
+        payload: { segmentId },
+        updatedAt: ago(880),
+      },
+      { ...done, id: newId('job'), kind: 'youtube_import', updatedAt: ago(970) },
+      // Running for 20 s of an expected 120 s: 100 s left.
+      {
+        id: newId('job'),
+        kind: 'transcribe',
+        status: 'running',
+        sessionId: session.id,
+        payload: { segmentId },
+        startedAt: ago(20),
+      },
+    ]);
+    const imp = await enqueueJob(db, {
+      kind: 'youtube_import',
+      sessionId: session.id,
+      actorId: owner.user.id,
+      payload: { url: 'https://youtu.be/y' },
+    });
+    const eta = async () => {
+      const [j] = await call(agent, 'jobs.list', { sessionId: session.id, status: ['queued'] });
+      expect(j).toMatchObject({ id: imp.id, queuePosition: 0 });
+      return j!.etaSec!;
+    };
+    const busy = async () => {
+      expect(await eta()).toBeGreaterThanOrEqual(129);
+      expect(await eta()).toBeLessThanOrEqual(130);
+    };
+
+    // No live worker row: WORKER_CONCURRENCY slots, one of them busy.
+    if (env.workerConcurrency > 1) expect(await eta()).toBe(30);
+    else await busy();
+
+    // One live worker with one slot, busy: 100 s until it frees up, then the import's own 30 s.
+    await beatWorker('wrk_a', 1, { transcribe: 1, youtube_import: 1 });
+    await beatWorker('wrk_a', 1, { transcribe: 1, youtube_import: 1 }); // heartbeat upserts
+    // A worker not seen for a minute no longer counts.
+    await db
+      .insert(schema.workers)
+      .values({ id: 'wrk_stale', concurrency: 8, lastSeenAt: ago(60) });
+    await busy();
+    // Rows not seen for a day are removed by the next heartbeat.
+    await db
+      .insert(schema.workers)
+      .values({ id: 'wrk_old', concurrency: 1, lastSeenAt: ago(90_000) });
+    await beatWorker('wrk_a', 1, {});
+    expect((await db.select().from(schema.workers)).map((w) => w.id).sort()).toEqual([
+      'wrk_a',
+      'wrk_stale',
+    ]);
+
+    // A second live worker adds a free slot: the import starts now.
+    await beatWorker('wrk_b', 1, {});
+    expect(await eta()).toBe(30);
+    await removeWorker('wrk_b');
+    await busy();
+
+    // Absurd concurrency values are clamped instead of overflowing.
+    await db.insert(schema.workers).values([
+      { id: 'wrk_x', concurrency: 2_000_000_000 },
+      { id: 'wrk_y', concurrency: 2_000_000_000 },
+    ]);
+    expect(await eta()).toBe(30);
   });
 });
