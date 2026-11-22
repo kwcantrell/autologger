@@ -1,9 +1,11 @@
 // WebSocket messages.
 //
 // Session socket: GET /ws/session/:sessionId (cookie auth). Server → client only, apart from ping.
+// Show socket: GET /ws/show/:showId (cookie auth): job and session-list changes of every session
+// of the show (the rail's jobs indicator and session list). Server → client only, apart from ping.
 // Companion socket: GET /ws/companion with `Authorization: Bearer <device token>` (or ?token=).
 
-import type { Session } from './entities.ts';
+import type { Job, Session } from './entities.ts';
 import type { CompanionState, OpName, RpcError } from './ops.ts';
 
 export type LiveEntity =
@@ -33,6 +35,20 @@ export type SessionServerMessage =
   | { type: 'pong' };
 
 export type SessionClientMessage = { type: 'ping' };
+
+export type ShowServerMessage =
+  | { type: 'hello'; showId: string; serverTime: string }
+  /** A job of one of the show's sessions changed (data: the Job, without estimates). */
+  | { type: 'change'; entity: 'job'; op: 'upsert' | 'delete'; id: string; data?: Job }
+  /**
+   * `job`: jobs of the show changed, refetch them. `session`: the show's session list changed
+   * (a session was created, deleted, renamed, archived, imported into or started rolling).
+   */
+  | { type: 'invalidate'; entity: 'job' | 'session' }
+  | { type: 'closed'; reason: 'access_revoked' | 'deleted' }
+  | { type: 'pong' };
+
+export type ShowClientMessage = { type: 'ping' };
 
 export type CompanionClientMessage =
   | { type: 'op'; reqId: string; op: OpName; input: unknown }

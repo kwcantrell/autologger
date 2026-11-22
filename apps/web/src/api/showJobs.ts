@@ -51,6 +51,21 @@ export function sameJobs(a: Job[], b: Job[]): boolean {
   return sig(a) === sig(b);
 }
 
+/**
+ * A pushed job change (show socket) applied to the cached show jobs, when it only changes the
+ * progress text of a listed unfinished job; null when the list has to be refetched (new job,
+ * status change, estimates).
+ */
+export function patchShowJobs(data: ShowJobs | undefined, job: Job): ShowJobs | null {
+  const cur = data?.active.find((j) => j.id === job.id);
+  if (!data || !cur || cur.status !== job.status) return null;
+  if (cur.progress === job.progress) return data;
+  return {
+    ...data,
+    active: data.active.map((j) => (j.id === job.id ? { ...j, progress: job.progress } : j)),
+  };
+}
+
 /** The job a session card shows: running over queued, else an undismissed failure. */
 export function jobsBySession(data: ShowJobs | undefined): Map<string, Job> {
   const out = new Map<string, Job>();

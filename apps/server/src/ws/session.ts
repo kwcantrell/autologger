@@ -13,6 +13,8 @@ registerWs(
   async (ws, req, url) => {
     const sessionId = sessionIdFrom(url);
     const actor = await actorFromSessionToken(sessionTokenFromCookieHeader(req.headers.cookie));
+    // The client may have gone while the actor was loading: subscribe nothing.
+    if (ws.readyState !== ws.OPEN) return;
     if (!actor) return ws.close(4401, 'unauthenticated');
 
     const send = (m: SessionServerMessage) => {

@@ -3,6 +3,7 @@ import { AudioLines, MoreVertical, Plus, Search, Settings, Upload, X } from 'luc
 import { lazy, type ReactElement, Suspense, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useLocation } from 'wouter';
+import { useLiveShow } from '@/api/liveShow';
 import { qk, useOpMutation, useSessions, useShowJobs } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { jobsBySession, jobsSummary } from '@/api/showJobs';
@@ -69,7 +70,9 @@ function StripTooltip({ label, children }: { label: string; children: ReactEleme
 export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
   const active = useActive();
   const sessions = useSessions(active.show?.id);
-  const showJobs = useShowJobs(active.show?.id);
+  // Pushes job and session-list changes of the whole show; polling is the fallback.
+  const showLive = useLiveShow(active.show?.id);
+  const showJobs = useShowJobs(active.show?.id, showLive.state === 'open');
   // The show the jobs dialog was opened for: it closes when the active show changes.
   const [jobsOpenFor, setJobsOpenFor] = useState<string | null>(null);
   const { state, isMobile, setOpen, setOpenMobile } = useSidebar();

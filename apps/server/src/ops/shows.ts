@@ -197,6 +197,7 @@ defineOp({
   async run(ctx, { showId }) {
     await requireShow(ctx, showId, 'manage');
     await ctx.db.delete(shows).where(eq(shows.id, showId));
+    ctx.publish(`show:${showId}`, { type: 'closed', reason: 'deleted' });
     return { deleted: true };
   },
 });
