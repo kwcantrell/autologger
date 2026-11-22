@@ -27,7 +27,7 @@ const kindLabel = (kind: string) => KIND_LABEL[kind] ?? kind;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** "about 4 min left" from a jobs.list etaSec (a rough estimate; 0 = overdue). */
-function fmtEta(sec: number | undefined): string | null {
+export function fmtEta(sec: number | undefined): string | null {
   if (sec === undefined) return null;
   if (sec <= 0) return 'taking longer than usual';
   if (sec < 60) return 'under a minute left';
