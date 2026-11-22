@@ -177,6 +177,24 @@ describe('media.importPlaylist', () => {
     expect(s.episodeDate).toBe('2023-01-01');
   });
 
+  it('lists the video URL on a single import job, so a failed one can be retried', async () => {
+    const { owner, show, session } = await studio();
+    const url = 'https://youtu.be/fffffffffff';
+    const job = await call(owner, 'media.importYoutube', { sessionId: session.id, url });
+    expect(job.sourceUrl).toBe(url);
+    await db
+      .update(schema.jobs)
+      .set({ status: 'failed', error: 'yt-dlp exited with code 1' })
+      .where(eq(schema.jobs.id, job.id));
+    const [failed] = await call(asAgent(owner), 'jobs.list', {
+      showId: show.id,
+      status: ['failed'],
+    });
+    expect(failed).toMatchObject({ id: job.id, sessionId: session.id, sourceUrl: url });
+    // The session itself only gets the link once the download succeeds.
+    expect((await call(owner, 'sessions.get', { sessionId: session.id })).sourceUrl).toBeNull();
+  });
+
   it('rejects bad URLs and callers without write access', async () => {
     const { owner, show, session } = await studio();
     await playlist([entry('aaaaaaaaaaa', 'Talk')]);

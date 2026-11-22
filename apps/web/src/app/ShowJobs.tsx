@@ -204,7 +204,8 @@ export function ShowJobsDialog({
         )}
         {section('Failed', failed, (j) => {
           const s = j.sessionId ? byId.get(j.sessionId) : undefined;
-          const canRetry = j.kind === 'youtube_import' && !!s?.sourceUrl && s.access !== 'read';
+          const importUrl = j.sourceUrl ?? s?.sourceUrl ?? null;
+          const canRetry = j.kind === 'youtube_import' && !!importUrl && s?.access !== 'read';
           const pending = retry.isPending && retry.variables?.sessionId === j.sessionId;
           const readOnly = j.sessionId ? s?.access === 'read' : !canWriteShow;
           const dismissing = dismiss.isPending && dismiss.variables?.jobId === j.id;
@@ -262,7 +263,7 @@ export function ShowJobsDialog({
                 <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
                 {rewaving ? 'Retrying…' : 'Retry'}
               </Button>
-            ) : j.kind === 'youtube_import' && s?.sourceUrl ? (
+            ) : j.kind === 'youtube_import' && s && importUrl ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -270,11 +271,11 @@ export function ShowJobsDialog({
                 title={
                   s.access === 'read'
                     ? 'Read-only access to this show.'
-                    : `Download ${s.sourceUrl} again`
+                    : `Download ${importUrl} again`
                 }
                 onClick={() =>
                   retry.mutate(
-                    { sessionId: s.id, url: s.sourceUrl as string },
+                    { sessionId: s.id, url: importUrl },
                     {
                       onSuccess: () => setRetried((r) => new Set(r).add(j.id)),
                       onError: (e) => showToast(errorMessage(e), true),
@@ -312,7 +313,7 @@ export function ShowJobsDialog({
                 <CheckIcon aria-hidden="true" data-icon="inline-start" />
                 {dismissing ? 'Dismissing…' : 'Dismiss'}
               </Button>
-              {j.kind === 'youtube_import' && !s?.sourceUrl && (
+              {j.kind === 'youtube_import' && !importUrl && (
                 <span className="basis-full text-xs text-muted-foreground">
                   The link isn't stored on this session: open it and import the video again from its
                   Audio menu.
