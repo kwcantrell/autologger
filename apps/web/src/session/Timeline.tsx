@@ -11,6 +11,8 @@ import type { PlayerSegment } from './audio/usePlayer';
 import { TimelineWaveform } from './TimelineWaveform';
 import { useWaveform } from './waveform';
 
+/** Minimum spacing between ruler labels in px (an "00:00:00" label plus a gap). */
+const RULER_LABEL_PX = 90;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 40;
 
@@ -60,6 +62,8 @@ export function Timeline({
   const [tip, setTip] = useState<{ m: Marker; x: number; y: number } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState({ left: 0, width: 1 });
+  /** Width of the whole (zoomed) track in px, for spacing the ruler labels. */
+  const [trackPx, setTrackPx] = useState(0);
   const viewportRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
@@ -129,6 +133,7 @@ export function Timeline({
       left: vp.scrollLeft / (vp.scrollWidth || 1),
       width: vp.clientWidth / (vp.scrollWidth || 1),
     });
+    setTrackPx(vp.scrollWidth);
   }, []);
   // biome-ignore lint/correctness/useExhaustiveDependencies: zoom is the trigger — re-sync the view after zooming
   useEffect(() => {
@@ -250,14 +255,15 @@ export function Timeline({
   };
 
   // Ruler labels, each placed at its own time (like markers, the playhead and the waveform) —
-  // not spread with justify-between, which drifts from the time it names.
+  // not spread with justify-between, which drifts from the time it names. As many as fit with
+  // ~90px per "00:00:00" label at the track's measured (zoomed) width.
   const ticks = useMemo(() => {
-    const count = Math.min(29, Math.max(7, Math.round(5 + zoom * 3)));
+    const count = Math.min(61, Math.max(2, Math.floor(trackPx / RULER_LABEL_PX) + 1));
     return Array.from({ length: count }, (_, i) => {
       const sec = (i * totalSec) / (count - 1);
       return { sec, label: fmtSec(sec) };
     });
-  }, [zoom, totalSec]);
+  }, [trackPx, totalSec]);
 
   const chipColor = current?.event.color ?? 'var(--si-dim)';
 
@@ -392,7 +398,7 @@ export function Timeline({
               <span
                 // biome-ignore lint/suspicious/noArrayIndexKey: ticks are fixed positional labels
                 key={i}
-                className={cn('absolute top-0', i % 2 === 1 && 'max-md:hidden')}
+                className="absolute top-0"
                 style={{ left: pct(t.sec) }}
               >
                 {/* Tick mark exactly at the time; the label is centred on it, except the first
