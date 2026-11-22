@@ -1,5 +1,6 @@
 import {
   normTitle,
+  setCitationEnds,
   type WikiCitation,
   type WikiCitationProblem,
   type WikiLint,
@@ -411,6 +412,29 @@ async function sessionAudioEnds(
   return audioEnd;
 }
 
+/** A citation `to` at most this far past its session's audio end is clamped to the end on save. */
+const CLAMP_PAST_END_SEC = 5;
+
+/**
+ * A body about to be saved (wiki.upsert / wiki.patch) with every citation `to` that overshoots its
+ * session's audio end by at most CLAMP_PAST_END_SEC set to that end (rounded down to 0.1 s), the
+ * usual result of rounding the last transcript line up. Larger overshoots are real mistakes (wrong
+ * session or time) that clamping would hide: they are saved as written and wiki.lint reports them
+ * as past_end.
+ */
+async function clampCitationEnds(ctx: Ctx, showId: string, bodyMd: string): Promise<string> {
+  const ids = [...new Set(wikiCitations(bodyMd).map((c) => c.sessionId))];
+  if (!ids.length) return bodyMd;
+  const audioEnd = await sessionAudioEnds(ctx, showId, ids);
+  return setCitationEnds(bodyMd, (c) => {
+    const end = audioEnd.get(c.sessionId);
+    if (end == null || c.endSec == null || c.endSec <= end || c.endSec > end + CLAMP_PAST_END_SEC)
+      return undefined;
+    const to = Math.floor(end * 10) / 10;
+    return to > c.startSec ? to : undefined;
+  });
+}
+
 /** `H:MM:SS` or `M:SS`, fraction allowed (the web shows a citation's range as HH:MM:SS). */
 const TIMECODE = String.raw`(?:\d{1,2}:[0-5]\d|\d{1,3}):[0-5]\d(?:\.\d+)?`;
 /** A label that starts with a timecode or timecode range: "01:01:01", "[1:01:01–1:02:00] …". */
@@ -517,7 +541,7 @@ async function lintCitations(
 defineOp({
   name: 'wiki.lint',
   description:
-    'Check the links of a whole show wiki in one call, the way the wiki renders them. unresolved: pages with [[Target]] / [[Target|label]] links (also [[Target\\|label]] in table cells; links inside code are ignored) that match no page title or alias (case-insensitive, spaces collapsed), with the missing targets as written — create those pages with wiki_upsert or fix the links. orphans: person, topic and bit pages no other page links to (session recaps and question pages are left out). badCitations: pages whose citations ([label](/sessions/<sessionId>?t=<startSec>&to=<endSec>)) are wrong, each with problem "unknown_session" (no session with that id in this show), "bad_range" (to is not greater than t) or "past_end" (the range ends after the session\'s audio; sessions without audio are not range-checked) or "label_mismatch" (the label starts with a timecode such as 01:01:01 or 1:01:01–1:02:00 that is more than a second off t / to — label timecodes are HH:MM:SS from the session start, like the chip) — fix them with wiki_patch; wiki_upsert and wiki_patch also report a page\'s bad citations when it is saved. counts: pages, distinct links, unresolved links, orphans, citations, bad citations. Read-only.',
+    'Check the links of a whole show wiki in one call, the way the wiki renders them. unresolved: pages with [[Target]] / [[Target|label]] links (also [[Target\\|label]] in table cells; links inside code are ignored) that match no page title or alias (case-insensitive, spaces collapsed), with the missing targets as written — create those pages with wiki_upsert or fix the links. orphans: person, topic and bit pages no other page links to (session recaps and question pages are left out). badCitations: pages whose citations ([label](/sessions/<sessionId>?t=<startSec>&to=<endSec>)) are wrong, each with problem "unknown_session" (no session with that id in this show), "bad_range" (to is not greater than t) or "past_end" (the range ends after the session\'s audio, audioSeconds in sessions_get; sessions without audio are not range-checked; wiki_upsert and wiki_patch clamp a `to` at most 5 s past the end, so these overshoot by more or come from older saves) or "label_mismatch" (the label starts with a timecode such as 01:01:01 or 1:01:01–1:02:00 that is more than a second off t / to — label timecodes are HH:MM:SS from the session start, like the chip) — fix them with wiki_patch; wiki_upsert and wiki_patch also report a page\'s bad citations when it is saved. counts: pages, distinct links, unresolved links, orphans, citations, bad citations. Read-only.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId }): Promise<WikiLint> {
@@ -596,8 +620,8 @@ defineOp({
 defineOp({
   name: 'wiki.upsert',
   description:
-    'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated (keeping its title), otherwise a new one is created; pass pageId to rename. bodyMd is raw Markdown text, stored exactly as sent: write real newlines and quotes, not JSON escapes like \\n or \\" inside the text. Link other pages with [[Title]] or [[Title|label]]; wiki_lint finds links to missing pages. Kind "session" pages are recaps tied to sessionId. Kind "question" pages store an answered question: title = the question as asked (e.g. "When did Dana talk about her dog?"), bodyMd = the answer, with a citation for every claim. ' +
-    'A citation is a Markdown link to a range of a session: [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), seconds from the session start (the @seconds of transcript_text; `to` optional and greater than t), e.g. [Dana on the dog](/sessions/ses_abc?t=754.2&to=811). The web shows it as a chip with the session title and range (HH:MM:SS–HH:MM:SS) that plays that range, the label as its tooltip. Prefer citations over bare timecodes on every page kind; wiki_lint checks them. Every save keeps a revision. To fix a few sentences of an existing page, use wiki_patch instead of resending the whole body. ' +
+    'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated (keeping its title), otherwise a new one is created; pass pageId to rename. bodyMd is raw Markdown text, stored exactly as sent (apart from clamping a citation end slightly past the audio, below): write real newlines and quotes, not JSON escapes like \\n or \\" inside the text. Link other pages with [[Title]] or [[Title|label]]; wiki_lint finds links to missing pages. Kind "session" pages are recaps tied to sessionId. Kind "question" pages store an answered question: title = the question as asked (e.g. "When did Dana talk about her dog?"), bodyMd = the answer, with a citation for every claim. ' +
+    "A citation is a Markdown link to a range of a session: [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), seconds from the session start (the @seconds of transcript_text; `to` optional and greater than t; the range must end within the session's audio — audioSeconds in sessions_get / sessions_list is the bound — and a `to` up to 5 s past the audio end is clamped to it on save, so the stored body then differs from what was sent there), e.g. [Dana on the dog](/sessions/ses_abc?t=754.2&to=811). The web shows it as a chip with the session title and range (HH:MM:SS–HH:MM:SS) that plays that range, the label as its tooltip. Prefer citations over bare timecodes on every page kind; wiki_lint checks them. Every save keeps a revision. To fix a few sentences of an existing page, use wiki_patch instead of resending the whole body. " +
     'Returns the saved page with its body and backlinks; pass `compact: true` (recommended for agents) to get only `{ id, title, kind, revision, unresolvedLinks, citationCount, badCitations }`, where unresolvedLinks lists the [[link]] targets in the body that match no page title or alias in the show yet (create those pages, or fix the link; wiki_lint checks the whole wiki). Both shapes include citationCount (citations in the saved body, repeats counted) and badCitations: the saved page\'s citations that wiki_lint would flag, in body order, as [{ sessionId, startSec, endSec?, label, problem }] with problem "unknown_session", "bad_range", "past_end" or "label_mismatch" (see wiki_lint) — the page is saved anyway; fix them with wiki_patch.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
@@ -624,7 +648,7 @@ defineOp({
       kind: input.kind,
       title,
       titleNorm: normTitle(title),
-      bodyMd: input.bodyMd,
+      bodyMd: await clampCitationEnds(ctx, input.showId, input.bodyMd),
       aliases: input.aliases ?? existing?.aliases ?? [],
       sessionId: input.sessionId ?? existing?.sessionId ?? null,
       updatedBy: ctx.actor.user.id,
@@ -693,7 +717,7 @@ function occurrences(text: string, find: string): number {
 defineOp({
   name: 'wiki.patch',
   description:
-    'Fix part of a wiki page without resending its body. edits: [{ find, replace }] are exact, case-sensitive text replacements applied in order; each `find` must occur exactly once in the page at that point (otherwise bad_request saying how often it matched; include more surrounding text to make it unique), and nothing is saved unless every edit applies. append (optional) adds Markdown on a new line at the end. Saved as one new revision, undoable from the change log. pageId comes from wiki_list / wiki_get. Returns the page summary (id, title, revision) without the body, plus citationCount and badCitations for the saved body (as in wiki_upsert); read the body with wiki_get if needed.',
+    "Fix part of a wiki page without resending its body. edits: [{ find, replace }] are exact, case-sensitive text replacements applied in order; each `find` must occur exactly once in the page at that point (otherwise bad_request saying how often it matched; include more surrounding text to make it unique), and nothing is saved unless every edit applies. append (optional) adds Markdown on a new line at the end. As in wiki_upsert, a citation `to` up to 5 s past its session's audio end is clamped to that end. Saved as one new revision, undoable from the change log. pageId comes from wiki_list / wiki_get. Returns the page summary (id, title, revision) without the body, plus citationCount and badCitations for the saved body (as in wiki_upsert); read the body with wiki_get if needed.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { pageId, edits, append }) {
@@ -712,6 +736,7 @@ defineOp({
       body = body.slice(0, at) + e.replace + body.slice(at + e.find.length);
     }
     if (append) body = body && !body.endsWith('\n') ? `${body}\n${append}` : body + append;
+    body = await clampCitationEnds(ctx, row.showId, body);
     if (body.length > 100_000) throw badRequest('The page would exceed 100000 characters.');
     const [after] = (await ctx.db
       .update(pages)

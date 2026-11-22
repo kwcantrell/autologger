@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { wikiCitations } from './wikiLinks.ts';
+import { setCitationEnds, wikiCitations } from './wikiLinks.ts';
 
 describe('wikiCitations', () => {
   it('parses ranges, single points and labels in order', () => {
@@ -34,5 +34,24 @@ describe('wikiCitations', () => {
       '```',
     ].join('\n');
     expect(wikiCitations(body)).toEqual([]);
+  });
+});
+
+describe('setCitationEnds', () => {
+  it('rewrites only the chosen ends, keeps every other byte, and skips code', () => {
+    const body = [
+      'Why? [end](/sessions/s1?t=10&to=6185 "hover") and [cell \\| x](/sessions/s1?to=6190&t=5)',
+      '[open](/sessions/s1?t=6000) [keep](/sessions/s2?t=1&to=6185)',
+      '`[inline](/sessions/s1?t=1&to=6185)`',
+    ].join('\n');
+    const seen: string[] = [];
+    const out = setCitationEnds(body, (c) => {
+      seen.push(c.label);
+      return c.sessionId === 's1' ? 6184.8 : undefined;
+    });
+    expect(seen).toEqual(['end', 'cell | x', 'keep']);
+    expect(out).toBe(
+      body.replace('t=10&to=6185', 't=10&to=6184.8').replace('to=6190&t=5', 'to=6184.8&t=5'),
+    );
   });
 });

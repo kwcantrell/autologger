@@ -7,15 +7,15 @@ export const WIKI_LINK = /\[\[([^[\]|\n]+?)(?:\|([^[\]\n]+?))?\]\]/g;
 /** Title normalisation used to match link targets to page titles and aliases. */
 export const normTitle = (t: string) => t.trim().toLowerCase().replace(/\s+/g, ' ');
 
+const FENCED_CODE = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[^\n]*$|(?![\s\S]))/gm;
+const CODE_SPAN = /(`+)[^`][\s\S]*?\1/g;
+
 /**
  * The Markdown text a reader sees links in: fenced code blocks and inline code spans removed
  * (the renderer does not link inside code), and `\|` unescaped as GFM does in table cells.
  */
 function linkableText(bodyMd: string): string {
-  return bodyMd
-    .replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[^\n]*$|(?![\s\S]))/gm, '')
-    .replace(/(`+)[^`][\s\S]*?\1/g, '')
-    .replace(/\\\|/g, '|');
+  return bodyMd.replace(FENCED_CODE, '').replace(CODE_SPAN, '').replace(/\\\|/g, '|');
 }
 
 /** Distinct link targets of a page body, trimmed as written, in order of first appearance. */
@@ -68,4 +68,32 @@ export function wikiCitations(bodyMd: string): WikiCitation[] {
     out.push({ sessionId: m[2]!, ...range, label });
   }
   return out;
+}
+
+/**
+ * The body with the `to` of some citations rewritten, everything else kept byte for byte:
+ * `endFor(citation)` returns the new end in seconds, or undefined to keep the link as written.
+ * Only citations with a `to` are offered; links inside code are left alone, as in wikiCitations.
+ */
+export function setCitationEnds(
+  bodyMd: string,
+  endFor: (c: WikiCitation) => number | undefined,
+): string {
+  // Code blanked to spaces (newlines kept), so match offsets are offsets in bodyMd.
+  const blank = (code: string) => code.replace(/[^\n]/g, ' ');
+  const masked = bodyMd.replace(FENCED_CODE, blank).replace(CODE_SPAN, blank);
+  let out = '';
+  let last = 0;
+  for (const m of masked.matchAll(new RegExp(CITATION_LINK.source, 'gd'))) {
+    const query = m[3] ?? '';
+    const range = citationRange(query);
+    if (range?.endSec == null) continue;
+    const label = (m[1] ?? '').replace(/\\(.)/g, '$1').trim();
+    const to = endFor({ sessionId: m[2]!, ...range, label });
+    if (to === undefined) continue;
+    const [from, until] = m.indices![3]!;
+    out += bodyMd.slice(last, from) + query.replace(/(^|&)to=[^&#]*/, `$1to=${to}`);
+    last = until;
+  }
+  return out + bodyMd.slice(last);
 }

@@ -538,6 +538,47 @@ describe('question pages and citations', () => {
     expect((await call(owner, 'wiki.lint', { showId: show.id })).counts.citations).toBe(0);
   });
 
+  it('clamps a citation end slightly past the audio on save and keeps larger overshoots', async () => {
+    const { owner, show, session } = await studio();
+    await db.insert(schema.audioSegments).values({
+      id: 'aud_clamp',
+      sessionId: session.id,
+      ordinal: 0,
+      startSec: 0,
+      durationSec: 6184.832,
+      mimeType: 'audio/mpeg',
+      origin: 'file',
+      objectKey: 'test/aud_clamp',
+      status: 'ready',
+    });
+    const cite = (q: string) => `[x](/sessions/${session.id}?${q})`;
+    const agent = asAgent(owner);
+    const page = await call(agent, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'session',
+      sessionId: session.id,
+      title: 'Ep 3 recap',
+      bodyMd: `${cite('t=6100&to=6185')} ${cite('t=6100&to=6200')} ${cite('t=6100&to=6184.5')}`,
+    });
+    const saved = `${cite('t=6100&to=6184.8')} ${cite('t=6100&to=6200')} ${cite('t=6100&to=6184.5')}`;
+    expect(page.bodyMd).toBe(saved);
+    const lint = await call(owner, 'wiki.lint', { showId: show.id });
+    expect(lint.badCitations[0]!.citations).toEqual([
+      { sessionId: session.id, startSec: 6100, endSec: 6200, label: 'x', problem: 'past_end' },
+    ]);
+
+    await call(agent, 'wiki.patch', { pageId: page.id, append: cite('t=10&to=6189') });
+    const patched = await call(owner, 'wiki.get', { pageId: page.id });
+    expect(patched.bodyMd).toBe(`${saved}\n${cite('t=10&to=6184.8')}`);
+    const [latest] = await call(owner, 'changes.list', { showId: show.id, via: 'mcp' });
+    await call(owner, 'changes.revert', { changeId: latest!.id });
+    expect((await call(owner, 'wiki.get', { pageId: page.id })).bodyMd).toBe(saved);
+    await failsWith(
+      call(await makeUser('stranger@example.com'), 'wiki.patch', { pageId: page.id, append: 'x' }),
+      'not_found',
+    );
+  });
+
   it('reports citation count and timecode labels that do not match the range on save', async () => {
     const { owner, show, session } = await studio();
     const cite = (label: string, q: string) => `[${label}](/sessions/${session.id}?${q})`;
