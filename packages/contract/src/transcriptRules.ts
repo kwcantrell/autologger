@@ -16,6 +16,12 @@ export interface TranscriptRule {
   wholeWord?: boolean;
   /** Match case exactly. Default false: case-insensitive, like transcript.find. */
   caseSensitive?: boolean;
+  /**
+   * Literal case-insensitive rules only (ignored with `regex` or `caseSensitive`). Default true:
+   * a match starting with a capital capitalises a lower-case replacement, and an ALL CAPS match
+   * upper-cases it; otherwise `replace` goes in as written. False: always as written.
+   */
+  preserveCase?: boolean;
 }
 
 /** How often one rule matched (in a transcription job, or a transcript.replace call). */
@@ -37,4 +43,5 @@ export const TranscriptRuleInput = z.object({
   regex: z.boolean().optional(),
   wholeWord: z.boolean().optional(),
   caseSensitive: z.boolean().optional(),
+  preserveCase: z.boolean().optional(),
 });

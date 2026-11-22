@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId } from '../core/ids.ts';
 import { db, schema } from '../db/client.ts';
-import { runRules } from '../media/rules.ts';
+import { applyShowRules, runRules } from '../media/rules.ts';
 import { handlers } from '../worker/handlers.ts';
 import { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
 
@@ -150,11 +150,46 @@ describe('rule matching in PostgreSQL', () => {
       ),
     );
     expect(run.texts).toEqual([
-      'dr(x) over ds dt, dr.',
+      'Dr(x) over ds dt, dr.', // literal rules keep the leading capital
       'sine x, sinh, résin, Sin(x)',
       '\\1& a+b c2 x^2',
     ]);
     expect(run.counts).toEqual([2, 1, 1, 1, 1, 1]);
+  });
+
+  it('keeps the case of matches for literal case-insensitive rules (preserveCase)', async () => {
+    const texts = [
+      'The 5,711 and the 5,711. THE 5,711!',
+      'Fubu, fubu and FUBU.',
+      'Ask Doctor Smith, the DOCTOR.',
+      'The x\uFDD0 marker', // holds a marker: plain replacement
+    ];
+    const run = await db.transaction((tx) =>
+      runRules(
+        tx,
+        texts,
+        [
+          { find: 'the 5,711', replace: 'the 5711' },
+          { find: 'fubu', replace: 'FUBU', wholeWord: true },
+          { find: 'doctor', replace: 'dr', wholeWord: true, preserveCase: false },
+          { find: 'ask (\\w+)', replace: 'ask \\1', regex: true }, // regex: as written
+          { find: 'the x', replace: 'the y' },
+        ],
+        { budgetMs: 5000, onError: 'throw' },
+      ),
+    );
+    expect(run.texts).toEqual([
+      'The 5711 and the 5711. THE 5711!',
+      'FUBU, FUBU and FUBU.',
+      'ask dr Smith, the dr.',
+      'the y\uFDD0 marker',
+    ]);
+    expect(run.counts).toEqual([3, 3, 2, 1, 1]);
+
+    // The transcribe job's path applies it too.
+    const seg = { startSec: 0, endSec: 2, text: 'The x said hi.', words: [] };
+    const job = await applyShowRules([seg], [{ find: 'the x', replace: 'the y' }]);
+    expect(job.segments[0]!.text).toBe('The y said hi.');
   });
 
   it('skips a rule that times out (worker mode) and keeps applying the rest', async () => {
@@ -197,7 +232,7 @@ describe('transcript.replace', () => {
           endSec: 9,
           speaker: 'Speaker 1',
           before: 'Ask Doctor Smith',
-          after: 'Ask dr Smith',
+          after: 'Ask Dr Smith',
         },
         {
           id: c,
@@ -240,12 +275,12 @@ describe('transcript.replace', () => {
 
     const after = await call(owner, 'transcript.get', { sessionId: session.id });
     expect(after.map((s) => s.text)).toEqual([
-      'Ask dr Smith',
+      'Ask Dr Smith',
       'nothing here',
       'the dr said doctors',
     ]);
     expect(after[0]!.edited).toBe(true);
-    expect(after[0]!.words[1]).toEqual({ w: 'dr', s: 1, e: 2 });
+    expect(after[0]!.words[1]).toEqual({ w: 'Dr', s: 1, e: 2 });
 
     const changes = await call(owner, 'changes.list', { sessionId: session.id, via: 'mcp' });
     expect(changes).toHaveLength(2);
