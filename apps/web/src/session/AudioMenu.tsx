@@ -262,6 +262,10 @@ function SegmentsDialog({
   const { confirm, confirmElement } = useConfirm();
   const del = useOpMutation('media.delete', { invalidate: () => [qk.media(session.id)] });
   const retr = useOpMutation('media.retranscribe', { invalidate: () => [qk.jobs(session.id)] });
+  const rewave = useOpMutation('media.rewaveform', {
+    invalidate: () => [qk.jobs(session.id)],
+    onSuccess: () => showToast('Waveform queued.'),
+  });
   return (
     <Dialog
       open
@@ -341,6 +345,23 @@ function SegmentsDialog({
                     <RefreshCwIcon aria-hidden="true" />
                   </Button>
                 )}
+              {canWrite && caps?.storage && !s.hasWaveform && s.status !== 'uploading' && (
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Compute waveform again"
+                  title="Compute waveform again (no waveform on the timeline yet)"
+                  disabled={rewave.isPending && rewave.variables?.segmentId === s.id}
+                  onClick={() =>
+                    rewave.mutate(
+                      { sessionId: session.id, segmentId: s.id },
+                      { onError: (e) => showToast(errorMessage(e), true) },
+                    )
+                  }
+                >
+                  <AudioLinesIcon aria-hidden="true" />
+                </Button>
+              )}
               {canWrite && (
                 <Button
                   variant="ghost"

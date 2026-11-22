@@ -1,6 +1,7 @@
 // Show-wide background jobs (YouTube imports, transcriptions): the rail indicator, the per-card
 // status mark and the dialog listing every unfinished job and every failure nobody has dismissed,
-// with a retry for failed YouTube imports and transcriptions and a dismiss for each failure.
+// with a retry for failed YouTube imports, transcriptions and waveforms and a dismiss for each
+// failure.
 
 import type { Job, Session } from '@autologger/contract';
 import { CheckIcon, Loader2Icon, RefreshCwIcon, TriangleAlertIcon } from 'lucide-react';
@@ -92,6 +93,10 @@ export function ShowJobsDialog({
     invalidate: () => [qk.showJobsAll],
     onSuccess: () => showToast('Import queued again.'),
   });
+  const rewave = useOpMutation('media.rewaveform', {
+    invalidate: () => [qk.showJobsAll],
+    onSuccess: () => showToast('Waveform queued again.'),
+  });
   const retranscribe = useOpMutation('media.retranscribe', {
     invalidate: () => [qk.showJobsAll],
     onSuccess: () => showToast('Transcription queued again.'),
@@ -182,6 +187,7 @@ export function ShowJobsDialog({
           const pending = retry.isPending && retry.variables?.sessionId === j.sessionId;
           const readOnly = s?.access === 'read';
           const dismissing = dismiss.isPending && dismiss.variables?.jobId === j.id;
+          const rewaving = rewave.isPending && rewave.variables?.sessionId === j.sessionId;
           const transcribing =
             retranscribe.isPending && retranscribe.variables?.segmentId === j.segmentId;
           const retryAction =
@@ -209,6 +215,31 @@ export function ShowJobsDialog({
               >
                 <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
                 {transcribing ? 'Queuing…' : 'Transcribe again'}
+              </Button>
+            ) : j.kind === 'waveform' && s ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={readOnly || rewaving || retried.has(j.id)}
+                title={
+                  readOnly
+                    ? 'Read-only access to this show.'
+                    : j.segmentId
+                      ? 'Compute the waveform of this audio segment again'
+                      : "Compute the waveform of this session's audio again"
+                }
+                onClick={() =>
+                  rewave.mutate(
+                    { sessionId: s.id, segmentId: j.segmentId },
+                    {
+                      onSuccess: () => setRetried((r) => new Set(r).add(j.id)),
+                      onError: (e) => showToast(errorMessage(e), true),
+                    },
+                  )
+                }
+              >
+                <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
+                {rewaving ? 'Retrying…' : 'Retry'}
               </Button>
             ) : j.kind === 'youtube_import' && s?.sourceUrl ? (
               <Button

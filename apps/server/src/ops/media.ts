@@ -24,7 +24,7 @@ import {
   presignUpload,
   requireStorage,
 } from '../media/s3.ts';
-import { activeTranscribeJob, lockSession, nextSegmentSlot } from '../media/segments.ts';
+import { activeTranscribeJob, lockSession, nextSegmentSlot, STORED } from '../media/segments.ts';
 import {
   isYoutubeUrl,
   listPlaylist,
@@ -82,7 +82,7 @@ function publishJob(ctx: Ctx, job: JobRow): void {
 }
 
 /** Waveform peaks for a newly stored segment (runs whether or not Deepgram is configured). */
-async function enqueueWaveform(ctx: Ctx, seg: SegmentRow): Promise<void> {
+async function enqueueWaveform(ctx: Ctx, seg: SegmentRow): Promise<JobRow> {
   const job = await enqueueJob(ctx.db, {
     kind: 'waveform',
     sessionId: seg.sessionId,
@@ -90,6 +90,7 @@ async function enqueueWaveform(ctx: Ctx, seg: SegmentRow): Promise<void> {
     payload: { segmentId: seg.id },
   });
   publishJob(ctx, job);
+  return job;
 }
 
 async function enqueueTranscribe(ctx: Ctx, seg: SegmentRow, keyTerms?: string[]): Promise<JobRow> {
@@ -476,6 +477,37 @@ defineOp({
     if (segmentId && eligible.length === 0) throw conflict('This segment is still uploading.');
     const out: JobRow[] = [];
     for (const seg of eligible) out.push(await enqueueTranscribe(ctx, seg, keyTerms));
+    return out.map(toJob);
+  },
+});
+
+defineOp({
+  name: 'media.rewaveform',
+  description:
+    "Compute the waveform peaks of stored audio again, e.g. after a failed waveform job (the worker's startup backfill doesn't retry those). With segmentId, that segment (even if it has peaks); without, every stored segment of the session that has no peaks. A segment whose waveform job is already queued or running keeps that job. Not a content change (nothing to undo). Returns the jobs.",
+  kind: 'write',
+  surfaces: ['web'],
+  async run(ctx, { sessionId, segmentId }) {
+    requireStorage();
+    await requireSession(ctx, sessionId, 'write');
+    const rows = await ctx.db
+      .select()
+      .from(audioSegments)
+      .where(
+        segmentId
+          ? and(eq(audioSegments.sessionId, sessionId), eq(audioSegments.id, segmentId))
+          : and(eq(audioSegments.sessionId, sessionId), isNull(audioSegments.peaksKey)),
+      )
+      .orderBy(asc(audioSegments.ordinal));
+    if (segmentId && rows.length === 0) throw notFound('Audio segment');
+    const stored = rows.filter((r) => (STORED as readonly string[]).includes(r.status));
+    if (segmentId && stored.length === 0) throw conflict('This segment is still uploading.');
+    const out: JobRow[] = [];
+    for (const seg of stored)
+      out.push(
+        (await activeTranscribeJob(ctx.db, seg.id, 'waveform')) ??
+          (await enqueueWaveform(ctx, seg)),
+      );
     return out.map(toJob);
   },
 });
