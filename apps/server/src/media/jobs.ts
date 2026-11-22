@@ -16,7 +16,7 @@ export type JobSpec =
       kind: 'transcribe';
       sessionId: string;
       actorId: string | null;
-      payload: { segmentId: string };
+      payload: { segmentId: string; keyTerms?: string[] };
     }
   | { kind: 'youtube_import'; sessionId: string; actorId: string | null; payload: { url: string } };
 
