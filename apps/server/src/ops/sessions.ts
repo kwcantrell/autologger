@@ -20,7 +20,7 @@ import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
 import { storageConfigured } from '../env.ts';
 import { toJob, withJobEstimates } from '../media/jobs.ts';
-import { deletePrefix, sessionPrefix } from '../media/s3.ts';
+import { deletePrefix, sessionPrefix, showPrefix } from '../media/s3.ts';
 import { iso, userRefs } from './map.ts';
 
 const { events, jobs, sessions, shows } = schema;
@@ -392,6 +392,20 @@ export function deleteSessionMedia(ctx: Ctx, sessionIds: string[]): void {
         await deletePrefix(sessionPrefix(id));
       } catch (e) {
         console.warn(`could not delete objects of session ${id}: ${(e as Error).message}`);
+      }
+    }
+  });
+}
+
+/** Like deleteSessionMedia, for show-level objects (video compilations) of deleted shows. */
+export function deleteShowMedia(ctx: Ctx, showIds: string[]): void {
+  if (!storageConfigured || showIds.length === 0) return;
+  ctx.afterCommit(async () => {
+    for (const id of showIds) {
+      try {
+        await deletePrefix(showPrefix(id));
+      } catch (e) {
+        console.warn(`could not delete objects of show ${id}: ${(e as Error).message}`);
       }
     }
   });

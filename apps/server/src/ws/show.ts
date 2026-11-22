@@ -107,6 +107,8 @@ registerWs(
         // A session was deleted: its jobs went with it.
         else if (m.type === 'invalidate' && m.entity === 'job')
           push(() => send({ type: 'invalidate', entity: 'job' }));
+        else if (m.type === 'compilation_changed')
+          push(() => send({ type: 'invalidate', entity: 'compilation' }));
         else if (m.type === 'closed')
           push(() => {
             send({ type: 'closed', reason: m.reason });

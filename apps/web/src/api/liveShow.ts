@@ -34,7 +34,13 @@ function applyShowMessage(
     if (patched) qc.setQueryData(jobsKey, patched);
     else refetch(jobsKey);
   } else if (m.type === 'invalidate') {
-    refetch(m.entity === 'job' ? jobsKey : qk.sessions(showId));
+    refetch(
+      m.entity === 'job'
+        ? jobsKey
+        : m.entity === 'compilation'
+          ? qk.compilations(showId)
+          : qk.sessions(showId),
+    );
   }
 }
 

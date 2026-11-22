@@ -54,6 +54,7 @@ export const qk = {
   wikiList: (showId: string) => ['wiki', showId] as const,
   wikiPage: (pageId: string) => ['wiki-page', pageId] as const,
   wikiRevisions: (pageId: string) => ['wiki-revisions', pageId] as const,
+  compilations: (showId: string) => ['compilations', showId] as const,
   search: (input: OpInput<'search'>) => ['search', input] as const,
   tokens: ['tokens'] as const,
   companion: ['companion'] as const,
@@ -321,3 +322,27 @@ export const useTokens = () => useOpQuery(qk.tokens, 'tokens.list', {});
 export const useCompanionDevices = () => useOpQuery(qk.companion, 'companion.list', {});
 export const useAdminUsers = (enabled: boolean) =>
   useOpQuery(qk.adminUsers, 'admin.users', {}, { enabled });
+
+// ── compilations ──────────────────────────────────────────────────
+
+/** Presigned video URLs last about an hour: refresh the list well before they expire. */
+const COMPILATION_URL_REFRESH_MS = 40 * 60_000;
+/** While one is building, poll as a fallback for the show socket's hints. */
+const COMPILATION_BUILDING_POLL_MS = 15_000;
+
+export const useCompilations = (showId: string | undefined) =>
+  useOpQuery(
+    qk.compilations(showId ?? ''),
+    'compilations.list',
+    { showId: showId ?? '' },
+    {
+      enabled: !!showId,
+      refetchInterval: (q) =>
+        q.state.data?.some((c) => c.status === 'queued' || c.status === 'running')
+          ? COMPILATION_BUILDING_POLL_MS
+          : COMPILATION_URL_REFRESH_MS,
+    },
+  );
+
+export const useDeleteCompilation = (showId: string) =>
+  useOpMutation('compilations.delete', { invalidate: () => [qk.compilations(showId)] });

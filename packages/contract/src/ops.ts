@@ -11,6 +11,7 @@ import type {
   Category,
   Change,
   CompanionDevice,
+  Compilation,
   Dashboard,
   Job,
   Me,
@@ -60,6 +61,11 @@ const sec = z
   .number()
   .min(0)
   .max(7 * 24 * 3600);
+/** Compilation limits (compilations.create). */
+export const MIN_CLIP_SEC = 1;
+export const MAX_CLIP_SEC = 20 * 60;
+export const MAX_COMPILATION_CLIPS = 100;
+export const MAX_COMPILATION_SEC = 3 * 3600;
 /** A timecode string `HH:MM:SS[:FF]` in the session's frame rate. */
 const timecode = z.string().regex(/^\d{1,2}:\d{2}:\d{2}(?:[:;.]\d{2})?$/);
 
@@ -449,6 +455,39 @@ export const opInputs = {
     }),
   'jobs.dismiss': z.object({ jobId: id }),
 
+  // ── compilations ──────────────────────────────────────────
+  'compilations.create': z.object({
+    showId: id,
+    title: name,
+    clips: z
+      .array(
+        z
+          .object({
+            sessionId: id,
+            startSec: sec,
+            endSec: sec,
+            label: z.string().trim().min(1).max(200).optional(),
+          })
+          .refine((c) => c.endSec - c.startSec >= MIN_CLIP_SEC, {
+            message: `Each clip must be at least ${MIN_CLIP_SEC} s long (endSec > startSec).`,
+          })
+          .refine((c) => c.endSec - c.startSec <= MAX_CLIP_SEC, {
+            message: `Each clip may be at most ${MAX_CLIP_SEC / 60} minutes long.`,
+          }),
+      )
+      .min(1)
+      .max(MAX_COMPILATION_CLIPS)
+      .refine((cs) => cs.reduce((n, c) => n + c.endSec - c.startSec, 0) <= MAX_COMPILATION_SEC, {
+        message: `The clips may total at most ${MAX_COMPILATION_SEC / 3600} hours.`,
+      }),
+  }),
+  'compilations.get': z.object({
+    compilationId: id,
+    waitSec: z.number().int().min(0).max(60).optional(),
+  }),
+  'compilations.list': z.object({ showId: id }),
+  'compilations.delete': z.object({ compilationId: id }),
+
   // ── search ────────────────────────────────────────────────
   search: z.object({
     query: z.string().trim().min(1).max(200),
@@ -650,6 +689,10 @@ export interface OpOutputs {
   'media.delete': { deleted: true };
   'jobs.list': Job[];
   'jobs.dismiss': Job;
+  'compilations.create': Compilation;
+  'compilations.get': Compilation;
+  'compilations.list': Compilation[];
+  'compilations.delete': { ok: true };
   search: SearchHit[];
   'changes.list': Change[];
   'changes.revert': Change;

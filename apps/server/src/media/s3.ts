@@ -105,6 +105,16 @@ export function sessionPrefix(sessionId: string): string {
   return `sessions/${sessionId}/`;
 }
 
+/** The MP4 of a video compilation (compilations.*). */
+export function compilationKeyFor(showId: string, compilationId: string): string {
+  return `shows/${showId}/compilations/${compilationId}.mp4`;
+}
+
+/** Every stored object of a show itself (compilations) lives under this prefix. */
+export function showPrefix(showId: string): string {
+  return `shows/${showId}/`;
+}
+
 let bucketReady: Promise<void> | null = null;
 
 /** Create the bucket if it is missing. Errors (e.g. no permission) are logged and ignored. */
@@ -136,10 +146,16 @@ export async function presignUpload(key: string, contentType: string): Promise<s
   );
 }
 
-export async function presignPlayback(key: string): Promise<string> {
-  return getSignedUrl(browser(), new GetObjectCommand({ Bucket: bucket(), Key: key }), {
-    expiresIn: PLAYBACK_URL_TTL_SEC,
-  });
+/** `downloadName`: answer with Content-Disposition attachment under that file name. */
+export async function presignPlayback(key: string, downloadName?: string): Promise<string> {
+  const disposition = downloadName
+    ? `attachment; filename="${downloadName.replace(/[^\w .()-]+/g, '_')}"; filename*=UTF-8''${encodeURIComponent(downloadName).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`
+    : undefined;
+  return getSignedUrl(
+    browser(),
+    new GetObjectCommand({ Bucket: bucket(), Key: key, ResponseContentDisposition: disposition }),
+    { expiresIn: PLAYBACK_URL_TTL_SEC },
+  );
 }
 
 /** A presigned GET on the server's endpoint, for tools the worker runs (ffmpeg reads by URL). */
