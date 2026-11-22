@@ -7,6 +7,7 @@ import {
   FileAudioIcon,
   LinkIcon,
   RefreshCwIcon,
+  TagsIcon,
   TriangleAlertIcon,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
@@ -39,6 +40,7 @@ import {
   retryUpload,
   uploadQueue,
 } from './audio/uploads';
+import { KeyTermsDialog } from './KeyTermsDialog';
 
 const STATUS_LABEL: Record<AudioSegment['status'], string> = {
   uploading: 'Uploading',
@@ -64,6 +66,7 @@ export function AudioMenu({
   const fileRef = useRef<HTMLInputElement>(null);
   const [ytOpen, setYtOpen] = useState(false);
   const [listOpen, setListOpen] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
   const jobs = useJobs(session.id);
   const activeJobs = (jobs.data ?? []).filter(
     (j) => j.status === 'queued' || j.status === 'running',
@@ -136,6 +139,15 @@ export function AudioMenu({
               Audio segments ({segments?.length ?? 0}){caps && !caps.transcription ? '' : ''}
             </span>
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setTermsOpen(true)}>
+            <TagsIcon aria-hidden="true" />
+            <span className="flex flex-col">
+              <span>Key terms ({session.keyTerms.length})…</span>
+              <span className="text-xs text-muted-foreground">
+                Names the transcriber listens for in this session
+              </span>
+            </span>
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <input
@@ -149,6 +161,15 @@ export function AudioMenu({
           if (f) void onFile(f);
         }}
       />
+      {termsOpen && (
+        <KeyTermsDialog
+          session={session}
+          caps={caps}
+          canWrite={canWrite}
+          segments={segments}
+          onClose={() => setTermsOpen(false)}
+        />
+      )}
       {ytOpen && <YoutubeDialog sessionId={session.id} onClose={() => setYtOpen(false)} />}
       {listOpen && (
         <SegmentsDialog
