@@ -4,13 +4,14 @@
 // bytes straight to S3 → media.completeUpload (verifies the object, status 'ready', enqueues
 // `transcribe`). The worker (src/worker) does the Deepgram and yt-dlp work.
 
-import type { AudioSegment, PlaylistImport } from '@autologger/contract';
+import type { AudioSegment, Job, PlaylistImport } from '@autologger/contract';
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { requireSession, requireShow } from '../core/authz.ts';
-import { changeMessage } from '../core/bus.ts';
+import { type BusMessage, changeMessage, subscribeAll, type Topic } from '../core/bus.ts';
 import { badRequest, conflict, notFound, unavailable } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
-import { type Ctx, defineOp } from '../core/op.ts';
+import { type Ctx, defineOp, type OpWatch } from '../core/op.ts';
+import type { Tx } from '../db/client.ts';
 import { db, schema } from '../db/client.ts';
 import { env, storageConfigured, transcriptionConfigured } from '../env.ts';
 import { enqueueJob, type JobRow, toJob } from '../media/jobs.ts';
@@ -220,7 +221,7 @@ defineOp({
 defineOp({
   name: 'media.importYoutube',
   description:
-    "Import the audio of one YouTube video into an existing session. Runs in the background: the worker downloads the audio, stores it and transcribes it. If the session's episodeDate is still its default (the day it was created), it is set to the video's upload date. Playlist URLs are rejected: use media.importPlaylist to import a whole playlist into a show. Returns the job; poll jobs.list for progress.",
+    "Import the audio of one YouTube video into an existing session. Runs in the background: the worker downloads the audio, stores it and transcribes it. If the session's episodeDate is still its default (the day it was created), it is set to the video's upload date. Playlist URLs are rejected: use media.importPlaylist to import a whole playlist into a show. Returns the job; wait for it with jobs.list (waitSec).",
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, url }) {
@@ -469,12 +470,92 @@ defineOp({
   },
 });
 
+/**
+ * Fill `queuePosition` on runnable queued jobs: how many runnable queued jobs (any show) the
+ * worker claims first, 0 = next. Mirrors claimJob's order (run_after, transcriptions first,
+ * created_at, id); `kind <> 'transcribe'` is false for transcriptions, so they sort first. Jobs
+ * waiting out a retry backoff (run_after in the future) get no position.
+ */
+async function withQueuePositions<T extends Job>(tx: Tx, list: T[]): Promise<T[]> {
+  const ids = list.filter((j) => j.status === 'queued').map((j) => j.id);
+  if (!ids.length) return list;
+  const rows = await tx
+    .select({
+      id: jobs.id,
+      ahead: sql<number>`(select count(*)::int from jobs a
+        where a.status = 'queued' and a.run_after <= now()
+          and (a.run_after, a.kind <> 'transcribe', a.created_at, a.id)
+            < (jobs.run_after, jobs.kind <> 'transcribe', jobs.created_at, jobs.id))`,
+    })
+    .from(jobs)
+    .where(and(inArray(jobs.id, ids), sql`${jobs.runAfter} <= now()`));
+  const ahead = new Map(rows.map((r) => [r.id, r.ahead]));
+  return list.map((j) => (ahead.has(j.id) ? { ...j, queuePosition: ahead.get(j.id)! } : j));
+}
+
+/**
+ * Long-poll for jobs.list. Starts listening on the realtime bus before the op's transaction (so
+ * a change committed meanwhile isn't missed); `wait` then resolves when a listed unfinished job
+ * changes status or is deleted, or a job is queued in one of their sessions — or on timeout or
+ * abort. Worker updates reach the bus through Postgres NOTIFY on the shared LISTEN connection, so
+ * waiting holds no database connection.
+ */
+function watchJobs(ms: number, signal?: AbortSignal): OpWatch<Job[]> {
+  const seen: [Topic, BusMessage][] = [];
+  let onMessage = (topic: Topic, m: BusMessage) => void seen.push([topic, m]);
+  const unsubscribe = subscribeAll((topic, m) => onMessage(topic, m));
+  let finish = () => {};
+  const onAbort = () => finish();
+  let timer: NodeJS.Timeout | undefined;
+  const cancel = () => {
+    unsubscribe();
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+    finish();
+  };
+  return {
+    cancel,
+    wait(list) {
+      const pending = new Map(
+        list.filter((j) => j.status === 'queued' || j.status === 'running').map((j) => [j.id, j]),
+      );
+      const topics = new Set(
+        [...pending.values()].flatMap((j) => (j.sessionId ? [`session:${j.sessionId}`] : [])),
+      );
+      if (!topics.size || signal?.aborted) return null;
+      const relevant = (topic: Topic, m: BusMessage) => {
+        if (!topics.has(topic)) return false;
+        if (m.type === 'invalidate') return m.entity === 'job';
+        if (m.type !== 'change' || m.entity !== 'job') return false;
+        const status = (m.data as Job | undefined)?.status;
+        // A progress update of a listed job doesn't count.
+        return !(m.op === 'upsert' && status && pending.get(m.id)?.status === status);
+      };
+      return new Promise<void>((resolve) => {
+        finish = () => {
+          finish = () => {};
+          resolve();
+          cancel();
+        };
+        if (seen.some(([t, m]) => relevant(t, m))) return finish();
+        onMessage = (t, m) => {
+          if (relevant(t, m)) finish();
+        };
+        timer = setTimeout(() => finish(), ms);
+        timer.unref();
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
+    },
+  };
+}
+
 defineOp({
   name: 'jobs.list',
   description:
-    'Background jobs (transcription, YouTube import), newest first, with status, progress and errors. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"). Optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Jobs take seconds to minutes: when waiting, poll every 15–30 seconds, not in a tight loop.',
+    'Background jobs (transcription, YouTube import), newest first, with status, progress and errors. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"). Optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Queued jobs include queuePosition: how many jobs the worker will start before this one, 0 = next. It counts every runnable queued job on the server (all teams and shows; only the number is exposed); a job waiting to retry after a failure has no queuePosition until its retry time. The worker runs a couple of jobs at a time and each usually takes under a minute or two. To wait for jobs, pass waitSec (1–55): if any listed job is queued or running, the call holds until one of them changes status (starts, finishes, fails) or a new job is queued in one of their sessions, then returns the fresh list — or returns after waitSec seconds when nothing changed. Call it again in a loop until the result is empty / all done; no separate sleep is needed. Without waitSec the call returns at once; do not poll it in a tight loop.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
+  watch: ({ waitSec }, signal) => (waitSec ? watchJobs(waitSec * 1000, signal) : null),
   async run(ctx, { sessionId, showId, status, limit }) {
     const statusCond = status ? inArray(jobs.status, status) : undefined;
     if (sessionId) {
@@ -485,7 +566,7 @@ defineOp({
         .where(and(eq(jobs.sessionId, sessionId), statusCond))
         .orderBy(desc(jobs.createdAt))
         .limit(limit);
-      return rows.map(toJob);
+      return withQueuePositions(ctx.db, rows.map(toJob));
     }
     // Read access is per show, so every session of a readable show is readable.
     await requireShow(ctx, showId!, 'read');
@@ -496,6 +577,9 @@ defineOp({
       .where(and(eq(sessions.showId, showId!), statusCond))
       .orderBy(desc(jobs.createdAt))
       .limit(limit);
-    return rows.map((r) => ({ ...toJob(r.job), sessionTitle: r.sessionTitle }));
+    return withQueuePositions(
+      ctx.db,
+      rows.map((r) => ({ ...toJob(r.job), sessionTitle: r.sessionTitle })),
+    );
   },
 });

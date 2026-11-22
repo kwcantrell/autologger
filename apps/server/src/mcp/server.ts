@@ -105,7 +105,7 @@ export function createMcpServer(actor: Actor): Server {
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: mcpTools().tools }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (req): Promise<CallToolResult> => {
+  server.setRequestHandler(CallToolRequestSchema, async (req, extra): Promise<CallToolResult> => {
     const op = mcpTools().byTool.get(req.params.name);
     if (!op)
       return {
@@ -113,7 +113,7 @@ export function createMcpServer(actor: Actor): Server {
         content: [{ type: 'text', text: `Unknown tool ${req.params.name}.` }],
       };
     try {
-      const data = await executeOp(op, req.params.arguments ?? {}, actor, 'mcp');
+      const data = await executeOp(op, req.params.arguments ?? {}, actor, 'mcp', extra.signal);
       return resultContent(op, data);
     } catch (e) {
       const err = toRpcError(e);

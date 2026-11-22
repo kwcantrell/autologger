@@ -71,6 +71,19 @@ export interface OpDef<N extends OpName, P = undefined> {
    */
   prepare?(actor: Actor, input: OpParsed<N>): Promise<P>;
   run(ctx: Ctx, input: OpParsed<N>, prepared: P): Promise<OpOutputs[N]>;
+  /**
+   * Optional long-poll. Called before the transaction, so it can start listening and miss
+   * nothing. After commit, `wait(result)` returns a promise that resolves when the answer may
+   * have changed, on timeout or on `signal` abort, and the op runs again in a fresh transaction
+   * (unless aborted); null answers at once. Waiting must not touch the database, so a waiting
+   * request holds no transaction or pooled connection. `cancel` is always called at the end.
+   */
+  watch?(input: OpParsed<N>, signal?: AbortSignal): OpWatch<OpOutputs[N]> | null;
+}
+
+export interface OpWatch<R> {
+  wait(result: R): Promise<void> | null;
+  cancel(): void;
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: heterogeneous registry
@@ -102,6 +115,7 @@ export async function executeOp<N extends OpName>(
   rawInput: unknown,
   actor: Actor,
   surface: Surface,
+  signal?: AbortSignal,
 ): Promise<OpOutputs[N]> {
   const op = registry.get(name) as OpDef<N, unknown> | undefined;
   if (!op?.surfaces.includes(surface)) throw new AppError('not_found', `Unknown op ${name}.`);
@@ -112,6 +126,25 @@ export async function executeOp<N extends OpName>(
   const input = opInputs[name].parse(rawInput ?? {}) as OpParsed<N>;
   const prepared = op.prepare ? await op.prepare(actor, input) : undefined;
 
+  const watch = op.watch?.(input, signal);
+  try {
+    const result = await runInTransaction(op, input, actor, prepared);
+    const waiting = watch?.wait(result);
+    if (!waiting) return result;
+    await waiting;
+    return signal?.aborted ? result : await runInTransaction(op, input, actor, prepared);
+  } finally {
+    watch?.cancel();
+  }
+}
+
+async function runInTransaction<N extends OpName>(
+  op: OpDef<N, unknown>,
+  input: OpParsed<N>,
+  actor: Actor,
+  prepared: unknown,
+): Promise<OpOutputs[N]> {
+  const name = op.name;
   const outbox: [Topic, BusMessage][] = [];
   const result = await db.transaction(async (tx) => {
     const ctx: Ctx = {
