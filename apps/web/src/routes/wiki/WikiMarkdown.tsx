@@ -7,9 +7,17 @@
 // cell an aliased link escapes its pipe, as GFM requires: [[Title\|label]].
 // Citations — [label](/sessions/<id>?t=<sec>&to=<sec>) — render as chips with the session title
 // and the range, the label as their tooltip. Titles come from `sessionTitle` (useSessionTitles:
-// one sessions.list of the page's show, not one request per link).
+// one sessions.list of the page's show, not one request per link). The short forms
+// [label](@<start>-<end>) / [@<start>-<end>] (the page's own `sessionId`) and
+// [label](@<sessionId>:<start>-<end>) / [@<sessionId>:<start>-<end>] render as the same chip.
 
-import { citationRange, WIKI_LINK } from '@autologger/contract';
+import {
+  BARE_CITATION,
+  citationHref,
+  citationRange,
+  shortCitationRef,
+  WIKI_LINK,
+} from '@autologger/contract';
 import { PlayIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import Markdown, { type Components, type UrlTransform } from 'react-markdown';
@@ -26,7 +34,12 @@ const IN_APP = /^\/(wiki|sessions)\//;
 const SESSION_HREF = /^\/sessions\/([A-Za-z0-9_-]+)\/?\?(.*)$/;
 
 const urlTransform: UrlTransform = (url) =>
-  url.startsWith(WIKI_SCHEME) || /^https?:\/\//i.test(url) || IN_APP.test(url) ? url : '';
+  url.startsWith(WIKI_SCHEME) ||
+  url.startsWith('@') ||
+  /^https?:\/\//i.test(url) ||
+  IN_APP.test(url)
+    ? url
+    : '';
 
 // ── remark plugin: [[Title]] / [[Title|label]] inside text nodes become links ──────────────────
 
@@ -58,16 +71,30 @@ function splitText(value: string): MdNode[] | null {
   return out;
 }
 
+/** Bare short citations `[@1664-1760]` in a text node become `@…` links with no text. */
+function splitBare(value: string): MdNode[] {
+  const out: MdNode[] = [];
+  let last = 0;
+  for (const m of value.matchAll(BARE_CITATION)) {
+    if (!shortCitationRef(m[1] ?? '')) continue;
+    if (m.index > last) out.push({ type: 'text', value: value.slice(last, m.index) });
+    out.push({ type: 'link', url: `@${m[1]}`, children: [] });
+    last = m.index + m[0].length;
+  }
+  if (!last) return [{ type: 'text', value }];
+  if (last < value.length) out.push({ type: 'text', value: value.slice(last) });
+  return out;
+}
+
 function walk(node: MdNode) {
   if (!node.children || node.type === 'link' || node.type === 'linkReference') return;
   const next: MdNode[] = [];
   for (const child of node.children) {
     if (child.type === 'text' && child.value) {
-      const parts = splitText(child.value);
-      if (parts) {
-        next.push(...parts);
-        continue;
-      }
+      for (const part of splitText(child.value) ?? [child])
+        if (part.type === 'text' && part.value?.includes('[@')) next.push(...splitBare(part.value));
+        else next.push(part);
+      continue;
     }
     walk(child);
     next.push(child);
@@ -84,10 +111,31 @@ function remarkWikiLinks() {
 const LINK_CLASS =
   'text-si-fg underline decoration-(--si-line-strong) underline-offset-2 hover-always:text-si-accent';
 
-function components(resolve: WikiResolver, sessionTitle: SessionTitle): Components {
+function components(
+  resolve: WikiResolver,
+  sessionTitle: SessionTitle,
+  pageSessionId: string | null | undefined,
+): Components {
   return {
     a({ href, children }) {
       if (!href) return <span>{children}</span>;
+      if (href.startsWith('@')) {
+        // A short citation; without a session to resolve to it stays text (saves reject it).
+        const short = shortCitationRef(href.slice(1), pageSessionId);
+        if (!short?.sessionId)
+          return <span className="text-si-dim">{children ?? `[${href}]`}</span>;
+        const c = { ...short, sessionId: short.sessionId };
+        return (
+          <CitationChip
+            href={citationHref(c)}
+            title={sessionTitle(c.sessionId)}
+            startSec={c.startSec}
+            endSec={c.endSec}
+          >
+            {children}
+          </CitationChip>
+        );
+      }
       const cite = SESSION_HREF.exec(href);
       const range = cite && citationRange(cite[2] ?? '');
       if (cite && range)
@@ -157,7 +205,7 @@ function CitationChip({
   title: string | null | undefined;
   startSec: number;
   endSec?: number;
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   const range =
     endSec != null && endSec > startSec
@@ -165,7 +213,7 @@ function CitationChip({
       : fmtSec(startSec);
   const name = title === undefined ? 'Session' : (title ?? 'Unknown session');
   return (
-    <Tooltip content={children}>
+    <Tooltip content={children} disabled={children == null || children === ''}>
       <Link
         href={href}
         data-slot="wiki-citation"
@@ -199,12 +247,15 @@ export function WikiMarkdown({
   body,
   resolve,
   sessionTitle = noTitle,
+  sessionId,
   className,
 }: {
   body: string;
   resolve: WikiResolver;
   /** Names cited sessions (useSessionTitles); without it citations show "Session". */
   sessionTitle?: SessionTitle;
+  /** The page's own session, which short citations without a session id cite. */
+  sessionId?: string | null;
   className?: string;
 }) {
   return (
@@ -214,7 +265,7 @@ export function WikiMarkdown({
         urlTransform={urlTransform}
         // biome-ignore lint/suspicious/noExplicitAny: a minimal local mdast shape instead of a types dep
         remarkPlugins={[remarkGfm, remarkWikiLinks as any]}
-        components={components(resolve, sessionTitle)}
+        components={components(resolve, sessionTitle, sessionId)}
       >
         {body}
       </Markdown>

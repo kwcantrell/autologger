@@ -65,10 +65,15 @@ export type SessionTitle = (sessionId: string) => string | null | undefined;
 
 /**
  * Names the sessions a body cites from one sessions.list of its show (cached, shared with the
- * rest of the app), fetched only when the body has citations.
+ * rest of the app), fetched only when the body has citations. `sessionId` is the page's own
+ * session, which short citations resolve to.
  */
-export function useSessionTitles(showId: string, body: string): SessionTitle {
-  const cites = useMemo(() => wikiCitations(body).length > 0, [body]);
+export function useSessionTitles(
+  showId: string,
+  body: string,
+  sessionId?: string | null,
+): SessionTitle {
+  const cites = useMemo(() => wikiCitations(body, sessionId).length > 0, [body, sessionId]);
   const sessions = useSessions(cites ? showId : undefined);
   return useMemo<SessionTitle>(() => {
     if (!sessions.data) return () => (sessions.isError ? null : undefined);

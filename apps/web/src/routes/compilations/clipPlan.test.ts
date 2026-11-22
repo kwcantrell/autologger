@@ -85,4 +85,17 @@ describe('citationCandidates', () => {
       { sessionId: 'ses_b', startSec: 99, endSec: 120, label: 'second one' },
     ]);
   });
+
+  it('resolves short citations against the page session', () => {
+    const body = [
+      '- [@1664-1760] — ten thousand hours',
+      '- [the dog](@ses_b:12.5) and [again](@99-120): second one [@5]',
+    ].join('\n');
+    expect(citationCandidates(body, 'ses_a')).toEqual([
+      { sessionId: 'ses_a', startSec: 1664, endSec: 1760, label: 'ten thousand hours' },
+      { sessionId: 'ses_b', startSec: 12.5, label: 'the dog' },
+      { sessionId: 'ses_a', startSec: 99, endSec: 120, label: 'again' },
+      { sessionId: 'ses_a', startSec: 5, label: '' },
+    ]);
+  });
 });

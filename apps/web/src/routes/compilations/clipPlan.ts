@@ -9,6 +9,7 @@ import {
   MAX_COMPILATION_SEC,
   MIN_CLIP_SEC,
   type Session,
+  shortCitationRef,
   wikiCitations,
 } from '@autologger/contract';
 
@@ -23,15 +24,19 @@ export interface ClipCandidate {
   label: string;
 }
 
-/** An in-app session link, `[label](/sessions/<id>?t=…)`, as written in a page line. */
+/**
+ * A citation as written in a page line: an in-app session link `[label](/sessions/<id>?t=…)`
+ * (groups 1–2), a short link `[label](@<ref>)` (group 3) or a bare `[@<ref>]` (group 4).
+ */
 const SESSION_LINK =
-  /\[(?:\\.|[^\\[\]\n])*\]\(\s*\/sessions\/([A-Za-z0-9_-]+)\/?\?([^\s)]*)[^)\n]*\)/g;
+  /\[(?:\\.|[^\\[\]\n])*\]\(\s*(?:\/sessions\/([A-Za-z0-9_-]+)\/?\?([^\s)]*)|@([^\s)"]+))[^)\n]*\)|(?<!\])\[@([^\s[\]\\]+)\](?![([])/g;
 
 /** Markdown inline syntax reduced to its text, for a one-line clip label. */
 function plainText(md: string): string {
   return md
     .replace(/\[\[([^[\]|\n]+?)(?:\\?\|([^[\]\n]+?))?\]\]/g, (_m, t: string, l?: string) => l ?? t)
     .replace(/\[([^\]\n]*)\]\([^)\n]*\)/g, '$1')
+    .replace(/\[@[^\]\n]*\]/g, '')
     .replace(/\*+|`+|__/g, '')
     .replace(/\s+/g, ' ')
     .replace(/^[\s—–\-:;,.|]+/, '')
@@ -41,29 +46,30 @@ function plainText(md: string): string {
 /**
  * The clips of a wiki page: its citations (wikiCitations). A citation that ends its line is
  * labelled with the text after it ("[Ep 1 00:27:44–00:29:20](…) — ten thousand hours" → "ten
- * thousand hours"), which says what the moment is; otherwise with its link text.
+ * thousand hours"), which says what the moment is; otherwise with its link text. `pageSessionId`
+ * is the page's own session, which short citations resolve to.
  */
-export function citationCandidates(bodyMd: string): ClipCandidate[] {
-  const written: { sessionId: string; query: string; after: string; used: boolean }[] = [];
+export function citationCandidates(bodyMd: string, pageSessionId?: string | null): ClipCandidate[] {
+  const written: { sessionId: string; startSec: number; after: string; used: boolean }[] = [];
   for (const line of bodyMd.split('\n')) {
     const links = [...line.matchAll(SESSION_LINK)];
     links.forEach((m, i) => {
       // Only the last link of a line is followed by its description; between links is glue.
       const last = i === links.length - 1;
+      const short = m[1] ? null : shortCitationRef(m[3] ?? m[4] ?? '', pageSessionId);
       written.push({
-        sessionId: m[1] ?? '',
-        query: m[2] ?? '',
+        sessionId: m[1] ?? short?.sessionId ?? '',
+        startSec: m[1]
+          ? Number(new URLSearchParams(m[2] ?? '').get('t'))
+          : (short?.startSec ?? NaN),
         after: last ? plainText(line.slice((m.index ?? 0) + m[0].length)) : '',
         used: false,
       });
     });
   }
-  return wikiCitations(bodyMd).map((c) => {
+  return wikiCitations(bodyMd, pageSessionId).map((c) => {
     const w = written.find(
-      (x) =>
-        !x.used &&
-        x.sessionId === c.sessionId &&
-        Number(new URLSearchParams(x.query).get('t')) === c.startSec,
+      (x) => !x.used && x.sessionId === c.sessionId && x.startSec === c.startSec,
     );
     if (w) w.used = true;
     return {
