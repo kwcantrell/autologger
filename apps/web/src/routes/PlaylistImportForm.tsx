@@ -3,8 +3,7 @@
 // each session's Audio menu shows.
 
 import type { PlaylistImport, Show } from '@autologger/contract';
-import { useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, type ReactNode, useState } from 'react';
+import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import { Link } from 'wouter';
 import { qk, useCapabilities, useOpMutation } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
@@ -28,21 +27,36 @@ const SKIP_REASON: Record<PlaylistImport['skipped'][number]['reason'], string> =
 export function PlaylistImportForm({
   show,
   onClose,
+  onImportingChange,
 }: {
   show: Show | undefined;
   onClose: () => void;
+  /** True while a real (non-dry) import is in flight: the dialog should stay open. */
+  onImportingChange: (importing: boolean) => void;
 }) {
   const caps = useCapabilities().data;
-  const qc = useQueryClient();
   const [url, setUrl] = useState('');
   const [order, setOrder] = useState<Order>('playlist');
   const [template, setTemplate] = useState('');
   // The preview (dryRun) or the finished import, with the inputs it was made for.
   const [result, setResult] = useState<{ key: string; data: PlaylistImport } | null>(null);
-  const run = useOpMutation('media.importPlaylist');
-  // Editing an input drops a stale error; the preview is kept per input set (see `current`).
+  // Refresh and toast in the hook, not per call: they must run even if the form has unmounted.
+  const run = useOpMutation('media.importPlaylist', {
+    invalidate: (d) => (d.dryRun ? [] : [qk.sessionsAll, qk.shows]),
+    onSuccess: (d) => {
+      if (d.dryRun) return;
+      const n = d.created.length;
+      showToast(
+        `Created ${n} session${n === 1 ? '' : 's'}. Downloads and transcription run in the background.`,
+      );
+    },
+  });
+  const importing = run.isPending && run.variables?.dryRun === false;
+  useEffect(() => onImportingChange(importing), [importing, onImportingChange]);
+  // Editing an input drops the preview and any error: Import only runs on what was previewed.
   const edit = (apply: () => void) => {
     run.reset();
+    setResult(null);
     apply();
   };
 
@@ -69,20 +83,7 @@ export function PlaylistImportForm({
     if (!show || !input.url || unavailable || run.isPending) return;
     if (imported) return onClose();
     const dryRun = !current;
-    run.mutate(
-      { ...input, dryRun },
-      {
-        onSuccess: (data) => {
-          setResult({ key, data });
-          if (dryRun) return;
-          void qc.invalidateQueries({ queryKey: qk.sessionsAll });
-          void qc.invalidateQueries({ queryKey: qk.shows });
-          showToast(
-            `Created ${data.created.length} session${data.created.length === 1 ? '' : 's'}. Downloads and transcription run in the background.`,
-          );
-        },
-      },
-    );
+    run.mutate({ ...input, dryRun }, { onSuccess: (data) => setResult({ key, data }) });
   };
 
   return (
@@ -164,7 +165,7 @@ export function PlaylistImportForm({
           <Button type="submit">Done</Button>
         ) : (
           <>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" disabled={importing} onClick={onClose}>
               Cancel
             </Button>
             {current && (

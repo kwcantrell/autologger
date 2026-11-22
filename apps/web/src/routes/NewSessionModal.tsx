@@ -47,6 +47,8 @@ export function NewSessionModal({
   const [tcOpen, setTcOpen] = useState(false);
   const [srcOpen, setSrcOpen] = useState(initialMode === 'import');
   const [kind, setKind] = useState<'session' | 'playlist'>('session');
+  // A real playlist import in flight: keep the dialog open and the mode fixed until it answers.
+  const [importing, setImporting] = useState(false);
   const [ytUrl, setYtUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -112,8 +114,8 @@ export function NewSessionModal({
   return (
     <Dialog
       open
-      onOpenChange={(o) => !o && onClose()}
-      title={kind === 'playlist' ? 'Import a YouTube playlist' : 'New session'}
+      onOpenChange={(o) => !o && !importing && onClose()}
+      title={kind === 'playlist' ? 'Import playlist' : 'New session'}
       hideTitle
       className="md:max-w-lg"
     >
@@ -133,6 +135,7 @@ export function NewSessionModal({
             variant="outline"
             size="sm"
             aria-label="Create"
+            disabled={importing}
             value={[kind]}
             onValueChange={([v]) => {
               if (v === 'session' || v === 'playlist') setKind(v);
@@ -151,7 +154,12 @@ export function NewSessionModal({
               owner or admin for write access, or add a show in Settings → Shows.
             </p>
           ) : (
-            <NativeSelect id="ns-show" value={showId} onChange={(e) => setShowId(e.target.value)}>
+            <NativeSelect
+              id="ns-show"
+              disabled={importing}
+              value={showId}
+              onChange={(e) => setShowId(e.target.value)}
+            >
               {writable.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name} ({s.code})
@@ -161,7 +169,11 @@ export function NewSessionModal({
           )}
         </Field>
 
-        {kind === 'playlist' ? <PlaylistImportForm show={show} onClose={onClose} /> : sessionForm()}
+        {/* Kept mounted while hidden, so the link and preview survive switching modes. */}
+        <div hidden={kind !== 'playlist'}>
+          <PlaylistImportForm show={show} onClose={onClose} onImportingChange={setImporting} />
+        </div>
+        {kind === 'session' && sessionForm()}
       </div>
     </Dialog>
   );
