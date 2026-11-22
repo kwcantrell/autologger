@@ -121,6 +121,7 @@ export async function withJobEstimates<T extends Job>(tx: DbOrTx, list: T[]): Pr
     per_audio_sec: number | null;
     overall: number | null;
     audio: Record<string, number>;
+    elapsed: Record<string, number>;
   }>(sql`
     with recent as (
       select r.* from (values ${kinds}) k(kind)
@@ -142,9 +143,11 @@ export async function withJobEstimates<T extends Job>(tx: DbOrTx, list: T[]): Pr
       (select percentile_cont(0.5) within group (order by sec) from recent) as overall,
       (select coalesce(json_object_agg(j.id, s.duration_sec), '{}'::json)
         from jobs j join audio_segments s on s.id = j.payload->>'segmentId'
-        where j.id in (${ids}) and j.kind = 'transcribe' and s.duration_sec > 0) as audio`);
+        where j.id in (${ids}) and j.kind = 'transcribe' and s.duration_sec > 0) as audio,
+      (select coalesce(json_object_agg(j.id, extract(epoch from now() - j.started_at)), '{}'::json)
+        from jobs j
+        where j.id in (${ids}) and j.status = 'running' and j.started_at is not null) as elapsed`);
 
-  const now = Date.now();
   const own = (j: Job): number | undefined => {
     const audio = stats?.audio[j.id];
     if (j.kind === 'transcribe' && audio && stats?.per_audio_sec != null)
@@ -157,8 +160,8 @@ export async function withJobEstimates<T extends Job>(tx: DbOrTx, list: T[]): Pr
     const duration = own(j);
     if (duration === undefined) return out;
     let eta: number | undefined;
-    if (j.status === 'running' && j.startedAt)
-      eta = Math.max(0, duration - (now - Date.parse(j.startedAt)) / 1000);
+    const elapsed = stats?.elapsed[j.id];
+    if (j.status === 'running' && elapsed !== undefined) eta = Math.max(0, duration - elapsed);
     else if (position !== undefined && stats?.overall != null)
       eta = duration + (position * stats.overall) / env.workerConcurrency;
     return eta === undefined ? out : { ...out, etaSec: Math.round(eta) };

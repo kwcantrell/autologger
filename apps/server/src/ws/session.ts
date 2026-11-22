@@ -1,8 +1,8 @@
 // Live session socket: GET /ws/session/:sessionId (cookie auth). Pushes changes to the browser.
 
 import type { SessionClientMessage, SessionServerMessage } from '@autologger/contract';
+import { canReadSession } from '../core/authz.ts';
 import { subscribe } from '../core/bus.ts';
-import { executeOp } from '../core/op.ts';
 import { actorFromSessionToken, sessionTokenFromCookieHeader } from '../http/auth.ts';
 import { heartbeat, registerWs } from './upgrade.ts';
 
@@ -27,12 +27,7 @@ registerWs(
     // Re-check access whenever the user's grants or roles change.
     const offUser = subscribe(`user:${actor.user.id}`, async () => {
       const fresh = await actorFromSessionToken(sessionTokenFromCookieHeader(req.headers.cookie));
-      const ok =
-        fresh &&
-        (await executeOp('sessions.get', { sessionId }, fresh, 'web').then(
-          () => true,
-          () => false,
-        ));
+      const ok = fresh && (await canReadSession(fresh, sessionId));
       if (!ok) {
         send({ type: 'closed', reason: 'access_revoked' });
         ws.close(4403, 'access_revoked');
@@ -56,11 +51,6 @@ registerWs(
   async (req, url) => {
     const actor = await actorFromSessionToken(sessionTokenFromCookieHeader(req.headers.cookie));
     if (!actor) return 401;
-    try {
-      await executeOp('sessions.get', { sessionId: sessionIdFrom(url) }, actor, 'web');
-      return true;
-    } catch {
-      return 404;
-    }
+    return (await canReadSession(actor, sessionIdFrom(url))) ? true : 404;
   },
 );
