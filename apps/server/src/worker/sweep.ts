@@ -45,6 +45,8 @@ export interface SweepResult {
   prefixes: string[];
   /** Single objects removed: compilation MP4s of deleted compilations under a live show. */
   objects: string[];
+  /** Orphan prefixes and objects kept because something under them is newer than the grace. */
+  withinGrace: number;
 }
 
 export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> {
@@ -59,7 +61,15 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
     opts.orphanGraceMs ?? env.mediaSweep.orphanGraceHours * HOUR_MS,
   );
   const tag = dryRun ? 'media sweep (dry run): would remove' : 'media sweep: removed';
-  const result: SweepResult = { ran: false, dryRun, uploads: [], prefixes: [], objects: [] };
+  const result: SweepResult = {
+    ran: false,
+    dryRun,
+    uploads: [],
+    prefixes: [],
+    objects: [],
+    withinGrace: 0,
+  };
+  const started = Date.now();
   const removed: { id: string; sessionId: string }[] = [];
 
   await db.transaction(async (tx) => {
@@ -109,7 +119,10 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
     };
     const removePrefix = async (prefix: string, why: string): Promise<void> => {
       const { old, count } = await settled(prefix);
-      if (!old) return;
+      if (!old) {
+        if (count > 0) result.withinGrace++;
+        return;
+      }
       if (!dryRun) {
         try {
           await deletePrefix(prefix);
@@ -165,7 +178,11 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
           ).map((r) => r.id),
         );
         for (const [id, o] of byId) {
-          if (kept.has(id) || o.lastModified.getTime() >= cutoff) continue;
+          if (kept.has(id)) continue;
+          if (o.lastModified.getTime() >= cutoff) {
+            result.withinGrace++;
+            continue;
+          }
           if (!dryRun) {
             try {
               await deleteObject(o.key);
@@ -181,9 +198,30 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
     }
   });
 
+  console.log(summaryLine(result, Date.now() - started));
   for (const seg of removed)
     publish(`session:${seg.sessionId}`, changeMessage('audio_segment', 'delete', seg.id));
   return result;
+}
+
+/**
+ * One line per run, so an operator can tell the sweep ran even when it found nothing:
+ * `media sweep (dry run): 0 stuck uploads, 1 orphan prefix, 0 compilation objects would be
+ * removed; 1 orphan within grace; 12 s`.
+ */
+export function summaryLine(r: SweepResult, elapsedMs: number): string {
+  const head = r.dryRun ? 'media sweep (dry run)' : 'media sweep';
+  if (!r.ran) return `${head}: skipped, another worker holds the sweep lock`;
+  const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+  return `${head}: ${[
+    n(r.uploads.length, 'stuck upload', 'stuck uploads'),
+    n(r.prefixes.length, 'orphan prefix', 'orphan prefixes'),
+    n(r.objects.length, 'compilation object', 'compilation objects'),
+  ].join(', ')} ${r.dryRun ? 'would be removed' : 'removed'}; ${n(
+    r.withinGrace,
+    'orphan',
+    'orphans',
+  )} within grace; ${Math.round(elapsedMs / 1000)} s`;
 }
 
 /** `sessions/<id>/` → `<id>`; anything not shaped like an id folder is ignored. */
