@@ -29,7 +29,7 @@ import {
   putObjectFromFile,
   requireStorage,
 } from '../media/s3.ts';
-import { lockSession, nextSegmentSlot } from '../media/segments.ts';
+import { lockSession, nextSegmentSlot, STORED } from '../media/segments.ts';
 import { computePeaks, encodePeaks, ffmpegAvailable } from '../media/waveform.ts';
 import { downloadAudio } from '../media/youtube.ts';
 import { toAudioSegment } from '../ops/map.ts';
@@ -260,9 +260,6 @@ const youtubeImport: Handler = {
   },
 };
 
-/** Segment states whose audio is in storage (waveform jobs and the backfill). */
-const STORED = ['ready', 'transcribing', 'transcribed'] as const;
-
 const waveform: Handler = {
   async run(job) {
     requireStorage();
@@ -302,7 +299,8 @@ const waveform: Handler = {
 /**
  * Queue a waveform job for stored audio without peaks: segments from before waveforms existed,
  * and ones whose job was skipped on a worker without ffmpeg. Segments with a queued, running or
- * failed waveform job are left alone (a failed one is not retried on every restart). Runs at
+ * failed waveform job are left alone (a failed one is not retried on every restart; users retry it
+ * with media.rewaveform). Runs at
  * worker startup when ffmpeg is available; an advisory lock keeps simultaneous starts from
  * queueing twice. Queues at most BACKFILL_MAX per run. Returns the number of jobs queued.
  */

@@ -25,13 +25,24 @@ export async function lockSession(tx: DbOrTx, sessionId: string): Promise<void> 
   await tx.execute(sql`select 1 from sessions where id = ${sessionId} for update`);
 }
 
-export async function activeTranscribeJob(tx: DbOrTx, segmentId: string) {
+/**
+ * Segment states whose audio is in storage (waveform jobs, the backfill, media.rewaveform). A
+ * failed segment is one whose transcription failed; its audio is stored.
+ */
+export const STORED = ['ready', 'transcribing', 'transcribed', 'failed'] as const;
+
+/** The queued or running job of `kind` (default transcribe) for one audio segment, or null. */
+export async function activeTranscribeJob(
+  tx: DbOrTx,
+  segmentId: string,
+  kind: 'transcribe' | 'waveform' = 'transcribe',
+) {
   const [row] = await tx
     .select()
     .from(schema.jobs)
     .where(
       and(
-        eq(schema.jobs.kind, 'transcribe'),
+        eq(schema.jobs.kind, kind),
         sql`${schema.jobs.status} in ('queued','running')`,
         sql`${schema.jobs.payload}->>'segmentId' = ${segmentId}`,
       ),

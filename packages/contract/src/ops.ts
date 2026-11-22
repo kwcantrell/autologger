@@ -423,6 +423,7 @@ export const opInputs = {
     segmentId: id.optional(),
     keyTerms: keyTermList.optional(),
   }),
+  'media.rewaveform': z.object({ sessionId: id, segmentId: id.optional() }),
   'media.delete': z.object({ segmentId: id }),
   'jobs.list': z
     .object({
@@ -644,6 +645,7 @@ export interface OpOutputs {
   'media.importYoutube': Job;
   'media.importPlaylist': PlaylistImport;
   'media.retranscribe': Job[];
+  'media.rewaveform': Job[];
   'media.delete': { deleted: true };
   'jobs.list': Job[];
   'jobs.dismiss': Job;

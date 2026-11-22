@@ -1,6 +1,6 @@
 // Show-wide background jobs (YouTube imports, transcriptions): the rail indicator, the per-card
 // status mark and the dialog listing every unfinished job and every failure nobody has dismissed,
-// with a retry for failed YouTube imports and a dismiss for each failure.
+// with a retry for failed YouTube imports and waveforms and a dismiss for each failure.
 
 import type { Job, Session } from '@autologger/contract';
 import { CheckIcon, Loader2Icon, RefreshCwIcon, TriangleAlertIcon } from 'lucide-react';
@@ -92,6 +92,10 @@ export function ShowJobsDialog({
     invalidate: () => [qk.showJobsAll],
     onSuccess: () => showToast('Import queued again.'),
   });
+  const rewave = useOpMutation('media.rewaveform', {
+    invalidate: () => [qk.showJobsAll],
+    onSuccess: () => showToast('Waveform queued again.'),
+  });
   const [retried, setRetried] = useState<Set<string>>(() => new Set());
   const dismiss = useOpMutation('jobs.dismiss', {
     invalidate: () => [qk.showJobsAll],
@@ -177,8 +181,32 @@ export function ShowJobsDialog({
           const pending = retry.isPending && retry.variables?.sessionId === j.sessionId;
           const readOnly = s?.access === 'read';
           const dismissing = dismiss.isPending && dismiss.variables?.jobId === j.id;
+          const rewaving = rewave.isPending && rewave.variables?.sessionId === j.sessionId;
           const retryAction =
-            j.kind === 'youtube_import' && s?.sourceUrl ? (
+            j.kind === 'waveform' && s ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={readOnly || rewaving || retried.has(j.id)}
+                title={
+                  readOnly
+                    ? 'Read-only access to this show.'
+                    : "Compute the waveform of this session's audio again"
+                }
+                onClick={() =>
+                  rewave.mutate(
+                    { sessionId: s.id },
+                    {
+                      onSuccess: () => setRetried((r) => new Set(r).add(j.id)),
+                      onError: (e) => showToast(errorMessage(e), true),
+                    },
+                  )
+                }
+              >
+                <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
+                {rewaving ? 'Retrying…' : 'Retry'}
+              </Button>
+            ) : j.kind === 'youtube_import' && s?.sourceUrl ? (
               <Button
                 size="sm"
                 variant="outline"

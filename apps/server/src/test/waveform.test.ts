@@ -35,7 +35,9 @@ const {
 } = await import('../media/waveform.ts');
 const { claimJob } = await import('../worker/queue.ts');
 const { backfillWaveforms, handlers } = await import('../worker/handlers.ts');
-const { call, failsWith, makeUser, resetDb, setupDb, studio } = await import('./harness.ts');
+const { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } = await import(
+  './harness.ts'
+);
 
 const { audioSegments, jobs } = schema;
 
@@ -195,6 +197,64 @@ describe('waveform jobs and media.waveform', () => {
     // A skipped job ends done; the next startup with ffmpeg queues the segment again.
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
     expect(await backfillWaveforms()).toBe(1);
+  });
+
+  it('media.rewaveform queues a failed waveform again; readers and agents cannot', async () => {
+    const { owner, team, show, session } = await studio();
+    const broken = await segment(session.id, 1, null);
+    await segment(session.id, 2, `sessions/${session.id}/done.peaks.json`);
+    // Transcription failed, but the audio is stored: its waveform can still be computed.
+    const untranscribed = await segment(session.id, 3, null);
+    await db
+      .update(audioSegments)
+      .set({ status: 'failed' })
+      .where(eq(audioSegments.id, untranscribed));
+    const failed = await enqueueJob(db, {
+      kind: 'waveform',
+      sessionId: session.id,
+      actorId: owner.user.id,
+      payload: { segmentId: broken },
+    });
+    await db.update(jobs).set({ status: 'failed' }).where(eq(jobs.id, failed.id));
+    expect(await backfillWaveforms()).toBe(1); // untranscribed only; the failure is left alone
+
+    const reader = await makeUser('reader@example.com');
+    await call(owner, 'teams.invite', { teamId: team.id, email: 'reader@example.com' });
+    await call(owner, 'teams.setGrant', {
+      teamId: team.id,
+      userId: reader.user.id,
+      showId: show.id,
+      access: 'read',
+    });
+    await failsWith(call(reader, 'media.rewaveform', { sessionId: session.id }), 'forbidden');
+    // Web only: the waveform is cosmetic, so it is not an MCP tool.
+    await failsWith(
+      call(asAgent(owner), 'media.rewaveform', { sessionId: session.id }),
+      'not_found',
+    );
+
+    // The session: segments without peaks; the one already queued keeps its job.
+    const queued = await call(owner, 'media.rewaveform', { sessionId: session.id });
+    expect(queued.map((j) => [j.kind, j.status])).toEqual([
+      ['waveform', 'queued'],
+      ['waveform', 'queued'],
+    ]);
+    const rows = await db.select().from(jobs).where(eq(jobs.status, 'queued'));
+    expect(rows.map((j) => (j.payload as { segmentId: string }).segmentId).sort()).toEqual(
+      [broken, untranscribed].sort(),
+    );
+    expect(await call(owner, 'media.rewaveform', { sessionId: session.id })).toEqual(queued);
+    // One segment, even with peaks.
+    const withPeaks = await segment(session.id, 4, `sessions/${session.id}/x.peaks.json`);
+    const [one] = await call(owner, 'media.rewaveform', {
+      sessionId: session.id,
+      segmentId: withPeaks,
+    });
+    expect(one).toMatchObject({ kind: 'waveform', status: 'queued' });
+    await failsWith(
+      call(owner, 'media.rewaveform', { sessionId: session.id, segmentId: newId('aud') }),
+      'not_found',
+    );
   });
 
   it('claims waveform jobs last, and agents can leave them out of jobs.list', async () => {
