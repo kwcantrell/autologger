@@ -92,6 +92,17 @@ function DropdownMenuItem({
   );
 }
 
+/** A menu row that is a link (`href`): navigates like an anchor, with the menu's keyboard model. */
+function DropdownMenuLinkItem({ className, ...props }: MenuPrimitive.LinkItem.Props) {
+  return (
+    <MenuPrimitive.LinkItem
+      data-slot="dropdown-menu-link-item"
+      className={cn(ITEM_BASE, 'no-underline', className)}
+      {...props}
+    />
+  );
+}
+
 function DropdownMenuCheckboxItem({
   className,
   children,
@@ -245,6 +256,7 @@ export {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuLinkItem,
   DropdownMenuPortal,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
