@@ -289,7 +289,20 @@ export const opInputs = {
   'media.importYoutube': z.object({ sessionId: id, url: z.url() }),
   'media.retranscribe': z.object({ sessionId: id, segmentId: id.optional() }),
   'media.delete': z.object({ segmentId: id }),
-  'jobs.list': z.object({ sessionId: id }),
+  'jobs.list': z
+    .object({
+      sessionId: id.optional(),
+      showId: id.optional(),
+      status: z
+        .array(z.enum(['queued', 'running', 'done', 'failed']))
+        .min(1)
+        .max(4)
+        .optional(),
+      limit: z.number().int().min(1).max(500).default(100),
+    })
+    .refine((v) => (v.sessionId === undefined) !== (v.showId === undefined), {
+      message: 'Pass exactly one of sessionId or showId.',
+    }),
 
   // ── search ────────────────────────────────────────────────
   search: z.object({
