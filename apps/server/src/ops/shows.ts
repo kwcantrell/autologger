@@ -116,9 +116,10 @@ defineOp({
 
 defineOp({
   name: 'shows.create',
-  description: 'Create a show in a team (owner/admin). Starts with default event buttons.',
+  description:
+    'Create a show (a series of sessions, e.g. a podcast or channel) in a team. Needs the owner or admin role in that team; teamId comes from teams_list (check `role`). `code` is a short uppercase prefix for default session titles (derived from the name when omitted); defaultFrameRate is the frame rate new sessions start with (default 24). The show starts with three default event buttons, in hotkey order: "Scene" (button), "Audio issue" (dropdown: Lav, Boom, Noise, Clipping) and "Note" (text) — replace or extend them with categories_save. Creating those buttons is recorded in the change log; the show itself is removed only from the web app.',
   kind: 'write',
-  surfaces: ['web'],
+  surfaces: ['web', 'mcp'],
   async run(ctx, { teamId, name, code, defaultFrameRate }) {
     await requireTeamRole(ctx, teamId, 'admin');
     const id = newId('show');
@@ -129,26 +130,40 @@ defineOp({
       code: (code || suggestedCode(name)).toUpperCase(),
       defaultFrameRate,
     });
-    await ctx.db.insert(categories).values(
-      DEFAULT_CATEGORIES.map((c, i) => ({
-        id: newId('cat'),
+    const created = await ctx.db
+      .insert(categories)
+      .values(
+        DEFAULT_CATEGORIES.map((c, i) => ({
+          id: newId('cat'),
+          showId: id,
+          position: i,
+          name: c.name,
+          color: c.color,
+          kind: c.kind,
+          options: 'options' in c ? c.options : [],
+        })),
+      )
+      .returning();
+    for (const c of created) {
+      await ctx.record({
+        entity: 'category',
+        entityId: c.id,
+        kind: 'create',
+        summary: `Added default button “${c.name}”`,
         showId: id,
-        position: i,
-        name: c.name,
-        color: c.color,
-        kind: c.kind,
-        options: 'options' in c ? c.options : [],
-      })),
-    );
+        after: snapshot(c),
+      });
+    }
     return getShow(ctx, id);
   },
 });
 
 defineOp({
   name: 'shows.update',
-  description: 'Update show settings (owner/admin).',
+  description:
+    'Change show settings (owner/admin of the show’s team; showId from shows_list). Only the fields you pass change: name, code (session-title prefix, uppercased), defaultFrameRate (for new sessions), titleSuffix (default title of new sessions created without one: "date" = CODE + date, "episode" = CODE + episode number, "none" = the show name) and nextEpisode (the episode number the next session gets). Event buttons are edited with categories_save. Settings changes are not in the change log and cannot be undone from it.',
   kind: 'write',
-  surfaces: ['web'],
+  surfaces: ['web', 'mcp'],
   async run(ctx, { showId, ...patch }) {
     await requireShow(ctx, showId, 'manage');
     const set = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
@@ -185,9 +200,9 @@ defineOp({
 defineOp({
   name: 'categories.save',
   description:
-    'Replace the show’s event buttons with this ordered list (owner/admin). Keep `id` to update an existing button; omit it to add one. Buttons not in the list are removed; past events keep their label.',
+    'Set a show’s event buttons (owner/admin of the show’s team). This REPLACES the whole list: send every button you want to keep, in order — read the current ones with categories_list (or shows_get) first. Pass a button’s `id` to keep and update it; omit `id` to add a new one; any existing button missing from the list is deleted (events already logged with it keep their label). Order sets the hotkeys: the first button is key 1, the ninth key 9; later ones have no hotkey. Max 40. Each button: name, color (#rrggbb), kind — "button" (one press logs an event), "dropdown" (the operator picks one of `options`, which becomes the event message; options only apply to dropdowns), "text" (the operator types a message), or "toggle" (each press flips on/off and logs value ON/OFF with `onLabel`/`offLabel`, default "ON"/"OFF", as the message). Every add, edit and removal is recorded in the change log and can be undone. Returns the saved list.',
   kind: 'write',
-  surfaces: ['web'],
+  surfaces: ['web', 'mcp'],
   async run(ctx, { showId, categories: list }) {
     await requireShow(ctx, showId, 'manage');
     const existing = await ctx.db.select().from(categories).where(eq(categories.showId, showId));
