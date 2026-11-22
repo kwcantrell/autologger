@@ -44,7 +44,7 @@ defineOp({
       parts.push(sql`select 'wiki', w.id, w.session_id, w.show_id, null, null, sh.name,
         w.title, ${hl(sql`w.body_md`)}, null::float, ts_rank(w.search, ${q}) * 1.5
         from wiki_pages w join shows sh on sh.id = w.show_id
-        where w.search @@ ${q} and ${scope(sql`w.show_id`, sql`w.session_id`)}`);
+        where w.deleted_at is null and w.search @@ ${q} and ${scope(sql`w.show_id`, sql`w.session_id`)}`);
     if (want.has('session'))
       parts.push(sql`select 'session', s.id, s.id, s.show_id, s.title, ${sessionDate}, sh.name,
         s.title, ${hl(sql`s.title || ' ' || s.notes`)}, null::float, ts_rank(s.search, ${q}) * 2
