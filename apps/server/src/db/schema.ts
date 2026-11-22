@@ -326,12 +326,15 @@ export const wikiPages = pgTable(
     updatedBy: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: created(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
+    /** Soft delete: the page and its revisions stay so the deletion can be undone. */
+    deletedAt: ts('deleted_at'),
     search: tsvector('search').generatedAlwaysAs(
       sql`to_tsvector('english', coalesce(title,'') || ' ' || coalesce(body_md,''))`,
     ),
   },
   (t) => [
-    uniqueIndex('wiki_pages_title').on(t.showId, t.titleNorm),
+    // Titles are unique among live pages only, so a deleted page's title can be reused.
+    uniqueIndex('wiki_pages_title').on(t.showId, t.titleNorm).where(sql`deleted_at is null`),
     index('wiki_pages_search').using('gin', t.search),
   ],
 );

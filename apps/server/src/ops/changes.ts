@@ -1,5 +1,7 @@
 // Change log listing and undo. Every content write records before/after snapshots; reverting
-// restores `before` (or deletes the row when it was a create) and is itself recorded.
+// restores `before` (or removes the row when it was a create) and is itself recorded.
+// Soft-deleted entities (wiki pages) are hidden and revealed via `deletedAt` instead, so their
+// history (wiki revisions) survives a delete/undo round trip.
 
 import type { Change, ChangeEntity, LiveEntity } from '@autologger/contract';
 import { and, desc, eq, getTableColumns, isNull } from 'drizzle-orm';
@@ -15,14 +17,20 @@ const { changes } = schema;
 // Loosely typed on purpose: undo works on any content table through its `id` column.
 // biome-ignore lint/suspicious/noExplicitAny: generic over several tables
 type AnyTable = PgTable & { id: any };
-const TABLES: Record<ChangeEntity, { table: AnyTable; live: LiveEntity | null }> = {
+const TABLES: Record<
+  ChangeEntity,
+  { table: AnyTable; live: LiveEntity | null; softDelete?: boolean }
+> = {
   event: { table: schema.events, live: 'event' },
   topic: { table: schema.topics, live: 'topic' },
   transcript_segment: { table: schema.transcriptSegments, live: 'transcript_segment' },
   dashboard: { table: schema.dashboards, live: 'dashboard' },
-  wiki_page: { table: schema.wikiPages, live: null },
+  wiki_page: { table: schema.wikiPages, live: null, softDelete: true },
   category: { table: schema.categories, live: null },
 };
+
+const isUniqueViolation = (e: unknown) =>
+  ((e as { cause?: { code?: string } })?.cause?.code ?? (e as { code?: string })?.code) === '23505';
 
 /** Turn a JSON snapshot back into insertable values (timestamps → Date, drop generated cols). */
 function revive(table: PgTable, snap: Record<string, unknown>): Record<string, unknown> {
@@ -112,25 +120,53 @@ defineOp({
     if (latest?.id !== c.id)
       throw conflict('This item changed again since; undo the newer change first.');
 
-    const { table, live } = TABLES[c.entity];
+    const { table, live, softDelete } = TABLES[c.entity];
     const idCol = table.id;
-    const [current] = await ctx.db.select().from(table).where(eq(idCol, c.entityId));
+    const [current] = (await ctx.db.select().from(table).where(eq(idCol, c.entityId))) as
+      | Record<string, unknown>[]
+      | [];
+    // A soft-deleted row still exists in the table but not for users.
+    const visible = Boolean(current) && !(softDelete && current?.deletedAt);
     let restored: Record<string, unknown> | undefined;
-    if (c.kind === 'create') {
-      if (current) await ctx.db.delete(table).where(eq(idCol, c.entityId));
-    } else if (c.kind === 'update') {
-      if (!current) throw conflict('That item no longer exists.');
-      [restored] = (await ctx.db
-        .update(table)
-        .set(revive(table, c.before as Record<string, unknown>))
-        .where(eq(idCol, c.entityId))
-        .returning()) as Record<string, unknown>[];
-    } else {
-      if (current) throw conflict('That item already exists again.');
-      [restored] = (await ctx.db
-        .insert(table)
-        .values(revive(table, c.before as Record<string, unknown>))
-        .returning()) as Record<string, unknown>[];
+    try {
+      if (c.kind === 'create') {
+        if (visible && softDelete) {
+          [restored] = (await ctx.db
+            .update(table)
+            .set({ deletedAt: new Date() })
+            .where(eq(idCol, c.entityId))
+            .returning()) as Record<string, unknown>[];
+        } else if (visible) {
+          await ctx.db.delete(table).where(eq(idCol, c.entityId));
+        }
+      } else if (c.kind === 'update') {
+        if (!visible) throw conflict('That item no longer exists.');
+        [restored] = (await ctx.db
+          .update(table)
+          .set(revive(table, c.before as Record<string, unknown>))
+          .where(eq(idCol, c.entityId))
+          .returning()) as Record<string, unknown>[];
+      } else if (softDelete && current) {
+        if (visible) throw conflict('That item already exists again.');
+        [restored] = (await ctx.db
+          .update(table)
+          .set({ ...revive(table, c.before as Record<string, unknown>), deletedAt: null })
+          .where(eq(idCol, c.entityId))
+          .returning()) as Record<string, unknown>[];
+      } else {
+        if (current) throw conflict('That item already exists again.');
+        [restored] = (await ctx.db
+          .insert(table)
+          .values(revive(table, c.before as Record<string, unknown>))
+          .returning()) as Record<string, unknown>[];
+      }
+    } catch (e) {
+      if (isUniqueViolation(e)) {
+        throw conflict(
+          'Something with the same name exists now; rename or remove it, then undo again.',
+        );
+      }
+      throw e;
     }
     await ctx.db.update(changes).set({ revertedAt: new Date() }).where(eq(changes.id, c.id));
     const revertId = await ctx.record({

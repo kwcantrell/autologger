@@ -1,5 +1,5 @@
 import type { WikiPage, WikiPageSummary } from '@autologger/contract';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { requireSession, requireShow } from '../core/authz.ts';
 import { badRequest, conflict, notFound } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
@@ -9,6 +9,9 @@ import { iso, userRefs } from './map.ts';
 
 const { wikiPages: pages, wikiRevisions: revisions } = schema;
 type PageRow = typeof pages.$inferSelect;
+
+/** Deleted pages are kept (with their revisions) for undo, but are invisible everywhere else. */
+const live = isNull(pages.deletedAt);
 
 export const normTitle = (t: string) => t.trim().toLowerCase().replace(/\s+/g, ' ');
 
@@ -42,6 +45,7 @@ async function fullPage(ctx: Ctx, row: PageRow): Promise<WikiPage> {
     .from(pages)
     .where(
       and(
+        live,
         eq(pages.showId, row.showId),
         sql`${pages.id} <> ${row.id}`,
         sql`${pages.bodyMd} ilike any(array[${sql.join(
@@ -55,7 +59,10 @@ async function fullPage(ctx: Ctx, row: PageRow): Promise<WikiPage> {
 }
 
 async function loadPage(ctx: Ctx, pageId: string, need: 'read' | 'write') {
-  const [row] = await ctx.db.select().from(pages).where(eq(pages.id, pageId));
+  const [row] = await ctx.db
+    .select()
+    .from(pages)
+    .where(and(eq(pages.id, pageId), live));
   if (!row) throw notFound('Wiki page');
   await requireShow(ctx, row.showId, need);
   return row;
@@ -74,7 +81,7 @@ async function addRevision(ctx: Ctx, row: PageRow) {
   });
 }
 
-/** Find an existing page by title or alias (case-insensitive) within a show. */
+/** Find a live page by title or alias (case-insensitive) within a show. */
 async function findByTitle(ctx: Ctx, showId: string, title: string): Promise<PageRow | undefined> {
   const n = normTitle(title);
   const [row] = await ctx.db
@@ -82,6 +89,7 @@ async function findByTitle(ctx: Ctx, showId: string, title: string): Promise<Pag
     .from(pages)
     .where(
       and(
+        live,
         eq(pages.showId, showId),
         sql`(${pages.titleNorm} = ${n} or exists (select 1 from jsonb_array_elements_text(${pages.aliases}) a where lower(a) = ${n}))`,
       ),
@@ -99,7 +107,7 @@ defineOp({
     const rows = await ctx.db
       .select()
       .from(pages)
-      .where(and(eq(pages.showId, showId), kind ? eq(pages.kind, kind) : undefined))
+      .where(and(live, eq(pages.showId, showId), kind ? eq(pages.kind, kind) : undefined))
       .orderBy(asc(pages.kind), asc(pages.title));
     return summaries(ctx, rows);
   },
@@ -200,11 +208,17 @@ defineOp({
 
 defineOp({
   name: 'wiki.delete',
-  description: 'Delete a wiki page.',
+  description:
+    'Delete a wiki page. It disappears from the wiki, search and links, but keeps its revision history so the deletion can be undone from the change log.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { pageId }) {
     const row = await loadPage(ctx, pageId, 'write');
+    const [after] = await ctx.db
+      .update(pages)
+      .set({ deletedAt: new Date() })
+      .where(eq(pages.id, pageId))
+      .returning();
     await ctx.record({
       entity: 'wiki_page',
       entityId: row.id,
@@ -213,8 +227,8 @@ defineOp({
       showId: row.showId,
       sessionId: row.sessionId,
       before: snapshot(row),
+      after: snapshot(after),
     });
-    await ctx.db.delete(pages).where(eq(pages.id, pageId));
     return { deleted: true };
   },
 });

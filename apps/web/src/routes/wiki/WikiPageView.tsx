@@ -142,7 +142,7 @@ function PageBody({ page }: { page: WikiPage }) {
   const onDelete = async () => {
     const ok = await confirm({
       title: 'Delete this page?',
-      message: `“${page.title}” leaves the wiki for everyone, along with its revision history. Links to it will show as missing.`,
+      message: `“${page.title}” leaves the wiki for everyone and links to it will show as missing. Its revision history is kept, so the deletion can be undone from the change log.`,
       confirmLabel: 'Delete page',
       danger: true,
     });
