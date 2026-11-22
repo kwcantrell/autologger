@@ -86,6 +86,17 @@ describe('timecode and events', () => {
     expect(b.timecodeFrames).toBe(24 * 3600 + 48);
     expect(b.source).toBe('agent');
     expect(b.categoryId).toBeNull(); // free label
+    expect(a.atSec).toBe(10);
+
+    // atSec round-trips through events.list (milliseconds; 24 fps rounds to the nearest frame).
+    const c = await call(owner, 'events.create', {
+      sessionId: session.id,
+      category: 'Note',
+      atSec: 61.5,
+    });
+    expect(c.atSec).toBe(61.5);
+    const listed = await call(owner, 'events.list', { sessionId: session.id });
+    expect(listed.map((e) => e.atSec)).toEqual([2, 10, 61.5]);
 
     await failsWith(
       call(owner, 'events.create', {
@@ -101,7 +112,7 @@ describe('timecode and events', () => {
     expect(rolling.take).toBe(1);
     const stopped = await call(owner, 'transport.stop', { sessionId: session.id });
     expect(stopped.isRolling).toBe(false);
-    expect(stopped.eventCount).toBe(2);
+    expect(stopped.eventCount).toBe(3);
   });
 
   it('imports CSV and reports bad rows', async () => {
