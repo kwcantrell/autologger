@@ -1,13 +1,19 @@
 // `/compilations`: video compilations of the active show. Agents create them over MCP and people
 // with "Make video" on a wiki page's citations or a session's topics (MakeVideoDialog), both through
 // compilations.create, from ranges of YouTube-imported sessions; the worker builds one MP4 each.
-// Here people watch, download and delete them. Updates arrive as show-socket hints (liveShow.ts).
+// Here people watch, download, retry (failed builds) and delete them. Updates arrive as show-socket hints (liveShow.ts).
 
 import type { Compilation } from '@autologger/contract';
-import { DownloadIcon, Trash2Icon } from 'lucide-react';
+import { DownloadIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react';
 import { Link } from 'wouter';
-import { useCapabilities, useCompilations, useDeleteCompilation } from '@/api/queries';
+import {
+  useCapabilities,
+  useCompilations,
+  useDeleteCompilation,
+  useRetryCompilation,
+} from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
+import { fmtEta } from '@/app/ShowJobs';
 import { useActive } from '@/app/useActive';
 import { PageFrame, RouteLoadingState } from '@/components/RouteState';
 import { fmtShort } from '@/lib/timecode';
@@ -32,6 +38,19 @@ const STATUS_LABEL: Record<Compilation['status'], string> = {
   failed: 'Failed',
 };
 
+/** "next in line · about 2 min left" from a compilation's queuePosition and etaSec, or null. */
+function fmtWait(c: Compilation): string | null {
+  const parts = [
+    c.queuePosition === undefined
+      ? null
+      : c.queuePosition === 0
+        ? 'next in line'
+        : `${c.queuePosition} job${c.queuePosition === 1 ? '' : 's'} ahead`,
+    fmtEta(c.etaSec),
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : null;
+}
+
 const clipHref = (sessionId: string, startSec: number) =>
   `/sessions/${encodeURIComponent(sessionId)}?t=${Math.round(startSec * 100) / 100}`;
 
@@ -40,13 +59,18 @@ function CompilationCard({
   canWrite,
   onDelete,
   deleting,
+  onRetry,
+  retrying,
 }: {
   c: Compilation;
   canWrite: boolean;
   onDelete: () => void;
   deleting: boolean;
+  onRetry: () => void;
+  retrying: boolean;
 }) {
   const building = c.status === 'queued' || c.status === 'running';
+  const wait = building ? fmtWait(c) : null;
   return (
     <li className="flex min-w-0 flex-col gap-3 rounded-ctl border border-si-line bg-si-panel p-4">
       <div className="flex min-w-0 items-start gap-3">
@@ -72,6 +96,7 @@ function CompilationCard({
       {building && (
         <p role="status" className="m-0 text-sm text-si-muted">
           {c.progress ?? 'Waiting for the worker'}
+          {wait && ` · ${wait}`}
         </p>
       )}
       {c.status === 'failed' && (
@@ -123,6 +148,19 @@ function CompilationCard({
             Download
           </Button>
         )}
+        {c.status === 'failed' && (
+          <Tooltip
+            content="You can watch this show's compilations but not build them again."
+            disabled={canWrite}
+          >
+            <span className="inline-flex">
+              <Button variant="outline" onClick={onRetry} disabled={!canWrite || retrying}>
+                <RefreshCwIcon data-icon="inline-start" />
+                {retrying ? 'Retrying…' : 'Retry'}
+              </Button>
+            </span>
+          </Tooltip>
+        )}
         <Tooltip
           content="You can watch this show's compilations but not delete them."
           disabled={canWrite}
@@ -142,6 +180,7 @@ function CompilationCard({
 function CompilationList({ showId, canWrite }: { showId: string; canWrite: boolean }) {
   const { data, isPending, isError, error, refetch } = useCompilations(showId);
   const del = useDeleteCompilation(showId);
+  const retry = useRetryCompilation();
   const { confirm, confirmElement } = useConfirm();
 
   const onDelete = async (c: Compilation) => {
@@ -200,6 +239,17 @@ function CompilationList({ showId, canWrite }: { showId: string; canWrite: boole
             canWrite={canWrite}
             deleting={del.isPending && del.variables?.compilationId === c.id}
             onDelete={() => void onDelete(c)}
+            retrying={retry.isPending && retry.variables?.compilationId === c.id}
+            onRetry={() =>
+              retry.mutate(
+                { compilationId: c.id },
+                {
+                  onSuccess: () => showToast(`“${c.title}” queued again.`),
+                  onError: (e) =>
+                    showToast(`Couldn't retry the compilation: ${errorMessage(e)}`, true),
+                },
+              )
+            }
           />
         ))}
       </ul>

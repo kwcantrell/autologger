@@ -571,4 +571,6 @@ export interface Capabilities {
   transcription: boolean;
   youtube: boolean;
   publicUrl: string;
+  /** Signed-out visitors at `/` see the public landing page; false sends them to /login (LANDING_PAGE=0). */
+  landingPage: boolean;
 }

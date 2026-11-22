@@ -1,13 +1,13 @@
 // Show-wide background jobs (YouTube imports, transcriptions, video compilations): the rail
 // indicator, the per-card status mark and the dialog listing every unfinished job and every
-// failure nobody has dismissed, with a retry for failed YouTube imports, transcriptions and
-// waveforms and a dismiss for each failure. Compile jobs belong to the show, not a session: they
+// failure nobody has dismissed, with a retry for failed YouTube imports, transcriptions,
+// waveforms and compilations and a dismiss for each failure. Compile jobs belong to the show, not a session: they
 // link to the Compilations page.
 
 import type { Job, Session } from '@autologger/contract';
 import { CheckIcon, Loader2Icon, RefreshCwIcon, TriangleAlertIcon } from 'lucide-react';
 import { useState } from 'react';
-import { qk, useCapabilities, useOpMutation } from '@/api/queries';
+import { qk, useCapabilities, useOpMutation, useRetryCompilation } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import type { ShowJobs } from '@/api/showJobs';
 import { showToast } from '@/shared/components/Toast';
@@ -27,7 +27,7 @@ const kindLabel = (kind: string) => KIND_LABEL[kind] ?? kind;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** "about 4 min left" from a jobs.list etaSec (a rough estimate; 0 = overdue). */
-function fmtEta(sec: number | undefined): string | null {
+export function fmtEta(sec: number | undefined): string | null {
   if (sec === undefined) return null;
   if (sec <= 0) return 'taking longer than usual';
   if (sec < 60) return 'under a minute left';
@@ -109,6 +109,7 @@ export function ShowJobsDialog({
     invalidate: () => [qk.showJobsAll],
     onSuccess: () => showToast('Transcription queued again.'),
   });
+  const recompile = useRetryCompilation();
   const transcription = useCapabilities().data?.transcription;
   const [retried, setRetried] = useState<Set<string>>(() => new Set());
   const dismiss = useOpMutation('jobs.dismiss', {
@@ -211,6 +212,8 @@ export function ShowJobsDialog({
           const rewaving = rewave.isPending && rewave.variables?.sessionId === j.sessionId;
           const transcribing =
             retranscribe.isPending && retranscribe.variables?.segmentId === j.segmentId;
+          const recompiling =
+            recompile.isPending && recompile.variables?.compilationId === j.compilationId;
           const retryAction =
             j.kind === 'transcribe' && j.segmentId && s ? (
               <Button
@@ -261,6 +264,28 @@ export function ShowJobsDialog({
               >
                 <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
                 {rewaving ? 'Retrying…' : 'Retry'}
+              </Button>
+            ) : j.kind === 'compile' && j.compilationId && j.compilationTitle ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={readOnly || recompiling || retried.has(j.id)}
+                title={readOnly ? 'Read-only access to this show.' : 'Build this compilation again'}
+                onClick={() =>
+                  recompile.mutate(
+                    { compilationId: j.compilationId as string },
+                    {
+                      onSuccess: () => {
+                        setRetried((r) => new Set(r).add(j.id));
+                        showToast('Compilation queued again.');
+                      },
+                      onError: (e) => showToast(errorMessage(e), true),
+                    },
+                  )
+                }
+              >
+                <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
+                {recompiling ? 'Retrying…' : 'Retry'}
               </Button>
             ) : j.kind === 'youtube_import' && s?.sourceUrl ? (
               <Button

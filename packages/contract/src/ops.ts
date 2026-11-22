@@ -498,6 +498,7 @@ export const opInputs = {
   }),
   'compilations.list': z.object({ showId: id }),
   'compilations.delete': z.object({ compilationId: id }),
+  'compilations.retry': z.object({ compilationId: id }),
 
   // ── search ────────────────────────────────────────────────
   search: z.object({
@@ -704,6 +705,7 @@ export interface OpOutputs {
   'compilations.get': Compilation;
   'compilations.list': Compilation[];
   'compilations.delete': { ok: true };
+  'compilations.retry': Compilation;
   search: SearchHit[];
   'changes.list': Change[];
   'changes.revert': Change;
