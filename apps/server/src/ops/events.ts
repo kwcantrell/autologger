@@ -14,12 +14,17 @@ const FREE_COLOR = '#a3a3a3';
 
 type EventRow = typeof events.$inferSelect;
 
-export async function eventEntities(ctx: Ctx, rows: EventRow[]): Promise<SessionEvent[]> {
+/** `session` supplies the clock (frameRate, startOffsetFrames) used to derive each event's atSec. */
+export async function eventEntities(
+  ctx: Ctx,
+  session: SessionRow,
+  rows: EventRow[],
+): Promise<SessionEvent[]> {
   const users = await userRefs(
     ctx.db,
     rows.map((r) => r.createdBy),
   );
-  return rows.map((r) => toEvent(r, users));
+  return rows.map((r) => toEvent(r, users, session));
 }
 
 function sourceFor(ctx: Ctx): EventRow['source'] {
@@ -115,24 +120,24 @@ async function insertEvent(
 
 async function publishEvents(
   ctx: Ctx,
-  sessionId: string,
+  session: SessionRow,
   rows: EventRow[],
 ): Promise<SessionEvent[]> {
-  const out = await eventEntities(ctx, rows);
+  const out = await eventEntities(ctx, session, rows);
   for (const e of out)
-    ctx.publish(`session:${sessionId}`, changeMessage('event', 'upsert', e.id, e));
-  await publishSession(ctx, sessionId);
+    ctx.publish(`session:${session.id}`, changeMessage('event', 'upsert', e.id, e));
+  await publishSession(ctx, session.id);
   return out;
 }
 
 defineOp({
   name: 'events.list',
   description:
-    'All events logged in a session, in timecode order. Times are frame counts on the session clock (see sessions.get for frameRate and startOffsetFrames).',
+    'All events logged in a session, in timecode order. Each event has `atSec` (seconds from the session start, rounded to ms; lines up with transcript_text @seconds and is the same value events.create/update accept as atSec) and `timecodeFrames` (frame count on the session clock, including startOffsetFrames — see sessions.get for frameRate). atSec is null only when the event has no timecode.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, categoryIds, source }) {
-    await requireSession(ctx, sessionId, 'read');
+    const { session } = await requireSession(ctx, sessionId, 'read');
     const rows = await ctx.db
       .select()
       .from(events)
@@ -144,7 +149,7 @@ defineOp({
         ),
       )
       .orderBy(asc(events.timecodeFrames), asc(events.createdAt));
-    return eventEntities(ctx, rows);
+    return eventEntities(ctx, session, rows);
   },
 });
 
@@ -157,7 +162,7 @@ defineOp({
   async run(ctx, { sessionId, ...input }) {
     const { session } = await requireSession(ctx, sessionId, 'write');
     const row = await insertEvent(ctx, session, input);
-    const [out] = await publishEvents(ctx, sessionId, [row]);
+    const [out] = await publishEvents(ctx, session, [row]);
     return out!;
   },
 });
@@ -172,7 +177,7 @@ defineOp({
     const { session } = await requireSession(ctx, sessionId, 'write');
     const rows: EventRow[] = [];
     for (const e of list) rows.push(await insertEvent(ctx, session, e));
-    return publishEvents(ctx, sessionId, rows);
+    return publishEvents(ctx, session, rows);
   },
 });
 
@@ -215,7 +220,7 @@ defineOp({
       before: snapshot(row),
       after: snapshot(after),
     });
-    const [out] = await publishEvents(ctx, session.id, [after!]);
+    const [out] = await publishEvents(ctx, session, [after!]);
     return out!;
   },
 });

@@ -1,5 +1,5 @@
 import type { DashboardQuery, DashboardRows } from '@autologger/contract';
-import { asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, lte, sql } from 'drizzle-orm';
 import { requireSession } from '../core/authz.ts';
 import { changeMessage } from '../core/bus.ts';
 import { notFound } from '../core/errors.ts';
@@ -78,7 +78,12 @@ export async function runDashboardQuery(
           summary: topics.summary,
         })
         .from(topics)
-        .where(eq(topics.sessionId, sessionId))
+        .where(
+          and(
+            eq(topics.sessionId, sessionId),
+            q.maxLevel ? lte(topics.level, q.maxLevel) : undefined,
+          ),
+        )
         .orderBy(asc(topics.startSec));
     case 'events': {
       const rows = await ctx.db
@@ -161,7 +166,7 @@ Widget types: stat {value|data+field, unit?, caption?}; bar {x, y, horizontal?};
 table {columns?: [{key,label}]}; timeline {at (seconds field), label, duration?}; markdown {markdown}.
 Data widgets take either static \`data\` rows you computed, or a live \`query\` re-evaluated on every view:
 events_by_category → {category,color,count}; events_over_time {bucketSec} → {atSec,category,count};
-speaker_talk_time → {speaker,seconds,turns}; topics → {atSec,durationSec,label,level,summary};
+speaker_talk_time → {speaker,seconds,turns}; topics {maxLevel?} → {atSec,durationSec,label,level,summary} (maxLevel 1 = chapters only, best for a timeline);
 events {categories?,limit} → {atSec,label,category,message,value,color}; summary_stats → {events,topics,speakers,words,audioSec,speechSec,wpm}
 (speechSec = last transcript segment end − first segment start, 0 without a transcript; wpm = words per minute
 over speechSec, rounded, null when speechSec is 0 — use it for speaking pace).

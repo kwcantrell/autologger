@@ -1,15 +1,16 @@
 // Row → API entity mappers. Keep the wire shapes in packages/contract/src/entities.ts.
 
-import type {
-  AudioSegment,
-  Category,
-  Dashboard,
-  DashboardSpec,
-  SessionEvent,
-  Topic,
-  TranscriptSegment,
-  UserRef,
-  Via,
+import {
+  type AudioSegment,
+  type Category,
+  type Dashboard,
+  type DashboardSpec,
+  framesToAtSec,
+  type SessionEvent,
+  type Topic,
+  type TranscriptSegment,
+  type UserRef,
+  type Via,
 } from '@autologger/contract';
 import { inArray } from 'drizzle-orm';
 import { schema, type Tx } from '../db/client.ts';
@@ -48,7 +49,11 @@ export function toCategory(r: Row<typeof schema.categories>): Category {
   };
 }
 
-export function toEvent(r: Row<typeof schema.events>, users: Map<string, UserRef>): SessionEvent {
+export function toEvent(
+  r: Row<typeof schema.events>,
+  users: Map<string, UserRef>,
+  clock: { frameRate: number; startOffsetFrames: number },
+): SessionEvent {
   return {
     id: r.id,
     sessionId: r.sessionId,
@@ -58,6 +63,7 @@ export function toEvent(r: Row<typeof schema.events>, users: Map<string, UserRef
     message: r.message,
     value: r.value,
     timecodeFrames: r.timecodeFrames,
+    atSec: r.timecodeFrames === null ? null : framesToAtSec(r.timecodeFrames, clock),
     wallTime: r.wallTime.toISOString(),
     take: r.take,
     source: r.source,
