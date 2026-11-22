@@ -1,6 +1,6 @@
 // Test harness: real Postgres, real ops, actors constructed directly.
 
-import type { OpInput, OpName, OpOutputs } from '@autologger/contract';
+import type { OpInput, OpName, OpResult } from '@autologger/contract';
 import { sql } from 'drizzle-orm';
 import { newId } from '../core/ids.ts';
 import { type Actor, executeOp, loadOps, type Surface } from '../core/op.ts';
@@ -53,12 +53,12 @@ export function asAgent(actor: Actor, clientName = 'Test Agent'): Actor {
   return { ...actor, via: 'mcp', clientName };
 }
 
-export function call<N extends OpName>(
+export function call<N extends OpName, I extends OpInput<N>>(
   actor: Actor,
   name: N,
-  input: OpInput<N>,
+  input: I,
   surface?: Surface,
-): Promise<OpOutputs[N]> {
+): Promise<OpResult<N, I>> {
   return executeOp(
     name,
     input,

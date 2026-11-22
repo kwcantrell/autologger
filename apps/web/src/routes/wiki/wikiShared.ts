@@ -57,7 +57,7 @@ export function useWikiResolver(showId: string | undefined): {
 export function useWikiUpsert() {
   return useOpMutation('wiki.upsert', {
     onSuccess: (page, _input, qc) => qc.setQueryData(qk.wikiPage(page.id), page),
-    invalidate: (page) => [qk.wikiList(page.showId), qk.wikiRevisions(page.id)],
+    invalidate: (page, input) => [qk.wikiList(input.showId), qk.wikiRevisions(page.id)],
   });
 }
 

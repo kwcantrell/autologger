@@ -24,6 +24,7 @@ import type {
   TranscriptFindId,
   TranscriptFindLine,
   TranscriptLine,
+  TranscriptReplaceCompactResult,
   TranscriptReplaceResult,
   TranscriptSegment,
   WikiLint,
@@ -190,6 +191,7 @@ export const opInputs = {
     sessionId: id,
     categoryIds: z.array(id).optional(),
     source: z.enum(['operator', 'companion', 'agent', 'import']).optional(),
+    compact,
   }),
   'events.create': z.object({ sessionId: id, ...EventFields }),
   'events.createMany': z.object({
@@ -310,6 +312,7 @@ export const opInputs = {
     fromSec: sec.optional(),
     toSec: sec.optional(),
     dryRun: z.boolean().default(false),
+    compact,
   }),
 
   // ── topics ────────────────────────────────────────────────
@@ -369,6 +372,7 @@ export const opInputs = {
     bodyMd: z.string().max(100_000),
     aliases: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
     sessionId: id.optional(),
+    compact,
   }),
   'wiki.patch': z.object({
     pageId: id,
@@ -498,6 +502,12 @@ export interface CompanionState {
 export type CompactEvent = Pick<SessionEvent, 'id' | 'atSec' | 'category'>;
 export type CompactTopic = Pick<Topic, 'id' | 'startSec' | 'level' | 'title'>;
 export type CompactDashboard = Pick<Dashboard, 'id' | 'revision'>;
+// Compact read / write results for the ops agents call most on long sessions.
+export type CompactEventLine = Pick<SessionEvent, 'id' | 'atSec' | 'category' | 'message'>;
+export type CompactWikiPage = Pick<WikiPage, 'id' | 'title' | 'kind' | 'revision'> & {
+  /** [[link]] targets in the body that match no page title or alias in the show. */
+  unresolvedLinks: string[];
+};
 
 export type DashboardRows = Record<string, string | number | boolean | null>[];
 
@@ -556,9 +566,9 @@ export interface OpOutputs {
   'transport.reset': Session;
   'events.list': SessionEvent[];
   'events.create': SessionEvent;
-  'events.createMany': SessionEvent[] | CompactEvent[];
+  'events.createMany': SessionEvent[];
   'events.update': SessionEvent;
-  'events.updateMany': SessionEvent[] | CompactEvent[];
+  'events.updateMany': SessionEvent[];
   'events.delete': { deleted: true };
   'events.importCsv': { imported: number; skipped: { line: number; reason: string }[] };
   'transcript.get': TranscriptSegment[];
@@ -577,9 +587,7 @@ export interface OpOutputs {
     | { total: number; lines: TranscriptFindLine[] }
     | { total: number; counts: number[] }
     | { total: number; lines: TranscriptFindId[] };
-  'transcript.updateSegments':
-    | { updated: number; segments: TranscriptLine[] }
-    | { updated: number; ids: string[] };
+  'transcript.updateSegments': { updated: number; segments: TranscriptLine[] };
   'transcript.renameSpeaker': { updated: number };
   'transcript.mergeSegments': TranscriptSegment;
   'transcript.splitSegment': TranscriptSegment[];
@@ -588,11 +596,11 @@ export interface OpOutputs {
   'topics.create': Topic;
   'topics.update': Topic;
   'topics.delete': { deleted: true };
-  'topics.replace': Topic[] | CompactTopic[];
+  'topics.replace': Topic[];
   'dashboards.list': Dashboard[];
   'dashboards.get': Dashboard;
-  'dashboards.save': Dashboard | CompactDashboard;
-  'dashboards.updateWidgets': Dashboard | CompactDashboard;
+  'dashboards.save': Dashboard;
+  'dashboards.updateWidgets': Dashboard;
   'dashboards.delete': { deleted: true };
   'dashboards.query': DashboardRows;
   'wiki.list': WikiList;
@@ -632,6 +640,39 @@ export interface OpOutputs {
   'admin.setStatus': AdminUser;
   'admin.setSuperadmin': AdminUser;
 }
+
+/** What ops that take `compact` return with `compact: true`, in place of their OpOutputs. */
+export interface CompactOpOutputs {
+  'events.list': CompactEventLine[];
+  'events.createMany': CompactEvent[];
+  'events.updateMany': CompactEvent[];
+  'transcript.updateSegments': { updated: number; ids: string[] };
+  'transcript.replace': TranscriptReplaceCompactResult;
+  'topics.replace': CompactTopic[];
+  'dashboards.save': CompactDashboard;
+  'dashboards.updateWidgets': CompactDashboard;
+  'wiki.upsert': CompactWikiPage;
+}
+
+/**
+ * What op N returns for input I: the compact shape when I has `compact: true`, the full one when
+ * I has no `compact` or `compact: false`, and either when that is only known at run time
+ * (`compact: boolean`, or an unknown input).
+ */
+export type OpResult<N extends OpName, I = OpInput<N>> = N extends keyof CompactOpOutputs
+  ? unknown extends I
+    ? OpOutputs[N] | CompactOpOutputs[N]
+    : I extends { compact?: infer C }
+      ? [C] extends [false | undefined]
+        ? OpOutputs[N]
+        : [C] extends [true]
+          ? CompactOpOutputs[N]
+          : OpOutputs[N] | CompactOpOutputs[N]
+      : OpOutputs[N]
+  : OpOutputs[N];
+
+/** An op input that never asks for `compact` (the web app), so its result is the full shape. */
+export type FullOpInput<N extends OpName> = OpInput<N> & { compact?: false };
 
 // Compile-time check: every op has an output type and vice versa.
 type _MissingOutputs = Exclude<OpName, keyof OpOutputs>;

@@ -3,9 +3,10 @@
 
 import type {
   DashboardQuery,
+  FullOpInput,
   OpInput,
   OpName,
-  OpOutputs,
+  OpResult,
   Via,
   WikiKind,
   WikiList,
@@ -54,14 +55,17 @@ export const qk = {
 
 type QOpts<T> = Omit<UseQueryOptions<T, RpcError, T, QueryKey>, 'queryKey' | 'queryFn'>;
 
+/** The full (never compact) result of op N, as the web app asks for it. */
+type Out<N extends OpName> = OpResult<N, FullOpInput<N>>;
+
 /** A query bound to one op. */
 export function useOpQuery<N extends OpName>(
   key: QueryKey,
   name: N,
-  input: OpInput<N>,
-  opts: QOpts<OpOutputs[N]> = {},
+  input: FullOpInput<N>,
+  opts: QOpts<Out<N>> = {},
 ) {
-  return useQuery<OpOutputs[N], RpcError, OpOutputs[N], QueryKey>({
+  return useQuery<Out<N>, RpcError, Out<N>, QueryKey>({
     queryKey: key,
     queryFn: () => rpc(name, input),
     ...opts,
@@ -72,12 +76,12 @@ export function useOpQuery<N extends OpName>(
 export function useOpMutation<N extends OpName>(
   name: N,
   opts: {
-    invalidate?: (data: OpOutputs[N], input: OpInput<N>) => QueryKey[];
-    onSuccess?: (data: OpOutputs[N], input: OpInput<N>, qc: QueryClient) => void;
+    invalidate?: (data: Out<N>, input: FullOpInput<N>) => QueryKey[];
+    onSuccess?: (data: Out<N>, input: FullOpInput<N>, qc: QueryClient) => void;
   } = {},
 ) {
   const qc = useQueryClient();
-  return useMutation<OpOutputs[N], RpcError, OpInput<N>>({
+  return useMutation<Out<N>, RpcError, FullOpInput<N>>({
     mutationFn: (input) => rpc(name, input),
     onSuccess: (data, input) => {
       opts.onSuccess?.(data, input, qc);

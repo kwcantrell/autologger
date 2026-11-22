@@ -256,7 +256,8 @@ defineOp({
 defineOp({
   name: 'wiki.upsert',
   description:
-    'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated (keeping its title), otherwise a new one is created; pass pageId to rename. bodyMd is raw Markdown text, stored exactly as sent: write real newlines and quotes, not JSON escapes like \\n or \\" inside the text. Link other pages with [[Title]] or [[Title|label]]; wiki_lint finds links to missing pages. Kind "session" pages are recaps tied to sessionId. Every save keeps a revision. To fix a few sentences of an existing page, use wiki_patch instead of resending the whole body.',
+    'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated (keeping its title), otherwise a new one is created; pass pageId to rename. bodyMd is raw Markdown text, stored exactly as sent: write real newlines and quotes, not JSON escapes like \\n or \\" inside the text. Link other pages with [[Title]] or [[Title|label]]; wiki_lint finds links to missing pages. Kind "session" pages are recaps tied to sessionId. Every save keeps a revision. To fix a few sentences of an existing page, use wiki_patch instead of resending the whole body. ' +
+    'Returns the saved page with its body and backlinks; pass `compact: true` (recommended for agents) to get only `{ id, title, kind, revision, unresolvedLinks }`, where unresolvedLinks lists the [[link]] targets in the body that match no page title or alias in the show yet (create those pages, or fix the link; wiki_lint checks the whole wiki).',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
@@ -326,6 +327,14 @@ defineOp({
       });
     }
     await addRevision(ctx, row);
+    if (input.compact)
+      return {
+        id: row.id,
+        title: row.title,
+        kind: row.kind,
+        revision: row.revision,
+        unresolvedLinks: await unresolvedTargets(ctx.db, row.showId, row.bodyMd),
+      };
     return fullPage(ctx, row);
   },
 });

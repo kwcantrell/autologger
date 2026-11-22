@@ -651,6 +651,50 @@ const MAX_REPLACE_WORK = 200_000;
 /** Total time all rules of one transcript.replace call may take in PostgreSQL. */
 const REPLACE_BUDGET_MS = 5000;
 
+/** Changes a compact transcript.replace dry run shows as samples. */
+const REPLACE_SAMPLES = 5;
+const isSpace = (ch: string | undefined) => ch !== undefined && /\s/.test(ch);
+
+/** Where the last `words` words of `cs` (and any word cut at its end) begin. */
+function wordsBack(cs: readonly string[], words: number): number {
+  let i = cs.length;
+  while (i > 0 && !isSpace(cs[i - 1])) i--;
+  for (let w = 0; w < words && i > 0; w++) {
+    while (i > 0 && isSpace(cs[i - 1])) i--;
+    while (i > 0 && !isSpace(cs[i - 1])) i--;
+  }
+  return i;
+}
+
+/**
+ * `before` and `after` cut to the span from the first to the last difference plus `words` words
+ * of context either side (`…` marks a cut); a span over `maxSpan` characters is cut in the
+ * middle. Works on code points, so a surrogate pair is never split.
+ */
+function diffExcerpt(
+  before: string,
+  after: string,
+  words = 3,
+  maxSpan = 120,
+): { before: string; after: string } {
+  const b = Array.from(before);
+  const a = Array.from(after);
+  const max = Math.min(b.length, a.length);
+  let p = 0;
+  while (p < max && b[p] === a[p]) p++;
+  let q = 0;
+  while (q < max - p && b[b.length - 1 - q] === a[a.length - 1 - q]) q++;
+  const start = wordsBack(b.slice(0, p), words);
+  const tail = b.slice(b.length - q);
+  const end = tail.length - wordsBack([...tail].reverse(), words);
+  const cut = (cs: string[]) => {
+    let mid = cs.slice(start, cs.length - q + end);
+    if (mid.length > maxSpan) mid = [...mid.slice(0, maxSpan / 2), '…', ...mid.slice(-maxSpan / 2)];
+    return `${start > 0 ? '…' : ''}${mid.join('')}${end < tail.length ? '…' : ''}`;
+  };
+  return { before: cut(b), after: cut(a) };
+}
+
 defineOp({
   name: 'transcript.replace',
   description:
@@ -659,10 +703,11 @@ defineOp({
     "Omit `rules` to apply the show's saved transcriptRules (e.g. to a session transcribed before they were set, without re-transcribing and losing manual edits). Optional fromSec/toSec (seconds from session start) limit it to segments overlapping that range. " +
     'Set `dryRun: true` first to preview: nothing is written and the result lists the would-be changes. Otherwise all changes apply in one transaction; each changed segment is its own change-log entry, undoable one by one from the Agents tab, and unchanged words keep their word timings. Segments a rule would empty are left unchanged. ' +
     'Limits (bad_request): invalid regexes or ones matching empty text; segments × rules over 200000 (narrow fromSec/toSec); a rule running over 2 s or all rules over 5 s. Segments over 20000 characters are skipped. ' +
-    'Returns `{ dryRun, changed, rules: [{ find, replace, count }], segments: [{ id, startSec, endSec, speaker, before, after }], truncated }`; `segments` lists at most 500 changes in time order (truncated is then true; narrow fromSec/toSec to see the rest).',
+    'Returns `{ dryRun, changed, rules: [{ find, replace, count }], segments: [{ id, startSec, endSec, speaker, before, after }], truncated }`; `segments` lists at most 500 changes in time order (truncated is then true; narrow fromSec/toSec to see the rest). ' +
+    `Pass \`compact: true\` (recommended for agents; full results run to tens of KB on long sessions) to get \`{ dryRun, changed, replacements, rules: [{ find, count }], samples? }\` instead: \`replacements\` is the total match count, \`rules\` lists only rules that matched, and a dry run adds \`samples\`: the first ${REPLACE_SAMPLES} changes as \`{ id, startSec, before, after }\`, each cut to the span from its first to its last changed word plus 3 words of context either side (\`…\` marks a cut). Check specific lines with transcript_find.`,
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, rules: given, fromSec, toSec, dryRun }) {
+  async run(ctx, { sessionId, rules: given, fromSec, toSec, dryRun, compact }) {
     const { session } = await requireSession(ctx, sessionId, 'write');
     let rules = given;
     if (!rules) {
@@ -712,6 +757,22 @@ defineOp({
     }
     if (!dryRun && changes.length)
       ctx.publish(`session:${sessionId}`, { type: 'invalidate', entity: 'transcript_segment' });
+    if (compact)
+      return {
+        dryRun,
+        changed: changes.length,
+        replacements: run.counts.reduce((n, c) => n + c, 0),
+        rules: rules.flatMap((r, i) =>
+          run.counts[i] ? [{ find: r.find, count: run.counts[i] }] : [],
+        ),
+        ...(dryRun && {
+          samples: changes.slice(0, REPLACE_SAMPLES).map((c) => ({
+            id: c.id,
+            startSec: c.startSec,
+            ...diffExcerpt(c.before, c.after),
+          })),
+        }),
+      };
     return {
       dryRun,
       changed: changes.length,

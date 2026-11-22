@@ -4,8 +4,8 @@
 import {
   type ChangeEntity,
   type OpName,
-  type OpOutputs,
   type OpParsed,
+  type OpResult,
   opInputs,
   type Via,
 } from '@autologger/contract';
@@ -70,7 +70,7 @@ export interface OpDef<N extends OpName, P = undefined> {
    * The result is passed to `run` as its third argument.
    */
   prepare?(actor: Actor, input: OpParsed<N>): Promise<P>;
-  run(ctx: Ctx, input: OpParsed<N>, prepared: P): Promise<OpOutputs[N]>;
+  run(ctx: Ctx, input: OpParsed<N>, prepared: P): Promise<OpResult<N, OpParsed<N>>>;
   /**
    * Optional long-poll. Called before the transaction, so it can start listening and miss
    * nothing. After commit, `wait(result)` returns a promise that resolves when the answer may
@@ -78,7 +78,7 @@ export interface OpDef<N extends OpName, P = undefined> {
    * (unless aborted); null answers at once. Waiting must not touch the database, so a waiting
    * request holds no transaction or pooled connection. `cancel` is always called at the end.
    */
-  watch?(input: OpParsed<N>, signal?: AbortSignal): OpWatch<OpOutputs[N]> | null;
+  watch?(input: OpParsed<N>, signal?: AbortSignal): OpWatch<OpResult<N, OpParsed<N>>> | null;
 }
 
 export interface OpWatch<R> {
@@ -110,13 +110,14 @@ export function snapshot<T extends Record<string, unknown>>(row: T | null | unde
   return rest;
 }
 
-export async function executeOp<N extends OpName>(
+/** Runs op `name`; the result type follows the input (see OpResult; unknown input: either). */
+export async function executeOp<N extends OpName, I = unknown>(
   name: N,
-  rawInput: unknown,
+  rawInput: I,
   actor: Actor,
   surface: Surface,
   signal?: AbortSignal,
-): Promise<OpOutputs[N]> {
+): Promise<OpResult<N, I>> {
   const op = registry.get(name) as OpDef<N, unknown> | undefined;
   if (!op?.surfaces.includes(surface)) throw new AppError('not_found', `Unknown op ${name}.`);
   if (actor.user.status === 'disabled') throw forbidden('This account is disabled.');
@@ -129,10 +130,12 @@ export async function executeOp<N extends OpName>(
   const watch = op.watch?.(input, signal);
   try {
     const result = await runInTransaction(op, input, actor, prepared);
+    // The op returned the shape its parsed input asked for, which is the one `I` names.
     const waiting = watch?.wait(result);
-    if (!waiting) return result;
+    if (!waiting) return result as OpResult<N, I>;
     await waiting;
-    return signal?.aborted ? result : await runInTransaction(op, input, actor, prepared);
+    if (signal?.aborted) return result as OpResult<N, I>;
+    return (await runInTransaction(op, input, actor, prepared)) as OpResult<N, I>;
   } finally {
     watch?.cancel();
   }
@@ -143,7 +146,7 @@ async function runInTransaction<N extends OpName>(
   input: OpParsed<N>,
   actor: Actor,
   prepared: unknown,
-): Promise<OpOutputs[N]> {
+): Promise<OpResult<N, OpParsed<N>>> {
   const name = op.name;
   const outbox: [Topic, BusMessage][] = [];
   const result = await db.transaction(async (tx) => {
