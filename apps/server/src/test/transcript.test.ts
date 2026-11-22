@@ -16,7 +16,7 @@ const words = [
 
 describe('transcript.updateSegment', () => {
   it('keeps real word timings for unchanged words, and undo restores the original', async () => {
-    const { owner, show, session } = await studio();
+    const { owner, session } = await studio();
     const segmentId = newId('seg');
     await db.insert(schema.transcriptSegments).values({
       id: segmentId,
@@ -40,7 +40,9 @@ describe('transcript.updateSegment', () => {
     });
     expect(edited.words).toEqual([words[0], words[1], { ...words[2], w: 'dr' }, ...words.slice(3)]);
 
-    const [change] = await call(owner, 'changes.list', { showId: show.id });
+    const change = (await call(owner, 'changes.list', { sessionId: session.id })).find(
+      (c) => c.entity === 'transcript_segment' && c.entityId === segmentId,
+    );
     await call(owner, 'changes.revert', { changeId: change!.id });
     const [restored] = await call(owner, 'transcript.get', { sessionId: session.id });
     expect(restored).toMatchObject({ text: 'Ask the doctor about it.', words });
