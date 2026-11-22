@@ -74,6 +74,7 @@ export async function loadSessions(
       transcriptStatus: transcriptStatus(segTotal, segDone, segFailed),
       sourceKind: s.sourceKind,
       sourceUrl: s.sourceUrl,
+      keyTerms: s.keyTerms,
       archivedAt: iso(s.archivedAt),
       createdAt: s.createdAt.toISOString(),
       createdBy: s.createdBy ? (users.get(s.createdBy) ?? null) : null,
@@ -149,7 +150,7 @@ defineOp({
 defineOp({
   name: 'sessions.create',
   description:
-    'Create a session in a show. Title defaults from the show code and date or episode number. Omit `episode` to take the show\'s next episode number; the counter is advanced atomically, so parallel calls get distinct numbers. An explicit whole-number `episode` (e.g. "19") at or above the counter moves it past that number (next default becomes 20); non-numeric episodes (e.g. "12b") leave it alone.',
+    "Create a session in a show. Title defaults from the show code and date or episode number. Omit `episode` to take the show's next episode number; the counter is advanced atomically, so parallel calls get distinct numbers. An explicit whole-number `episode` (e.g. \"19\") at or above the counter moves it past that number (next default becomes 20); non-numeric episodes (e.g. \"12b\") leave it alone. `keyTerms`: names and jargon to favour when this session's audio is transcribed (e.g. the guest's name), at most 50 terms of up to 50 characters and 1000 characters in total. They are sent before the show's key terms; if the two lists together exceed those limits, the show terms that don't fit are dropped. Prefer session terms for anything that is not said in every session: the transcriber pushes key terms into audio that doesn't contain them.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
@@ -186,6 +187,7 @@ defineOp({
       episode,
       episodeDate: date,
       notes: input.notes ?? '',
+      keyTerms: [...new Set(input.keyTerms ?? [])],
       frameRate,
       startOffsetFrames,
       createdBy: ctx.actor.user.id,
@@ -198,7 +200,7 @@ defineOp({
 defineOp({
   name: 'sessions.update',
   description:
-    'Edit session metadata. Frame rate and start timecode can only change while the transport is stopped.',
+    "Edit session metadata; only the fields you pass change. Frame rate and start timecode can only change while the transport is stopped. `keyTerms` replaces this session's transcription key terms (same limits as in sessions_create; [] clears them); they apply to transcriptions that run from now on, so re-transcribe (media_retranscribe) to use them on audio already transcribed. Metadata and key-term changes are not in the change log and cannot be undone from it.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, startTimecode, ...patch }) {
@@ -209,6 +211,7 @@ defineOp({
     if ((set.frameRate !== undefined || startTimecode) && session.isRolling) {
       throw conflict('Stop the transport before changing frame rate or start timecode.');
     }
+    if (set.keyTerms) set.keyTerms = [...new Set(set.keyTerms)];
     if (startTimecode) {
       const f = parseTimecode(startTimecode, set.frameRate ?? session.frameRate);
       if (f === null) throw badRequest('Start timecode is not valid for this frame rate.');

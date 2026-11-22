@@ -111,6 +111,8 @@ export interface Session {
   transcriptStatus: 'none' | 'pending' | 'partial' | 'done' | 'failed';
   sourceKind: MediaSource | null;
   sourceUrl: string | null;
+  /** Transcription: key terms for this session only, sent before the show's key terms. */
+  keyTerms: string[];
   archivedAt: string | null;
   createdAt: string;
   createdBy: UserRef | null;

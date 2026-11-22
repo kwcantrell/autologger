@@ -16,7 +16,14 @@ function publishJob(job: JobRow): void {
     publish(`session:${job.sessionId}`, changeMessage('job', 'upsert', job.id, toJob(job)));
 }
 
-/** Atomically take the next runnable job, or null. */
+/**
+ * Atomically take the next runnable job, or null.
+ *
+ * Claim order: run_after, then transcriptions before other kinds, then created_at, then id.
+ * A follow-up transcription is queued with run_after = its import's created_at (enqueueJob
+ * `after`), so it takes its parent's place; the kind tie-break keeps it ahead of sibling imports
+ * inserted in the same transaction (identical now() timestamps). id makes the order total.
+ */
 export async function claimJob(): Promise<JobRow | null> {
   const rows = await db.execute<{ id: string }>(sql`
     update jobs set status = 'running', locked_at = now(), updated_at = now(),
@@ -24,7 +31,7 @@ export async function claimJob(): Promise<JobRow | null> {
     where id = (
       select id from jobs
       where status = 'queued' and run_after <= now()
-      order by run_after, created_at
+      order by run_after, (kind = 'transcribe') desc, created_at, id
       limit 1
       for update skip locked
     )
