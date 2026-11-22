@@ -1,4 +1,7 @@
 import {
+  SUSPECT_LONG_SEC,
+  SUSPECT_QUESTION_WORDS,
+  SUSPECT_TURN_REASONS,
   secondsToClock,
   TRANSCRIPT_REPLACE_LIST_LIMIT,
   type TranscriptFindLine,
@@ -229,6 +232,19 @@ function findMatches(pattern: string, regex: boolean) {
   return sql`to_jsonb(${matchArray(pattern, regex)})`;
 }
 
+/** A question mark followed by SUSPECT_QUESTION_WORDS more words in the same turn. */
+const QUESTION_THEN_MORE = `\\?(\\s+\\S+){${SUSPECT_QUESTION_WORDS}}`;
+/** The question sentences of such a turn (the split point is right after one of them). */
+const QUESTION_SENTENCE = `[^.?!]*\\?(?=(\\s+\\S+){${SUSPECT_QUESTION_WORDS}})`;
+
+/** transcript.find `suspect: true`: one condition per SUSPECT_TURN_REASONS entry, in order. */
+function suspectConditions() {
+  return [
+    sql`(${ts.text} ~ ${QUESTION_THEN_MORE})`,
+    sql`(${ts.endSec} - ${ts.startSec} > ${SUSPECT_LONG_SEC})`,
+  ];
+}
+
 /** Segments within `context` positions (session time order) of the given ones, excluding them. */
 async function findContext(ctx: Ctx, sessionId: string, ids: string[], context: number) {
   if (context === 0 || ids.length === 0) return [];
@@ -251,20 +267,23 @@ async function findContext(ctx: Ctx, sessionId: string, ids: string[], context: 
 defineOp({
   name: 'transcript.find',
   description:
-    'Find transcript segments (speaker turns) in one session whose text matches `pattern`, or any of `patterns` (up to 20, OR-ed; pass exactly one of the two), case-insensitive. By default patterns are plain text (substring match); set `regex: true` to use PostgreSQL regular expressions (POSIX style, e.g. `\\mdoctor\\M` for whole words, `x ?2`). Beware: `\\m`/`\\M` treat apostrophes as word boundaries, so `\\mm\\M` also matches "I\'m". Optional fromSec/toSec (seconds from session start) narrow the search to segments that START in [fromSec, toSec), the same rule as transcript.text, so consecutive windows never return a line twice. Regex searches time out after 2 seconds (bad_request). ' +
+    'Find transcript segments (speaker turns) in one session whose text matches `pattern`, or any of `patterns` (up to 20, OR-ed; pass exactly one of the two, or `suspect: true` below), case-insensitive. By default patterns are plain text (substring match); set `regex: true` to use PostgreSQL regular expressions (POSIX style, e.g. `\\mdoctor\\M` for whole words, `x ?2`). Beware: `\\m`/`\\M` treat apostrophes as word boundaries, so `\\mm\\M` also matches "I\'m". Optional fromSec/toSec (seconds from session start) narrow the search to segments that START in [fromSec, toSec), the same rule as transcript.text, so consecutive windows never return a line twice. Regex searches time out after 2 seconds (bad_request). ' +
     'Returns `{ total, lines }`: `total` is the number of matching lines in the range before `limit` is applied; `lines` holds `{ id, startSec, endSec, speaker, text, edited, matches, patternIndexes }` per matching line in time order, without word timings: `matches` lists the distinct matched substrings as written in the text, `patternIndexes` the 0-based indexes into `patterns` that matched (always `[0]` with `pattern`). At most `limit` matching lines (default 500); if total > lines returned, page with fromSec = the startSec of the last line returned (that line comes back again). ' +
     'Optional `context` (0-3, default 0) also returns up to that many neighbouring lines before and after each match (from the whole session, ignoring fromSec/toSec), flagged `context: true` and without matches or patternIndexes; use it when an error may span two segments. Pass the ids to transcript.updateSegments to fix them. ' +
-    'Cheaper modes (context is ignored): `countOnly: true` returns only `{ total, counts }`, where counts[i] is the number of lines matching patterns[i] (use it to size a pattern before fetching lines); `idsOnly: true` returns `{ total, lines }` with only `{ id, startSec, speaker }` per line, up to `limit` (use it to collect ids to edit, e.g. regex `.` over a time range to relabel every line in it).',
+    'Cheaper modes (context is ignored): `countOnly: true` returns only `{ total, counts }`, where counts[i] is the number of lines matching patterns[i] (use it to size a pattern before fetching lines); `idsOnly: true` returns `{ total, lines }` with only `{ id, startSec, speaker }` per line, up to `limit` (use it to collect ids to edit, e.g. regex `.` over a time range to relabel every line in it). ' +
+    `\`suspect: true\` (instead of pattern/patterns; not with regex) lists turns that may hold two speakers, for checking speaker labels after diarization: each line has \`reasons\` — "question" (a question followed by ${SUSPECT_QUESTION_WORDS}+ more words in the same turn, often the interviewer's question and the guest's answer under one label; \`matches\` holds those question sentences) and/or "long" (longer than ${SUSPECT_LONG_SEC} s). Heuristic: many hits are one speaker asking a rhetorical question, so read each and fix real ones with transcript.splitSegment (atText = first words after the question, speaker = the other speaker); countOnly gives counts [question, long]. Combine with fromSec/toSec, limit and context as above.`,
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
-    const { sessionId, regex, fromSec, toSec, limit, context, countOnly, idsOnly } = input;
-    const patterns = input.patterns ?? [input.pattern ?? ''];
+    const { sessionId, regex, fromSec, toSec, limit, context, countOnly, idsOnly, suspect } = input;
+    const patterns = suspect ? [] : (input.patterns ?? [input.pattern ?? '']);
     await requireSession(ctx, sessionId, 'read');
     try {
       // Bound regex cost: this op's transaction is read-only, so a local timeout is safe.
-      if (regex) await ctx.db.execute(sql`set local statement_timeout = '2s'`);
-      const conditions = patterns.map((p) => findCondition(p, regex));
+      if (regex || suspect) await ctx.db.execute(sql`set local statement_timeout = '2s'`);
+      const conditions = suspect
+        ? suspectConditions()
+        : patterns.map((p) => findCondition(p, regex));
       const where = and(startWhere(sessionId, fromSec, toSec), or(...conditions));
       const countAll = async () => {
         const [c] = await ctx.db
@@ -294,19 +313,32 @@ defineOp({
         .select({
           row: ts,
           hits: sql<string[][]>`jsonb_build_array(${sql.join(
-            patterns.map((p) => findMatches(p, regex)),
+            suspect
+              ? [findMatches(QUESTION_SENTENCE, true)]
+              : patterns.map((p) => findMatches(p, regex)),
             sql`, `,
           )})`,
+          flags: suspect
+            ? sql<boolean[]>`jsonb_build_array(${sql.join(conditions, sql`, `)})`
+            : sql<null>`null`,
         })
         .from(ts)
         .where(where)
         .orderBy(asc(ts.startSec), asc(ts.id))
         .limit(limit);
-      const lines: TranscriptFindLine[] = rows.map(({ row, hits }) => ({
-        ...toTranscriptLine(row),
-        matches: [...new Set(hits.flat())],
-        patternIndexes: hits.flatMap((h, i) => (h.length > 0 ? [i] : [])),
-      }));
+      const lines: TranscriptFindLine[] = rows.map(({ row, hits, flags }) =>
+        suspect
+          ? {
+              ...toTranscriptLine(row),
+              matches: [...new Set(hits.flat().map((m) => m.trim()))],
+              reasons: SUSPECT_TURN_REASONS.filter((_, i) => flags?.[i]),
+            }
+          : {
+              ...toTranscriptLine(row),
+              matches: [...new Set(hits.flat())],
+              patternIndexes: hits.flatMap((h, i) => (h.length > 0 ? [i] : [])),
+            },
+      );
       const total = rows.length < limit ? rows.length : (await countAll()).total;
       const around = await findContext(
         ctx,

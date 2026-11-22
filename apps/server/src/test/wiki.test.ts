@@ -497,6 +497,11 @@ describe('question pages and citations', () => {
     expect(page.kind).toBe('question');
 
     const lint = await call(owner, 'wiki.lint', { showId: show.id });
+    // The save reports the same bad citations wiki.lint finds, for that page only.
+    expect(page).toMatchObject({
+      citationCount: 6,
+      badCitations: lint.badCitations[0]!.citations,
+    });
     expect(lint.badCitations).toEqual([
       {
         pageId: page.id,
@@ -531,6 +536,87 @@ describe('question pages and citations', () => {
     const [created] = await call(owner, 'changes.list', { showId: show.id, via: 'mcp' });
     await call(owner, 'changes.revert', { changeId: created!.id });
     expect((await call(owner, 'wiki.lint', { showId: show.id })).counts.citations).toBe(0);
+  });
+
+  it('clamps a citation end slightly past the audio on save and keeps larger overshoots', async () => {
+    const { owner, show, session } = await studio();
+    await db.insert(schema.audioSegments).values({
+      id: 'aud_clamp',
+      sessionId: session.id,
+      ordinal: 0,
+      startSec: 0,
+      durationSec: 6184.832,
+      mimeType: 'audio/mpeg',
+      origin: 'file',
+      objectKey: 'test/aud_clamp',
+      status: 'ready',
+    });
+    const cite = (q: string) => `[x](/sessions/${session.id}?${q})`;
+    const agent = asAgent(owner);
+    const page = await call(agent, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'session',
+      sessionId: session.id,
+      title: 'Ep 3 recap',
+      bodyMd: `${cite('t=6100&to=6185')} ${cite('t=6100&to=6200')} ${cite('t=6100&to=6184.5')}`,
+    });
+    const saved = `${cite('t=6100&to=6184.8')} ${cite('t=6100&to=6200')} ${cite('t=6100&to=6184.5')}`;
+    expect(page.bodyMd).toBe(saved);
+    const lint = await call(owner, 'wiki.lint', { showId: show.id });
+    expect(lint.badCitations[0]!.citations).toEqual([
+      { sessionId: session.id, startSec: 6100, endSec: 6200, label: 'x', problem: 'past_end' },
+    ]);
+
+    await call(agent, 'wiki.patch', { pageId: page.id, append: cite('t=10&to=6189') });
+    const patched = await call(owner, 'wiki.get', { pageId: page.id });
+    expect(patched.bodyMd).toBe(`${saved}\n${cite('t=10&to=6184.8')}`);
+    const [latest] = await call(owner, 'changes.list', { showId: show.id, via: 'mcp' });
+    await call(owner, 'changes.revert', { changeId: latest!.id });
+    expect((await call(owner, 'wiki.get', { pageId: page.id })).bodyMd).toBe(saved);
+    await failsWith(
+      call(await makeUser('stranger@example.com'), 'wiki.patch', { pageId: page.id, append: 'x' }),
+      'not_found',
+    );
+  });
+
+  it('reports citation count and timecode labels that do not match the range on save', async () => {
+    const { owner, show, session } = await studio();
+    const cite = (label: string, q: string) => `[${label}](/sessions/${session.id}?${q})`;
+    const page = await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'session',
+      sessionId: session.id,
+      title: 'Ep 13 recap',
+      bodyMd: [
+        cite('01:01:01', 't=3661.5&to=3700'),
+        cite('1:01:01–1:01:40 the dog', 't=3661&to=3700.9'),
+        cite('61:01', 't=3661'),
+        cite('Tom on pricing at 00:01:01', 't=3661'),
+        cite('00:01:01', 't=3661.5&to=3700'),
+        cite('\\[01:01:01–01:02:00\\]', 't=3661&to=3700'),
+      ].join('\n'),
+    });
+    const wrong = [
+      { sessionId: session.id, startSec: 3661.5, endSec: 3700, label: '00:01:01' },
+      { sessionId: session.id, startSec: 3661, endSec: 3700, label: '[01:01:01–01:02:00]' },
+    ].map((c) => ({ ...c, problem: 'label_mismatch' }));
+    expect(page).toMatchObject({ citationCount: 6, badCitations: wrong, backlinkCount: 0 });
+    expect((await call(owner, 'wiki.lint', { showId: show.id })).badCitations).toEqual([
+      expect.objectContaining({ pageId: page.id, citations: wrong }),
+    ]);
+
+    const fixed = await call(asAgent(owner), 'wiki.patch', {
+      pageId: page.id,
+      edits: [
+        { find: '[00:01:01]', replace: '[01:01:01]' },
+        { find: '01:02:00\\]', replace: '01:01:40\\]' },
+      ],
+    });
+    expect(fixed).toMatchObject({ revision: 2, citationCount: 6, badCitations: [] });
+    await failsWith(
+      call(await makeUser('stranger@example.com'), 'wiki.patch', { pageId: page.id, append: 'x' }),
+      'not_found',
+    );
   });
 
   it('lists the pages citing a session, kept in step with every write, undo and the backfill', async () => {
@@ -591,6 +677,19 @@ describe('question pages and citations', () => {
       ],
       ['Recap', [{ startSec: 42, endSec: 50, label: 'x' }]],
     ]);
+
+    // countOnly: per-page counts and the total over every matching page, without the ranges.
+    const counted = await call(owner, 'wiki.list', {
+      showId: show.id,
+      citesSession: session.id,
+      countOnly: true,
+      limit: 1,
+    });
+    expect(counted.pages.map((p) => [p.title, p.citationCount, p.citations])).toEqual([
+      ['Q', 2, undefined],
+    ]);
+    expect([counted.total, counted.citationTotal]).toEqual([2, 3]);
+    await failsWith(call(owner, 'wiki.list', { showId: show.id, countOnly: true }), 'bad_request');
 
     // Pages saved before the index: the backfill rebuilds it, and a rerun is a no-op.
     await db.delete(schema.wikiCitations);
