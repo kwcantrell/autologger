@@ -1,9 +1,10 @@
 // YouTube import via yt-dlp. Downloads the best audio-only stream as-is (no ffmpeg re-encode).
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { chmod, copyFile, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { env } from '../env.ts';
 import { PermanentError } from './deepgram.ts';
 
 const YT_HOSTS = new Set([
@@ -73,7 +74,91 @@ export interface Download {
   cleanup(): Promise<void>;
 }
 
-function run(
+/**
+ * Thrown when YouTube refuses the download until someone signs in: its bot check ("Sign in to
+ * confirm you're not a bot", usually for a datacenter IP) or a private, members-only or
+ * age-restricted video. Retrying won't help, so it is permanent.
+ */
+export class YoutubeAuthError extends PermanentError {
+  readonly reason: 'bot_check' | 'restricted';
+  constructor(reason: 'bot_check' | 'restricted', message: string) {
+    super(message);
+    this.reason = reason;
+  }
+}
+
+// Age-restricted errors also suggest --cookies, so they are checked first.
+const RESTRICTED =
+  /private video|video is private|members[- ]only|join this channel|confirm your age|age[- ]restricted|inappropriate for some users/i;
+const BOT_CHECK =
+  /confirm you(?:'|\u2019)?re not a bot|--cookies-from-browser|use --cookies|cookies for the authentication/i;
+
+/** The sign-in error in yt-dlp's stderr, as a YoutubeAuthError, or null for any other failure. */
+export function youtubeAuthError(
+  stderr: string,
+  cookiesConfigured: boolean,
+): YoutubeAuthError | null {
+  const line =
+    stderr
+      .split('\n')
+      .filter((l) => RESTRICTED.test(l) || BOT_CHECK.test(l))
+      .at(0)
+      ?.trim()
+      .slice(0, 200) ?? '';
+  if (!line) return null;
+  const detail = ` (yt-dlp: ${line})`;
+  if (RESTRICTED.test(stderr))
+    return new YoutubeAuthError(
+      'restricted',
+      cookiesConfigured
+        ? `YouTube requires a signed-in account for this video (private, members-only or age-restricted), and the account in YTDLP_COOKIES_FILE cannot watch it (or its cookies have expired).${detail}`
+        : `YouTube requires a signed-in account for this video (private, members-only or age-restricted). Configure YTDLP_COOKIES_FILE with an account that can watch it on the server and worker; see docs/media.md.${detail}`,
+    );
+  return new YoutubeAuthError(
+    'bot_check',
+    cookiesConfigured
+      ? `YouTube is blocking this server's downloads (bot check) even with the cookies in YTDLP_COOKIES_FILE: they have probably expired or been signed out. Export fresh cookies (and/or set YTDLP_PROXY) on the server and worker; see docs/media.md.${detail}`
+      : `YouTube is blocking this server's downloads (bot check). Configure YTDLP_COOKIES_FILE (and/or YTDLP_PROXY) on the server and worker; see docs/media.md.${detail}`,
+  );
+}
+
+/**
+ * Run yt-dlp with the operator's YouTube access settings (YTDLP_COOKIES_FILE, YTDLP_PROXY,
+ * YTDLP_EXTRA_ARGS) in front of `args`. Every yt-dlp call goes through here.
+ */
+async function run(
+  cmd: string,
+  args: string[],
+  timeoutMs?: number,
+): Promise<{ stdout: string; stderr: string }> {
+  const pre: string[] = [];
+  let cookieDir: string | null = null;
+  if (env.ytDlpCookiesFile) {
+    // yt-dlp saves cookies back on exit: give each run a private copy, so a read-only mount
+    // works and concurrent runs never write the same file.
+    cookieDir = await mkdtemp(join(tmpdir(), 'autologger-ytc-'));
+    const copy = join(cookieDir, 'cookies.txt');
+    try {
+      await copyFile(env.ytDlpCookiesFile, copy);
+      await chmod(copy, 0o600);
+    } catch (e) {
+      await rm(cookieDir, { recursive: true, force: true });
+      throw new PermanentError(
+        `Cannot read YTDLP_COOKIES_FILE (${env.ytDlpCookiesFile}): ${(e as NodeJS.ErrnoException).code ?? (e as Error).message}.`,
+      );
+    }
+    pre.push('--cookies', copy);
+  }
+  if (env.ytDlpProxy) pre.push('--proxy', env.ytDlpProxy);
+  pre.push(...env.ytDlpExtraArgs);
+  try {
+    return await spawnYtDlp(cmd, [...pre, ...args], timeoutMs);
+  } finally {
+    if (cookieDir) await rm(cookieDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+function spawnYtDlp(
   cmd: string,
   args: string[],
   timeoutMs?: number,
@@ -98,6 +183,8 @@ function run(
       else if (signal && timeoutMs)
         reject(new Error(`yt-dlp did not finish within ${Math.round(timeoutMs / 1000)} seconds.`));
       else {
+        const auth = youtubeAuthError(stderr, Boolean(env.ytDlpCookiesFile));
+        if (auth) return reject(auth);
         const last =
           stderr
             .trim()
@@ -114,13 +201,16 @@ function run(
   });
 }
 
+/** yt-dlp format for audio imports: the best audio-only stream, as-is. */
+const AUDIO_FORMAT = 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio';
+
 export async function downloadAudio(ytDlpPath: string, url: string): Promise<Download> {
   const dir = await mkdtemp(join(tmpdir(), 'autologger-yt-'));
   const cleanup = () => rm(dir, { recursive: true, force: true });
   try {
     const { stdout } = await run(ytDlpPath, [
       '-f',
-      'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
+      AUDIO_FORMAT,
       '--no-playlist',
       '--no-progress',
       '--no-simulate',
@@ -163,7 +253,9 @@ function isoDate(d: unknown): string | null {
 
 /**
  * One video's length in seconds from its metadata, without downloading anything; null when
- * yt-dlp does not report one. Throws when yt-dlp fails or exceeds `timeoutMs`.
+ * yt-dlp does not report one. Resolves the same audio format as downloadAudio, so it doubles as
+ * a cheap probe: a YoutubeAuthError here means the download would hit it too. Throws when yt-dlp
+ * fails or exceeds `timeoutMs`.
  */
 export async function videoDuration(
   ytDlpPath: string,
@@ -174,6 +266,8 @@ export async function videoDuration(
     ytDlpPath,
     [
       '--ignore-config',
+      '-f',
+      AUDIO_FORMAT,
       '--no-playlist',
       '--skip-download',
       '--dump-json',

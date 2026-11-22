@@ -19,12 +19,18 @@ x-app-env: &app-env
   S3_SECRET_ACCESS_KEY: ${S3_PASSWORD:?set S3_PASSWORD}
   S3_FORCE_PATH_STYLE: "1"
   DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+  # YouTube bot check (docs/media.md): mount the cookies file into app and worker (below).
+  YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
+  YTDLP_PROXY: ${YTDLP_PROXY:-}
+  YTDLP_EXTRA_ARGS: ${YTDLP_EXTRA_ARGS:-}
 
 services:
   app:
     build: .
     restart: unless-stopped
     environment: *app-env
+    # With YTDLP_COOKIES_FILE=/run/secrets/youtube-cookies.txt in .env:
+    # volumes: ["./secrets/youtube-cookies.txt:/run/secrets/youtube-cookies.txt:ro"]
     depends_on:
       postgres: { condition: service_healthy }
       s3: { condition: service_started }
@@ -43,6 +49,7 @@ services:
     restart: unless-stopped
     command: ["node", "src/worker/main.ts"]
     environment: *app-env
+    # volumes: ["./secrets/youtube-cookies.txt:/run/secrets/youtube-cookies.txt:ro"]
     depends_on:
       app: { condition: service_healthy }
 

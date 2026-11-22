@@ -156,7 +156,7 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => void shu
 await waitForMigrations();
 console.log(
   `autologger worker starting (concurrency ${CONCURRENCY}, per kind ${JSON.stringify(KIND_CONCURRENCY)}; storage ${storageConfigured ? 'on' : 'off'}, ` +
-    `transcription ${transcriptionConfigured ? 'on' : 'off'}, youtube ${env.youtubeEnabled ? `on via ${env.ytDlpPath}` : 'off'}, ` +
+    `transcription ${transcriptionConfigured ? 'on' : 'off'}, youtube ${env.youtubeEnabled ? `on via ${env.ytDlpPath}${env.ytDlpCookiesFile ? ' with cookies' : ''}${env.ytDlpProxy ? ' via proxy' : ''}` : 'off'}, ` +
     `waveforms ${hasFfmpeg ? `on via ${env.ffmpegPath}` : `off: ffmpeg not found (FFMPEG_PATH=${env.ffmpegPath}), this worker does not claim waveform or compile jobs`}, ` +
     `media sweep ${storageConfigured && env.mediaSweep.intervalMin > 0 ? `every ${env.mediaSweep.intervalMin} min${env.mediaSweep.dryRun ? ' (dry run)' : ''}` : 'off'})`,
 );

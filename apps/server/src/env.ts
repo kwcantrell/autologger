@@ -64,6 +64,16 @@ export const env = {
   },
   deepgramApiKey: str('DEEPGRAM_API_KEY'),
   ytDlpPath: str('YTDLP_PATH', 'yt-dlp')!,
+  /**
+   * Netscape cookies.txt from a signed-in YouTube session, for when YouTube asks the server to
+   * "sign in to confirm you're not a bot". Each yt-dlp run gets its own copy (`--cookies`):
+   * yt-dlp writes cookies back on exit and the file may be mounted read-only.
+   */
+  ytDlpCookiesFile: str('YTDLP_COOKIES_FILE'),
+  /** Proxy URL for every yt-dlp run (`--proxy`), e.g. for a datacenter IP YouTube blocks. */
+  ytDlpProxy: str('YTDLP_PROXY'),
+  /** Extra yt-dlp arguments for every run, split on whitespace (no shell, no quoting). */
+  ytDlpExtraArgs: (str('YTDLP_EXTRA_ARGS') ?? '').split(/\s+/).filter(Boolean),
   youtubeEnabled: str('YOUTUBE_IMPORT', '1') === '1',
   /** ffmpeg for waveform peaks (worker). Missing → waveform jobs are skipped with a note. */
   ffmpegPath: str('FFMPEG_PATH', 'ffmpeg')!,

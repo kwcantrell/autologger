@@ -15,7 +15,10 @@ the **worker** (`apps/server/src/worker/main.ts`), a second entrypoint of the se
 | `S3_FORCE_PATH_STYLE`                                   | app, worker | `1` (default) for SeaweedFS/MinIO-style servers; `0` for virtual-hosted AWS buckets.                                                              |
 | `DEEPGRAM_API_KEY`                                      | app, worker | Enables transcription (`nova-3`, diarized). Without it uploads still work but are not transcribed and `media.retranscribe` answers `unavailable`. |
 | `YOUTUBE_IMPORT`                                        | app         | `1` (default) enables `media.importYoutube`.                                                                                                      |
-| `YTDLP_PATH`                                            | worker      | yt-dlp binary (default `yt-dlp` on `PATH`). Best audio is downloaded as-is, ffmpeg is not required.                                               |
+| `YTDLP_PATH`                                            | app, worker | yt-dlp binary (default `yt-dlp` on `PATH`). Best audio is downloaded as-is, ffmpeg is not required. The app runs it too, to read playlists and probe a video before importing. |
+| `YTDLP_COOKIES_FILE`                                    | app, worker | Netscape `cookies.txt` of a signed-in YouTube session, for servers YouTube bot-checks. Copied per run (may be read-only and shared). See _YouTube bot check_. |
+| `YTDLP_PROXY`                                           | app, worker | Proxy for every yt-dlp run (`--proxy`, e.g. `socks5://user:pass@host:1080`), for an IP YouTube blocks. |
+| `YTDLP_EXTRA_ARGS`                                      | app, worker | Extra yt-dlp arguments for every run, split on whitespace (no shell, no quoting), e.g. `--extractor-args youtubepot-bgutilhttp:base_url=http://pot:4416`. |
 | `WORKER_CONCURRENCY`                                    | worker, api | Jobs run in parallel per worker process (default 2). The API uses it for etaSec only while no worker heartbeat row is live.                       |
 | `WORKER_CONCURRENCY_TRANSCRIBE`                         | worker      | Of those slots, how many `transcribe` jobs may hold at once (1 to `WORKER_CONCURRENCY`, which is the default).                                    |
 | `WORKER_CONCURRENCY_YOUTUBE_IMPORT`                     | worker      | Same for `youtube_import` jobs. Set it below `WORKER_CONCURRENCY` so slow downloads always leave a slot for transcriptions.                       |
@@ -29,6 +32,40 @@ the **worker** (`apps/server/src/worker/main.ts`), a second entrypoint of the se
 | `MEDIA_SWEEP_DRY_RUN`                                   | worker      | `1` logs what the sweep would remove and deletes nothing.                                                                                         |
 
 The bucket is created on first use (worker start, or the first upload) if the credentials allow it.
+
+### YouTube bot check
+
+YouTube often answers downloads from datacenter IPs with "Sign in to confirm you're not a bot"
+(listing a playlist usually still works). yt-dlp then needs cookies from a signed-in session
+and/or a proxy:
+
+1. Sign in to YouTube in a browser with a **dedicated throwaway Google account** (the cookies
+   grant full access to it, and YouTube may flag it), ideally in a private window you then close
+   without signing out.
+2. Export the cookies in Netscape format, e.g. with the "Get cookies.txt LOCALLY" browser
+   extension on youtube.com, or `yt-dlp --cookies-from-browser chrome --cookies cookies.txt
+   --skip-download https://www.youtube.com/watch?v=jNQXAC9IVRw`.
+3. Put the file on the server and mount it read-only into **both** the `app` and `worker`
+   containers (the app lists playlists and probes the first video before creating sessions), e.g.
+   `./secrets/youtube-cookies.txt:/run/secrets/youtube-cookies.txt:ro`, and set
+   `YTDLP_COOKIES_FILE=/run/secrets/youtube-cookies.txt` (see the commented lines in
+   `compose.yaml`). Restart both.
+
+yt-dlp rewrites its cookie file on exit, so every run gets its own private copy of the file in a
+temp dir (deleted afterwards); the mounted file is never changed and concurrent jobs don't race.
+Cookies expire or get signed out (often within weeks): when jobs start failing with "…even with
+the cookies in YTDLP_COOKIES_FILE: they have probably expired", export fresh ones. `YTDLP_PROXY`
+(a residential proxy) and `YTDLP_EXTRA_ARGS` (e.g. a PO-token provider plugin's
+`--extractor-args`) are alternatives or additions.
+
+A bot check (or a private, members-only or age-restricted video) is a permanent error: the
+`youtube_import` or `compile` job fails at once with "YouTube is blocking this server's downloads
+(bot check) …" or "YouTube requires a signed-in account …" instead of retrying.
+`media.importYoutube` and `media.importPlaylist` (not on `dryRun`) first run a metadata-only
+probe of the (first) video with the download's format selection (`--skip-download`, 15 s timeout,
+at most 4 at once per app process) and fail with `bad_request`, creating no sessions or jobs,
+when it hits that error. Any other probe outcome (yt-dlp missing on the app host, timeout, busy)
+lets the import go ahead, so an app host without yt-dlp never blocks imports.
 
 ### Local S3 for development
 
