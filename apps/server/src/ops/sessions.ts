@@ -102,6 +102,19 @@ function defaultTitle(show: typeof shows.$inferSelect, episode: string, date: st
   return `${show.code} ${date}`;
 }
 
+/**
+ * Atomically take `count` consecutive episode numbers from the show counter; returns the first.
+ * Safe against concurrent session creation (one UPDATE … RETURNING).
+ */
+export async function reserveEpisodes(ctx: Ctx, showId: string, count: number): Promise<number> {
+  const [row] = await ctx.db
+    .update(shows)
+    .set({ nextEpisode: sql`${shows.nextEpisode} + ${count}` })
+    .where(eq(shows.id, showId))
+    .returning({ next: shows.nextEpisode });
+  return row!.next - count;
+}
+
 defineOp({
   name: 'sessions.list',
   description:

@@ -387,6 +387,13 @@ export const opInputs = {
   'media.completeUpload': z.object({ segmentId: id, durationSec: sec.optional() }),
   'media.playbackUrl': z.object({ segmentId: id }),
   'media.importYoutube': z.object({ sessionId: id, url: z.url() }),
+  'media.importPlaylist': z.object({
+    showId: id,
+    url: z.url().max(2048),
+    order: z.enum(['playlist', 'reverse']).default('playlist'),
+    titleTemplate: z.string().trim().min(1).max(200).optional(),
+    dryRun: z.boolean().default(false),
+  }),
   'media.retranscribe': z.object({ sessionId: id, segmentId: id.optional() }),
   'media.delete': z.object({ segmentId: id }),
   'jobs.list': z
@@ -474,6 +481,28 @@ export type CompactTopic = Pick<Topic, 'id' | 'startSec' | 'level' | 'title'>;
 export type CompactDashboard = Pick<Dashboard, 'id' | 'revision'>;
 
 export type DashboardRows = Record<string, string | number | boolean | null>[];
+
+export interface PlaylistImport {
+  playlistTitle: string | null;
+  /** True when nothing was written (dryRun): sessionId and jobId are then null. */
+  dryRun: boolean;
+  /** One new session per video, in episode order, each with its queued youtube_import job. */
+  created: {
+    sessionId: string | null;
+    title: string;
+    episode: string;
+    videoId: string;
+    durationSec: number | null;
+    jobId: string | null;
+  }[];
+  /** Videos not imported: already in the show (sessionId set) or private/deleted. */
+  skipped: {
+    videoId: string;
+    title: string;
+    reason: 'already_imported' | 'unavailable';
+    sessionId: string | null;
+  }[];
+}
 
 export interface OpOutputs {
   'me.get': Me;
@@ -564,6 +593,7 @@ export interface OpOutputs {
   'media.completeUpload': AudioSegment;
   'media.playbackUrl': { url: string; expiresAt: string };
   'media.importYoutube': Job;
+  'media.importPlaylist': PlaylistImport;
   'media.retranscribe': Job[];
   'media.delete': { deleted: true };
   'jobs.list': Job[];
