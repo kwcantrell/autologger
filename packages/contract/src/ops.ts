@@ -431,10 +431,12 @@ export const opInputs = {
         .optional(),
       limit: z.number().int().min(1).max(500).default(100),
       waitSec: z.number().int().min(1).max(55).optional(),
+      hideDismissed: z.boolean().default(false),
     })
     .refine((v) => (v.sessionId === undefined) !== (v.showId === undefined), {
       message: 'Pass exactly one of sessionId or showId.',
     }),
+  'jobs.dismiss': z.object({ jobId: id }),
 
   // ── search ────────────────────────────────────────────────
   search: z.object({
@@ -634,6 +636,7 @@ export interface OpOutputs {
   'media.retranscribe': Job[];
   'media.delete': { deleted: true };
   'jobs.list': Job[];
+  'jobs.dismiss': Job;
   search: SearchHit[];
   'changes.list': Change[];
   'changes.revert': Change;

@@ -399,6 +399,8 @@ export interface Job {
   progress: string | null;
   /** When the current (or last) attempt started; null while queued. */
   startedAt: string | null;
+  /** Failed jobs: when the failure was acknowledged with jobs.dismiss; null otherwise. */
+  dismissedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

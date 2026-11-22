@@ -467,3 +467,55 @@ describe('job timing', () => {
     expect(await eta()).toBe(30);
   });
 });
+
+describe('jobs.dismiss', () => {
+  it('acknowledges a failure, which hideDismissed then leaves out; read access cannot', async () => {
+    const { owner, team, show, session } = await studio();
+    const job = () =>
+      enqueueJob(db, {
+        kind: 'youtube_import',
+        sessionId: session.id,
+        actorId: owner.user.id,
+        payload: { url: 'https://youtu.be/x' },
+      });
+    const failed = await job();
+    await db
+      .update(schema.jobs)
+      .set({ status: 'failed', error: 'Video unavailable' })
+      .where(eq(schema.jobs.id, failed.id));
+    const queued = await job();
+
+    const reader = await makeUser('reader@example.com');
+    await call(owner, 'teams.invite', { teamId: team.id, email: 'reader@example.com' });
+    await call(owner, 'teams.setGrant', {
+      teamId: team.id,
+      userId: reader.user.id,
+      showId: show.id,
+      access: 'read',
+    });
+    await failsWith(call(reader, 'jobs.dismiss', { jobId: failed.id }), 'forbidden');
+    const outsider = await makeUser('outsider@example.com');
+    await failsWith(call(outsider, 'jobs.dismiss', { jobId: failed.id }), 'not_found');
+
+    const agent = asAgent(owner);
+    await failsWith(call(agent, 'jobs.dismiss', { jobId: queued.id }), 'conflict');
+    const dismissed = await call(agent, 'jobs.dismiss', { jobId: failed.id });
+    expect(dismissed).toMatchObject({ id: failed.id, status: 'failed' });
+    expect(dismissed.dismissedAt).not.toBeNull();
+    // Idempotent.
+    expect((await call(agent, 'jobs.dismiss', { jobId: failed.id })).dismissedAt).toBe(
+      dismissed.dismissedAt,
+    );
+
+    const all = await call(reader, 'jobs.list', { showId: show.id });
+    expect(all.map((j) => j.id).sort()).toEqual([failed.id, queued.id].sort());
+    const open = await call(reader, 'jobs.list', { showId: show.id, hideDismissed: true });
+    expect(open.map((j) => j.id)).toEqual([queued.id]);
+    const openHere = await call(reader, 'jobs.list', {
+      sessionId: session.id,
+      status: ['failed'],
+      hideDismissed: true,
+    });
+    expect(openHere).toEqual([]);
+  });
+});
