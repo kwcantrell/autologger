@@ -1,15 +1,18 @@
 // `/search?q=&show=`: the full results page. The URL is the state; every edit REPLACES the entry
 // (Back leaves the page rather than stepping through keystrokes). Results are grouped by kind;
-// moments are grouped under their session, 3 each, with "Show N more in this session".
+// moments are grouped under their session, 3 each, with "Show N more in this session". "Make video"
+// turns the moments of one show into a compilation (MakeVideoDialog), one per show.
 
 import type { SearchHit } from '@autologger/contract';
-import { BookOpenIcon, SearchIcon } from 'lucide-react';
+import { BookOpenIcon, FilmIcon, SearchIcon } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useMemo, useState } from 'react';
 import { Link, useLocation, useSearch as useLocationSearch } from 'wouter';
-import { useSearch } from '@/api/queries';
+import { useSearch, useSessions } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { useActive } from '@/app/useActive';
 import { PageFrame } from '@/components/RouteState';
+import { planClips } from '@/routes/compilations/clipPlan';
+import { MakeVideoDialog, useMakeVideoBlocked } from '@/routes/compilations/MakeVideoDialog';
 import { Button } from '@/shared/components/ui/button';
 import { Input } from '@/shared/components/ui/input';
 import {
@@ -20,8 +23,10 @@ import {
   SelectValue,
 } from '@/shared/components/ui/select';
 import { Spinner } from '@/shared/components/ui/spinner';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import { fmtDateOnly } from '@/shared/utils/fmtDateOnly';
 import { SearchSnippet } from './SearchSnippet';
+import { momentsByShow, type ShowMoments, searchClipCandidates, WINDOW_NOTE } from './searchClips';
 import {
   groupHits,
   hitHref,
@@ -37,6 +42,8 @@ import {
 const PAGE_LIMIT = 100;
 const PER_SESSION = 3;
 const ALL = '__all__';
+/** Up to this many clips start ticked in the "Make video" dialog; more start unticked to pick from. */
+const TICK_ALL_UP_TO = 10;
 
 const RESULT_ROW =
   'flex w-full min-w-0 flex-col items-start gap-1 rounded-ctl px-3 py-2.5 text-left no-underline outline-none transition-colors hover:bg-si-panel-2 focus-visible:ring-[3px] focus-visible:ring-ring/50';
@@ -164,6 +171,79 @@ function MomentsBySession({ moments }: { moments: MomentHit[] }) {
   );
 }
 
+/** "Make video" over one show's moments: the button, why it is unavailable, and the dialog. */
+function ShowVideoButton({
+  group,
+  query,
+  named,
+}: {
+  group: ShowMoments;
+  query: string;
+  named: boolean;
+}) {
+  const { allShows } = useActive();
+  const [open, setOpen] = useState(false);
+  const show = allShows.find((s) => s.id === group.showId);
+  const canWrite = show?.access === 'manage' || show?.access === 'write';
+  const candidates = useMemo(() => searchClipCandidates(group.moments), [group.moments]);
+  const sessions = useSessions(group.showId);
+  const noVideo =
+    sessions.data && planClips(candidates, sessions.data).clips.length === 0
+      ? 'None of these sessions were imported from YouTube, so there is no video to cut.'
+      : null;
+  const blocked = useMakeVideoBlocked(canWrite, group.showName) ?? noVideo;
+  const n = group.moments.length;
+  return (
+    <>
+      <Tooltip content={blocked} disabled={!blocked}>
+        <span className="inline-flex max-w-full">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!!blocked}
+            onClick={() => setOpen(true)}
+            className="max-w-full"
+          >
+            <FilmIcon aria-hidden="true" />
+            <span className="truncate">{named ? `${group.showName} (${n})` : 'Make video'}</span>
+          </Button>
+        </span>
+      </Tooltip>
+      <MakeVideoDialog
+        showId={group.showId}
+        open={open}
+        onOpenChange={setOpen}
+        defaultTitle={`${group.showName} — “${query}”`}
+        candidates={candidates}
+        sourceNoun={`${n} moment${n === 1 ? '' : 's'} found for “${query}”${named ? ` in ${group.showName}` : ''}`}
+        startTicked={candidates.length <= TICK_ALL_UP_TO}
+        note={WINDOW_NOTE}
+      />
+    </>
+  );
+}
+
+/** A compilation belongs to one show: one button, or one per show when the moments span shows. */
+function MakeVideoBar({ moments, query }: { moments: MomentHit[]; query: string }) {
+  const groups = useMemo(() => momentsByShow(moments), [moments]);
+  if (groups.length === 0) return null;
+  const many = groups.length > 1;
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 pb-1">
+      <p className="m-0 min-w-0 text-xs text-si-muted">
+        {many
+          ? 'Make a video from these moments. A compilation belongs to one show, so pick one:'
+          : 'Make a video from these moments (YouTube-imported sessions only).'}
+      </p>
+      <div className="flex min-w-0 flex-wrap gap-2">
+        {groups.map((g) => (
+          <ShowVideoButton key={g.showId} group={g} query={query} named={many} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function searchUrl(q: string, show: string) {
   const p = new URLSearchParams();
   if (q) p.set('q', q);
@@ -258,6 +338,7 @@ export function SearchRoute() {
         )}
         {groups.moments.length > 0 && (
           <ResultGroup title="Moments" list={false}>
+            <MakeVideoBar moments={groups.moments} query={debouncedQ.trim()} />
             <MomentsBySession key={`${debouncedQ}\n${show}`} moments={groups.moments} />
           </ResultGroup>
         )}
