@@ -342,9 +342,18 @@ export interface WikiLint {
 
 /**
  * Why wiki.lint flags a citation: `unknown_session` (no session with that id in this show),
- * `bad_range` (`to` is not after `t`), `past_end` (the range ends after the session's audio).
+ * `bad_range` (`to` is not after `t`), `past_end` (the range ends after the session's audio),
+ * `label_mismatch` (the label starts with an HH:MM:SS timecode that is not the cited `t` / `to`).
  */
-export type WikiCitationProblem = 'unknown_session' | 'bad_range' | 'past_end';
+export type WikiCitationProblem = 'unknown_session' | 'bad_range' | 'past_end' | 'label_mismatch';
+
+/** What wiki.upsert / wiki.patch report about the saved page's citations (wiki.lint's checks). */
+export interface WikiSavedCitations {
+  /** Citations in the saved body, repeats counted. */
+  citationCount: number;
+  /** The saved page's citations that wiki.lint flags, in body order. */
+  badCitations: (WikiCitation & { problem: WikiCitationProblem })[];
+}
 
 export interface WikiPage extends WikiPageSummary {
   bodyMd: string;

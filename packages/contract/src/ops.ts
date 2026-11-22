@@ -34,6 +34,7 @@ import type {
   WikiList,
   WikiPage,
   WikiRevision,
+  WikiSavedCitations,
 } from './entities.ts';
 import { MAX_TRANSCRIPT_RULES, TranscriptRuleInput } from './transcriptRules.ts';
 
@@ -569,7 +570,7 @@ export type CompactEventLine = Pick<SessionEvent, 'id' | 'atSec' | 'category' | 
 export type CompactWikiPage = Pick<WikiPage, 'id' | 'title' | 'kind' | 'revision'> & {
   /** [[link]] targets in the body that match no page title or alias in the show. */
   unresolvedLinks: string[];
-};
+} & WikiSavedCitations;
 
 export type DashboardRows = Record<string, string | number | boolean | null>[];
 
@@ -667,9 +668,9 @@ export interface OpOutputs {
   'dashboards.query': DashboardRows;
   'wiki.list': WikiList;
   'wiki.get': WikiPage;
-  'wiki.upsert': WikiPage;
+  'wiki.upsert': WikiPage & WikiSavedCitations;
   // The page summary (WikiPageSummary), spelled via WikiPage so it doesn't depend on that import.
-  'wiki.patch': Omit<WikiPage, 'bodyMd' | 'backlinks' | 'backlinkCount'>;
+  'wiki.patch': Omit<WikiPage, 'bodyMd' | 'backlinks' | 'backlinkCount'> & WikiSavedCitations;
   'wiki.delete': { deleted: true };
   'wiki.revisions': WikiRevision[];
   'wiki.restore': WikiPage;

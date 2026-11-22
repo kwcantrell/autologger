@@ -141,6 +141,8 @@ describe('compact responses for bulk writes', () => {
       kind: 'topic',
       revision: 1,
       unresolvedLinks: ['Tom Talks'],
+      citationCount: 0,
+      badCitations: [],
     });
     const updated = await call(agent, 'wiki.upsert', {
       showId: show.id,
