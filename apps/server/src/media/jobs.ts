@@ -20,7 +20,17 @@ export type JobSpec =
     }
   | { kind: 'youtube_import'; sessionId: string; actorId: string | null; payload: { url: string } };
 
-export async function enqueueJob(tx: DbOrTx, spec: JobSpec): Promise<JobRow> {
+/**
+ * Queue a job. Pass `after` for follow-up work (an import's transcription): the new job takes
+ * the parent's place in the queue (run_after = parent's created_at) instead of going to the back,
+ * so it runs before anything queued after the parent — a playlist import's first transcript
+ * doesn't wait behind every other download.
+ */
+export async function enqueueJob(
+  tx: DbOrTx,
+  spec: JobSpec,
+  opts: { after?: JobRow } = {},
+): Promise<JobRow> {
   const [row] = await tx
     .insert(schema.jobs)
     .values({
@@ -30,6 +40,7 @@ export async function enqueueJob(tx: DbOrTx, spec: JobSpec): Promise<JobRow> {
       payload: spec.payload,
       actorId: spec.actorId,
       progress: 'Queued',
+      ...(opts.after ? { runAfter: opts.after.createdAt } : {}),
     })
     .returning();
   // Delivered on commit; harmless when the worker isn't listening.

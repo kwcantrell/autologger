@@ -189,12 +189,11 @@ const youtubeImport: Handler = {
           .set({ sourceKind: 'youtube', sourceUrl: url, updatedAt: sql`now()` })
           .where(eq(sessions.id, sessionId));
         const transcribeJob = transcriptionConfigured
-          ? await enqueueJob(tx, {
-              kind: 'transcribe',
-              sessionId,
-              actorId: job.actorId,
-              payload: { segmentId },
-            })
+          ? await enqueueJob(
+              tx,
+              { kind: 'transcribe', sessionId, actorId: job.actorId, payload: { segmentId } },
+              { after: job },
+            )
           : null;
         return { seg: seg!, transcribeJob };
       });

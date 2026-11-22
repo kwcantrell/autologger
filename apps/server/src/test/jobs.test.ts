@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { db, schema } from '../db/client.ts';
 import { enqueueJob } from '../media/jobs.ts';
+import { claimJob } from '../worker/queue.ts';
 import { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
 
 beforeAll(setupDb);
@@ -55,5 +56,28 @@ describe('jobs.list', () => {
       call(outsider, 'jobs.list', { showId: show.id, sessionId: session.id }),
       'bad_request',
     );
+  });
+});
+
+describe('job queue order', () => {
+  it('runs an import’s transcription before imports queued after it', async () => {
+    const { owner, session } = await studio();
+    const spec = {
+      kind: 'youtube_import' as const,
+      sessionId: session.id,
+      actorId: owner.user.id,
+      payload: { url: 'https://youtu.be/x' },
+    };
+    const first = await enqueueJob(db, spec);
+    const rest = [await enqueueJob(db, spec), await enqueueJob(db, spec)];
+
+    expect((await claimJob())?.id).toBe(first.id);
+    const transcribe = await enqueueJob(
+      db,
+      { kind: 'transcribe', sessionId: session.id, actorId: null, payload: { segmentId: 'aud_x' } },
+      { after: first },
+    );
+    expect((await claimJob())?.id).toBe(transcribe.id);
+    expect((await claimJob())?.id).toBe(rest[0]!.id);
   });
 });
