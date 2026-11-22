@@ -309,8 +309,10 @@ export interface WikiLint {
 
 export interface WikiPage extends WikiPageSummary {
   bodyMd: string;
-  /** Pages that link to this one via [[Title]]. */
+  /** Pages that link to this one via [[Title]] or an alias, by title; the first 50. */
   backlinks: { id: string; title: string; kind: WikiKind }[];
+  /** How many pages link to this one (backlinks lists at most 50). */
+  backlinkCount: number;
 }
 
 export interface WikiRevision {

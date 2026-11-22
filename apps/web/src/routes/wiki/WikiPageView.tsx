@@ -287,6 +287,11 @@ function PageBody({ page }: { page: WikiPage }) {
                 <span className="text-xs text-si-dim">{WIKI_KIND_LABEL[b.kind]}</span>
               </li>
             ))}
+            {page.backlinkCount > page.backlinks.length && (
+              <li className="text-sm text-si-dim">
+                and {page.backlinkCount - page.backlinks.length} more
+              </li>
+            )}
           </ul>
         </section>
       )}
