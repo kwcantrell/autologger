@@ -255,3 +255,37 @@ export async function deletePrefix(prefix: string): Promise<number> {
   } while (token);
   return deleted;
 }
+
+/** The "folders" directly under a prefix ending in '/', e.g. `sessions/` → `sessions/<id>/`. */
+export async function listChildPrefixes(prefix: string): Promise<string[]> {
+  const out: string[] = [];
+  let token: string | undefined;
+  do {
+    const page = await server().send(
+      new ListObjectsV2Command({
+        Bucket: bucket(),
+        Prefix: prefix,
+        Delimiter: '/',
+        ContinuationToken: token,
+      }),
+    );
+    for (const p of page.CommonPrefixes ?? []) if (p.Prefix) out.push(p.Prefix);
+    token = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (token);
+  return out;
+}
+
+/** Every object under a prefix with its last-modified time (now when the server omits it). */
+export async function listObjects(prefix: string): Promise<{ key: string; lastModified: Date }[]> {
+  const out: { key: string; lastModified: Date }[] = [];
+  let token: string | undefined;
+  do {
+    const page = await server().send(
+      new ListObjectsV2Command({ Bucket: bucket(), Prefix: prefix, ContinuationToken: token }),
+    );
+    for (const o of page.Contents ?? [])
+      if (o.Key) out.push({ key: o.Key, lastModified: o.LastModified ?? new Date() });
+    token = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (token);
+  return out;
+}

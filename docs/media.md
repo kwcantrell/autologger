@@ -22,6 +22,10 @@ the **worker** (`apps/server/src/worker/main.ts`), a second entrypoint of the se
 | `WORKER_CONCURRENCY_WAVEFORM`                           | worker      | Same for `waveform` jobs (default 1).                                                                                                             |
 | `WORKER_CONCURRENCY_COMPILE`                            | worker      | Same for `compile` jobs (video compilations; default 1).                                                                                          |
 | `FFMPEG_PATH`                                           | worker      | ffmpeg binary for waveform peaks (default `ffmpeg` on `PATH`; in the worker image). Without it, the worker doesn't claim waveform jobs.           |
+| `MEDIA_SWEEP_INTERVAL_MIN`                              | worker      | Minutes between media sweeps (default 60; first run 5 min after start; `0` turns it off). See _media sweep_ below.                                |
+| `MEDIA_SWEEP_UPLOAD_AGE_HOURS`                          | worker      | Uploads still `uploading` after this long are removed, row and object (default 24, at least 1).                                                   |
+| `MEDIA_SWEEP_ORPHAN_GRACE_HOURS`                        | worker      | Orphaned objects are removed only once the newest under their prefix is this old (default 24, at least 1).                                        |
+| `MEDIA_SWEEP_DRY_RUN`                                   | worker      | `1` logs what the sweep would remove and deletes nothing.                                                                                         |
 
 The bucket is created on first use (worker start, or the first upload) if the credentials allow it.
 
@@ -103,5 +107,16 @@ In production: `node src/worker/main.ts` with the same environment as the app (c
   the `compilations` row; changes are published as `compilation_changed` on `show:<id>` (show
   socket → the web Compilations page; `compilations.get` waitSec). Needs ffmpeg (and ffprobe for
   the measured length) and yt-dlp; a worker without ffmpeg does not claim compile jobs.
+- **Media sweep** (`src/worker/sweep.ts`, every `MEDIA_SWEEP_INTERVAL_MIN`): removes uploads
+  stuck in `uploading` past `MEDIA_SWEEP_UPLOAD_AGE_HOURS` (object, then row; an `audio_segment`
+  delete is published), `sessions/<id>/` prefixes whose session no longer exists, `shows/<id>/`
+  prefixes whose show no longer exists and, under a live show, `compilations/<id>.mp4` objects
+  whose compilation row is gone. Session, show and compilation deletes already remove their objects
+  after commit; the sweep catches what that best-effort step missed (crash, S3 outage, a job still
+  uploading for a deleted session). Objects of existing sessions, and other key shapes under a live
+  show, are never touched; orphans are removed only when their newest object is older than
+  `MEDIA_SWEEP_ORPHAN_GRACE_HOURS`, so in-flight imports and compiles are left alone. A
+  transaction-level advisory lock lets one worker sweep at a time (others skip that round). Every
+  removal is logged (`media sweep: removed …`); `MEDIA_SWEEP_DRY_RUN=1` logs `would remove` instead.
 - Realtime: the worker publishes `audio_segment` / `job` changes and `transcript_segment` /
   `session` invalidations through the bus (Postgres NOTIFY), so open session pages update live.
