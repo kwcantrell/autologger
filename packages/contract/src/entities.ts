@@ -321,6 +321,8 @@ export interface WikiListItem extends WikiPageSummary {
   bodyMd?: string;
   /** With `citesSession`: this page's citations of that session, in body order. */
   citations?: Omit<WikiCitation, 'sessionId'>[];
+  /** With `citesSession` and `countOnly`: how many times this page cites that session. */
+  citationCount?: number;
 }
 
 /** A page of wiki.list. `nextOffset` is null on the last page. */
@@ -328,6 +330,8 @@ export interface WikiList {
   pages: WikiListItem[];
   total: number;
   nextOffset: number | null;
+  /** With `citesSession`: citations of that session across all matching pages (not just this page). */
+  citationTotal?: number;
 }
 
 export interface WikiLint {

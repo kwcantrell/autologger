@@ -375,6 +375,8 @@ export const opInputs = {
     include: z.enum(['summary', 'body']).optional(),
     linksTo: id.optional(),
     citesSession: id.optional(),
+    /** With citesSession: per-page `citationCount` instead of the `citations` ranges. */
+    countOnly: z.boolean().optional(),
     limit: z.number().int().min(1).max(200).optional(),
     offset: z.number().int().min(0).optional(),
   }),
