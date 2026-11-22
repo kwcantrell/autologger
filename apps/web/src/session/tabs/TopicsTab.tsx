@@ -1,6 +1,6 @@
 import type { Session, Topic } from '@autologger/contract';
-import { BotIcon, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { BotIcon, FilmIcon, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTopics } from '@/api/queries';
 import { errorMessage, rpc } from '@/api/rpc';
 import { settingsOpen } from '@/lib/store';
@@ -10,6 +10,8 @@ import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
+import { Tooltip } from '@/shared/ui/Tooltip';
+import { MakeVideoDialog, useMakeVideoBlocked } from '../../routes/compilations/MakeVideoDialog';
 import { useWorkspace } from '../context';
 import {
   FEED_CELL,
@@ -39,6 +41,22 @@ export function TopicsTab({ session }: { session: Session }) {
   const q = useTopics(session.id);
   const { confirm, confirmElement } = useConfirm();
   const topics = q.data ?? [];
+  const [makeVideo, setMakeVideo] = useState(false);
+  const blocked =
+    useMakeVideoBlocked(canWrite, session.showName) ??
+    (session.sourceKind !== 'youtube' || !session.sourceUrl
+      ? 'This session was not imported from YouTube, so there is no video to cut.'
+      : null);
+  const candidates = useMemo(
+    () =>
+      (q.data ?? []).map((t) => ({
+        sessionId: t.sessionId,
+        startSec: t.startSec,
+        ...(t.durationSec > 0 ? { endSec: t.startSec + t.durationSec } : {}),
+        label: t.title,
+      })),
+    [q.data],
+  );
 
   const insert = async () => {
     try {
@@ -82,11 +100,27 @@ export function TopicsTab({ session }: { session: Session }) {
     <FeedShell
       countLabel={feedCountLabel(topics.length, 'topic')}
       toolbar={
-        canWrite && (
-          <Button variant="glass" onClick={() => void insert()}>
-            <ToolbarCaption label="Insert" icon={<IconPlus />} />
-          </Button>
-        )
+        <>
+          <Tooltip content={blocked} disabled={!blocked}>
+            <span className="inline-flex">
+              <Button
+                variant="glass"
+                disabled={!!blocked || q.isPending || q.isError}
+                onClick={() => setMakeVideo(true)}
+              >
+                <ToolbarCaption
+                  label="Make video"
+                  icon={<FilmIcon className="block size-[18px]" aria-hidden="true" />}
+                />
+              </Button>
+            </span>
+          </Tooltip>
+          {canWrite && (
+            <Button variant="glass" onClick={() => void insert()}>
+              <ToolbarCaption label="Insert" icon={<IconPlus />} />
+            </Button>
+          )}
+        </>
       }
     >
       {q.isError ? (
@@ -131,6 +165,15 @@ export function TopicsTab({ session }: { session: Session }) {
         </FeedTable>
       )}
       {confirmElement}
+      <MakeVideoDialog
+        showId={session.showId}
+        open={makeVideo}
+        onOpenChange={setMakeVideo}
+        defaultTitle={`${session.title.trim() || 'Untitled session'} — topics`}
+        candidates={candidates}
+        sourceNoun="session’s topics"
+        startTicked={false}
+      />
     </FeedShell>
   );
 }

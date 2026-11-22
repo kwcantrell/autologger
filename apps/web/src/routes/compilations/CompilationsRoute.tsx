@@ -1,5 +1,6 @@
-// `/compilations`: video compilations of the active show. Agents create them over MCP
-// (compilations.create) from ranges of YouTube-imported sessions; the worker builds one MP4 each.
+// `/compilations`: video compilations of the active show. Agents create them over MCP and people
+// with "Make video" on a wiki page's citations or a session's topics (MakeVideoDialog), both through
+// compilations.create, from ranges of YouTube-imported sessions; the worker builds one MP4 each.
 // Here people watch, download and delete them. Updates arrive as show-socket hints (liveShow.ts).
 
 import type { Compilation } from '@autologger/contract';
@@ -183,8 +184,9 @@ function CompilationList({ showId, canWrite }: { showId: string; canWrite: boole
       <div className="flex flex-col items-center gap-1 py-10 text-center">
         <p className="m-0 text-sm text-si-muted">No compilations yet.</p>
         <p className="m-0 max-w-[30rem] text-xs text-si-dim">
-          Agents connected over MCP build them from moments in sessions imported from YouTube — for
-          example “make a video of every time we talked about the dog”.
+          Use “Make video” on a wiki page with citations or on a session’s Topics tab, or ask an
+          agent connected over MCP — for example “make a video of every time we talked about the
+          dog”. Only sessions imported from YouTube can be compiled.
         </p>
       </div>
     );
