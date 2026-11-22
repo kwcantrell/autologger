@@ -128,17 +128,22 @@ defineOp({
   },
 });
 
+/** The non-empty substrings of a segment's text that `pattern` matches, in order (text[]). */
+function matchArray(pattern: string, regex: boolean) {
+  // `***=` makes the rest of the pattern a literal, so plain text shares the regex functions.
+  const p = regex ? pattern : `***=${pattern}`;
+  // Patterns like `x*` also match the empty string everywhere; those hits are dropped.
+  return sql`array(select m from (select regexp_substr(${ts.text}, ${p}, 1, n, 'i') as m from generate_series(1, regexp_count(${ts.text}, ${p}, 1, 'i')) as n) as hits where m <> '')`;
+}
+
 function findCondition(pattern: string, regex: boolean) {
   return regex
-    ? sql`${ts.text} ~* ${pattern}`
+    ? sql`(${ts.text} ~* ${pattern} and cardinality(${matchArray(pattern, regex)}) > 0)`
     : ilike(ts.text, `%${pattern.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
 }
 
-/** The substrings of a segment's text that `pattern` matches, in order, as a jsonb array. */
 function findMatches(pattern: string, regex: boolean) {
-  // `***=` makes the rest of the pattern a literal, so plain text shares the regex functions.
-  const p = regex ? pattern : `***=${pattern}`;
-  return sql`to_jsonb(array(select regexp_substr(${ts.text}, ${p}, 1, n, 'i') from generate_series(1, regexp_count(${ts.text}, ${p}, 1, 'i')) as n))`;
+  return sql`to_jsonb(${matchArray(pattern, regex)})`;
 }
 
 /** Segments within `context` positions (session time order) of the given ones, excluding them. */
