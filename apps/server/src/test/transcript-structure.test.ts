@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { subscribe } from '../core/bus.ts';
 import { newId } from '../core/ids.ts';
 import { db, schema } from '../db/client.ts';
 import { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
@@ -131,6 +132,136 @@ describe('transcript merge and split', () => {
       text: 'Glad to be here.',
     });
     expect(second!.words).toHaveLength(4);
+
+    await undoAll(owner, session.id);
+    expect(await call(owner, 'transcript.get', { sessionId: session.id })).toEqual(before);
+  });
+
+  it('splits before a phrase (atText) or at a time (atSec)', async () => {
+    const { owner, session } = await studio();
+    const agent = asAgent(owner, 'Claude Code');
+    const [a] = await seed(session.id, [
+      {
+        start: 10,
+        end: 16,
+        speaker: 'Tom',
+        words: [
+          ['How', 10, 10.5],
+          ['was', 10.5, 11],
+          ['it?', 11, 11.5],
+          ['It', 12, 12.5],
+          ['was', 12.5, 13],
+          ['great,', 13, 14],
+          ['honestly.', 14, 16],
+        ],
+      },
+    ]);
+    // "was" occurs twice; "how" starts the segment; "nope" is absent.
+    for (const atText of ['was', 'How was', 'nope'])
+      await failsWith(
+        call(agent, 'transcript.splitSegment', { segmentId: a!, atText }),
+        'bad_request',
+      );
+    await failsWith(
+      call(agent, 'transcript.splitSegment', { segmentId: a!, atText: 'it', atWord: 3 }),
+      'bad_request',
+    );
+
+    const [q, ans] = await call(agent, 'transcript.splitSegment', {
+      segmentId: a!,
+      atText: 'it WAS great',
+      speaker: 'Guest',
+    });
+    expect(q).toMatchObject({ id: a, endSec: 12, speaker: 'Tom', text: 'How was it?' });
+    expect(ans).toMatchObject({ startSec: 12, speaker: 'Guest', text: 'It was great, honestly.' });
+
+    const [, tail] = await call(agent, 'transcript.splitSegment', {
+      segmentId: ans!.id,
+      atSec: 13.5,
+    });
+    expect(tail).toMatchObject({ startSec: 14, endSec: 16, text: 'honestly.' });
+    await failsWith(
+      call(agent, 'transcript.splitSegment', { segmentId: tail!.id, atSec: 14 }),
+      'bad_request',
+    );
+  });
+});
+
+describe('transcript.renameSpeaker', () => {
+  it('relabels a time range, with or without `from`, and undo restores it', async () => {
+    const { owner, session } = await studio();
+    const agent = asAgent(owner, 'Claude Code');
+    await seed(session.id, [
+      { start: 0, end: 20, speaker: 'Speaker 2', words: [['Promo', 0, 20]] },
+      { start: 20, end: 47, speaker: 'Speaker 3', words: [['music', 20, 47]] },
+      { start: 47, end: 60, speaker: 'Speaker 2', words: [['Welcome', 47, 60]] },
+      { start: 60, end: 70, speaker: 'Speaker 1', words: [['Thanks', 60, 70]] },
+      { start: 70, end: 80, speaker: 'Speaker 2', words: [['Sure', 70, 80]] },
+    ]);
+    const before = await call(owner, 'transcript.get', { sessionId: session.id });
+    const speakers = async () =>
+      (await call(owner, 'transcript.get', { sessionId: session.id })).map((s) => s.speaker);
+
+    expect(
+      await call(agent, 'transcript.renameSpeaker', {
+        sessionId: session.id,
+        from: 'Speaker 2',
+        to: 'Promo',
+        toSec: 47,
+      }),
+    ).toEqual({ updated: 1 });
+    expect(await speakers()).toEqual(['Promo', 'Speaker 3', 'Speaker 2', 'Speaker 1', 'Speaker 2']);
+
+    expect(
+      await call(agent, 'transcript.renameSpeaker', {
+        sessionId: session.id,
+        to: 'Promo',
+        fromSec: 0,
+        toSec: 47,
+      }),
+    ).toEqual({ updated: 1 });
+    expect(await speakers()).toEqual(['Promo', 'Promo', 'Speaker 2', 'Speaker 1', 'Speaker 2']);
+
+    // A whole-session rename records one change per segment but publishes each message once.
+    const sent: string[] = [];
+    const stop = subscribe(`session:${session.id}`, (m) => sent.push(JSON.stringify(m)));
+    expect(
+      await call(agent, 'transcript.renameSpeaker', {
+        sessionId: session.id,
+        from: 'Speaker 2',
+        to: 'Guest',
+      }),
+    ).toEqual({ updated: 2 });
+    stop();
+    expect(await speakers()).toEqual(['Promo', 'Promo', 'Guest', 'Speaker 1', 'Guest']);
+    expect(sent.sort()).toEqual(
+      [
+        { type: 'invalidate', entity: 'change' },
+        { type: 'invalidate', entity: 'transcript_segment' },
+      ]
+        .map((m) => JSON.stringify(m))
+        .sort(),
+    );
+
+    // Without a range `from` is required, and the range must not be reversed.
+    await failsWith(
+      call(agent, 'transcript.renameSpeaker', { sessionId: session.id, to: 'X' }),
+      'bad_request',
+    );
+    await failsWith(
+      call(agent, 'transcript.renameSpeaker', {
+        sessionId: session.id,
+        to: 'X',
+        fromSec: 50,
+        toSec: 10,
+      }),
+      'bad_request',
+    );
+    const stranger = await makeUser('stranger@example.com');
+    await failsWith(
+      call(stranger, 'transcript.renameSpeaker', { sessionId: session.id, from: 'A', to: 'B' }),
+      'not_found',
+    );
 
     await undoAll(owner, session.id);
     expect(await call(owner, 'transcript.get', { sessionId: session.id })).toEqual(before);

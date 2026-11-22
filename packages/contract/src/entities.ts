@@ -111,6 +111,8 @@ export interface Session {
   transcriptStatus: 'none' | 'pending' | 'partial' | 'done' | 'failed';
   sourceKind: MediaSource | null;
   sourceUrl: string | null;
+  /** Transcription: key terms for this session only, sent before the show's key terms. */
+  keyTerms: string[];
   archivedAt: string | null;
   createdAt: string;
   createdBy: UserRef | null;
@@ -160,6 +162,8 @@ export interface TranscriptWord {
   w: string;
   s: number;
   e: number;
+  /** Diarized speaker index from transcription (0-based: "Speaker 1" is 0), when known. */
+  sp?: number;
 }
 
 export interface TranscriptSegment {
@@ -206,6 +210,19 @@ export interface TranscriptReplaceResult {
   truncated: boolean;
 }
 
+/** transcript.replace with `compact: true`: counts instead of every before/after text. */
+export interface TranscriptReplaceCompactResult {
+  dryRun: boolean;
+  /** Segments changed (or that would change). */
+  changed: number;
+  /** Matches over all rules. */
+  replacements: number;
+  /** The rules that matched, in rule order. */
+  rules: { find: string; count: number }[];
+  /** dryRun only: the first few changes, each cut to the changed words plus a little context. */
+  samples?: { id: string; startSec: number; before: string; after: string }[];
+}
+
 /**
  * A transcript.find result line. Matched lines carry the matched substrings and the indexes of the
  * patterns that hit; neighbouring lines requested with `context` carry `context: true` instead.
@@ -214,6 +231,13 @@ export interface TranscriptFindLine extends TranscriptLine {
   matches?: string[];
   patternIndexes?: number[];
   context?: true;
+}
+
+/** A transcript.find line with `idsOnly: true`: enough to target an edit, no text. */
+export interface TranscriptFindId {
+  id: string;
+  startSec: number;
+  speaker: string;
 }
 
 export interface Topic {
@@ -254,6 +278,28 @@ export interface WikiPageSummary {
   revision: number;
   updatedAt: string;
   updatedBy: UserRef | null;
+}
+
+/** A wiki.list row; `summary` / `bodyMd` only with `include: 'summary'` / `'body'`. */
+export interface WikiListItem extends WikiPageSummary {
+  /** First paragraph of the body (headings skipped), at most 400 characters. */
+  summary?: string;
+  bodyMd?: string;
+}
+
+/** A page of wiki.list. `nextOffset` is null on the last page. */
+export interface WikiList {
+  pages: WikiListItem[];
+  total: number;
+  nextOffset: number | null;
+}
+
+export interface WikiLint {
+  /** Pages whose [[links]] name no page title or alias in the show. */
+  unresolved: { pageId: string; title: string; kind: WikiKind; targets: string[] }[];
+  /** Person, topic and bit pages no other page links to (session recaps are left out). */
+  orphans: { pageId: string; title: string; kind: WikiKind }[];
+  counts: { pages: number; links: number; unresolvedLinks: number; orphans: number };
 }
 
 export interface WikiPage extends WikiPageSummary {
@@ -324,6 +370,8 @@ export interface Job {
   sessionId: string | null;
   /** Set when listing a whole show (jobs.list with showId). */
   sessionTitle?: string;
+  /** Queued jobs only (jobs.list): jobs ahead of this one in the worker queue, 0 = next. */
+  queuePosition?: number;
   error: string | null;
   progress: string | null;
   createdAt: string;

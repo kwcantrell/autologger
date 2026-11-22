@@ -3,11 +3,14 @@
 
 import type {
   DashboardQuery,
+  FullOpInput,
   OpInput,
   OpName,
-  OpOutputs,
+  OpResult,
   Via,
   WikiKind,
+  WikiList,
+  WikiListItem,
 } from '@autologger/contract';
 import {
   type QueryClient,
@@ -52,14 +55,17 @@ export const qk = {
 
 type QOpts<T> = Omit<UseQueryOptions<T, RpcError, T, QueryKey>, 'queryKey' | 'queryFn'>;
 
+/** The full (never compact) result of op N, as the web app asks for it. */
+type Out<N extends OpName> = OpResult<N, FullOpInput<N>>;
+
 /** A query bound to one op. */
 export function useOpQuery<N extends OpName>(
   key: QueryKey,
   name: N,
-  input: OpInput<N>,
-  opts: QOpts<OpOutputs[N]> = {},
+  input: FullOpInput<N>,
+  opts: QOpts<Out<N>> = {},
 ) {
-  return useQuery<OpOutputs[N], RpcError, OpOutputs[N], QueryKey>({
+  return useQuery<Out<N>, RpcError, Out<N>, QueryKey>({
     queryKey: key,
     queryFn: () => rpc(name, input),
     ...opts,
@@ -70,12 +76,12 @@ export function useOpQuery<N extends OpName>(
 export function useOpMutation<N extends OpName>(
   name: N,
   opts: {
-    invalidate?: (data: OpOutputs[N], input: OpInput<N>) => QueryKey[];
-    onSuccess?: (data: OpOutputs[N], input: OpInput<N>, qc: QueryClient) => void;
+    invalidate?: (data: Out<N>, input: FullOpInput<N>) => QueryKey[];
+    onSuccess?: (data: Out<N>, input: FullOpInput<N>, qc: QueryClient) => void;
   } = {},
 ) {
   const qc = useQueryClient();
-  return useMutation<OpOutputs[N], RpcError, OpInput<N>>({
+  return useMutation<Out<N>, RpcError, FullOpInput<N>>({
     mutationFn: (input) => rpc(name, input),
     onSuccess: (data, input) => {
       opts.onSuccess?.(data, input, qc);
@@ -158,13 +164,27 @@ export const useChanges = (sessionId: string, via: Via | 'all') =>
     ...(via === 'all' ? {} : { via }),
     limit: 300,
   });
+/** Every page of a show's wiki (wiki.list is paged; the screens need all of it for links). */
+export async function listAllWikiPages(showId: string, kind?: WikiKind) {
+  const out: WikiListItem[] = [];
+  for (let offset: number | null = 0; offset !== null; ) {
+    const page: WikiList = await rpc('wiki.list', {
+      showId,
+      ...(kind ? { kind } : {}),
+      limit: 200,
+      offset,
+    });
+    out.push(...page.pages);
+    offset = page.nextOffset;
+  }
+  return out;
+}
 export const useWikiList = (showId: string | undefined, kind?: WikiKind) =>
-  useOpQuery(
-    [...qk.wikiList(showId ?? ''), kind ?? 'all'],
-    'wiki.list',
-    { showId: showId ?? '', ...(kind ? { kind } : {}) },
-    { enabled: !!showId },
-  );
+  useQuery<WikiListItem[], RpcError>({
+    queryKey: [...qk.wikiList(showId ?? ''), kind ?? 'all'],
+    queryFn: () => listAllWikiPages(showId ?? '', kind),
+    enabled: !!showId,
+  });
 export const useWikiPage = (pageId: string | undefined) =>
   useOpQuery(
     qk.wikiPage(pageId ?? ''),

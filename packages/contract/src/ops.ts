@@ -21,12 +21,15 @@ import type {
   Team,
   TeamDetail,
   Topic,
+  TranscriptFindId,
   TranscriptFindLine,
   TranscriptLine,
+  TranscriptReplaceCompactResult,
   TranscriptReplaceResult,
   TranscriptSegment,
+  WikiLint,
+  WikiList,
   WikiPage,
-  WikiPageSummary,
   WikiRevision,
 } from './entities.ts';
 import { MAX_TRANSCRIPT_RULES, TranscriptRuleInput } from './transcriptRules.ts';
@@ -42,6 +45,13 @@ export const MAX_KEY_TERMS_TOTAL_CHARS = 1000;
 /** Characters a key term list spends of MAX_KEY_TERMS_TOTAL_CHARS. */
 export const keyTermsChars = (terms: string[]): number =>
   terms.reduce((n, t) => n + t.trim().length, 0);
+/** A key term list for one session or one re-transcription (same limits as the show's list). */
+const keyTermList = z
+  .array(z.string().trim().min(1).max(MAX_KEY_TERM_LENGTH))
+  .max(MAX_KEY_TERMS)
+  .refine((terms) => keyTermsChars(terms) <= MAX_KEY_TERMS_TOTAL_CHARS, {
+    message: `Key terms may total at most ${MAX_KEY_TERMS_TOTAL_CHARS} characters (Deepgram limits key terms to about 500 tokens per request).`,
+  });
 const teamRole = z.enum(['owner', 'admin', 'member']);
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 const sec = z
@@ -158,6 +168,7 @@ export const opInputs = {
     frameRate: z.number().positive().max(120).optional(),
     startTimecode: timecode.optional(),
     notes: z.string().max(10000).optional(),
+    keyTerms: keyTermList.optional(),
   }),
   'sessions.update': z.object({
     sessionId: id,
@@ -167,6 +178,7 @@ export const opInputs = {
     notes: z.string().max(10000).optional(),
     frameRate: z.number().positive().max(120).optional(),
     startTimecode: timecode.optional(),
+    keyTerms: keyTermList.optional(),
   }),
   'sessions.archive': z.object({ sessionId: id, archived: z.boolean() }),
   'sessions.delete': z.object({ sessionId: id }),
@@ -179,6 +191,7 @@ export const opInputs = {
     sessionId: id,
     categoryIds: z.array(id).optional(),
     source: z.enum(['operator', 'companion', 'agent', 'import']).optional(),
+    compact,
   }),
   'events.create': z.object({ sessionId: id, ...EventFields }),
   'events.createMany': z.object({
@@ -195,12 +208,36 @@ export const opInputs = {
     timecode: timecode.optional(),
     atSec: sec.optional(),
   }),
+  'events.updateMany': z.object({
+    sessionId: id,
+    events: z
+      .array(
+        z.object({
+          id,
+          categoryId: id.nullable().optional(),
+          category: z.string().trim().max(60).optional(),
+          message: z.string().max(5000).optional(),
+          value: z.string().max(200).nullable().optional(),
+          timecode: timecode.optional(),
+          atSec: sec.optional(),
+        }),
+      )
+      .min(1)
+      .max(500),
+    compact,
+  }),
   'events.delete': z.object({ eventId: id }),
   'events.importCsv': z.object({ sessionId: id, csv: z.string().max(5_000_000) }),
 
   // ── transcript ────────────────────────────────────────────
   'transcript.get': z.object({ sessionId: id, fromSec: sec.optional(), toSec: sec.optional() }),
-  'transcript.text': z.object({ sessionId: id, fromSec: sec.optional(), toSec: sec.optional() }),
+  'transcript.text': z.object({
+    sessionId: id,
+    fromSec: sec.optional(),
+    toSec: sec.optional(),
+    format: z.enum(['lines', 'compact']).default('lines'),
+    ids: z.boolean().default(false),
+  }),
   'transcript.updateSegment': z.object({
     segmentId: id,
     text: z.string().max(20000).optional(),
@@ -216,9 +253,14 @@ export const opInputs = {
       toSec: sec.optional(),
       limit: z.number().int().min(1).max(2000).default(500),
       context: z.number().int().min(0).max(3).default(0),
+      countOnly: z.boolean().default(false),
+      idsOnly: z.boolean().default(false),
     })
     .refine((v) => (v.pattern === undefined) !== (v.patterns === undefined), {
       message: 'Pass exactly one of pattern or patterns',
+    })
+    .refine((v) => !(v.countOnly && v.idsOnly), {
+      message: 'Pass at most one of countOnly or idsOnly',
     }),
   'transcript.updateSegments': z.object({
     sessionId: id,
@@ -234,27 +276,43 @@ export const opInputs = {
       .max(500),
     compact,
   }),
-  'transcript.renameSpeaker': z.object({
-    sessionId: id,
-    from: z.string().max(80),
-    to: z.string().trim().min(1).max(80),
-  }),
+  'transcript.renameSpeaker': z
+    .object({
+      sessionId: id,
+      from: z.string().max(80).optional(),
+      to: z.string().trim().min(1).max(80),
+      fromSec: sec.optional(),
+      toSec: sec.optional(),
+    })
+    .refine((v) => v.from !== undefined || v.fromSec !== undefined || v.toSec !== undefined, {
+      message: 'Pass from, or a fromSec/toSec range to relabel every speaker in it',
+    })
+    .refine((v) => v.fromSec === undefined || v.toSec === undefined || v.fromSec <= v.toSec, {
+      message: 'fromSec must not be after toSec',
+    }),
   // Segment structure fixes (merge / split).
   'transcript.mergeSegments': z.object({
     segmentIds: z.array(id).min(2).max(50),
     speaker: z.string().trim().max(80).optional(),
   }),
-  'transcript.splitSegment': z.object({
-    segmentId: id,
-    atWord: z.number().int().min(1).max(100000),
-    speaker: z.string().trim().max(80).optional(),
-  }),
+  'transcript.splitSegment': z
+    .object({
+      segmentId: id,
+      atWord: z.number().int().min(1).max(100000).optional(),
+      atText: z.string().trim().min(1).max(500).optional(),
+      atSec: sec.optional(),
+      speaker: z.string().trim().max(80).optional(),
+    })
+    .refine((v) => [v.atWord, v.atText, v.atSec].filter((x) => x !== undefined).length === 1, {
+      message: 'Pass exactly one of atWord, atText or atSec',
+    }),
   'transcript.replace': z.object({
     sessionId: id,
     rules: z.array(TranscriptRuleInput).min(1).max(MAX_TRANSCRIPT_RULES).optional(),
     fromSec: sec.optional(),
     toSec: sec.optional(),
     dryRun: z.boolean().default(false),
+    compact,
   }),
 
   // ── topics ────────────────────────────────────────────────
@@ -284,6 +342,12 @@ export const opInputs = {
     spec: DashboardSpec,
     compact,
   }),
+  'dashboards.updateWidgets': z.object({
+    dashboardId: id,
+    /** Widget patches: `id` picks the stored widget, other fields replace its fields (null removes one). */
+    widgets: z.array(z.looseObject({ id })).min(1).max(40),
+    compact,
+  }),
   'dashboards.delete': z.object({ dashboardId: id }),
   'dashboards.query': z.object({ sessionId: id, query: DashboardQuery }),
 
@@ -291,6 +355,9 @@ export const opInputs = {
   'wiki.list': z.object({
     showId: id,
     kind: z.enum(['person', 'topic', 'bit', 'session']).optional(),
+    include: z.enum(['summary', 'body']).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+    offset: z.number().int().min(0).optional(),
   }),
   'wiki.get': z.object({
     pageId: id.optional(),
@@ -305,10 +372,20 @@ export const opInputs = {
     bodyMd: z.string().max(100_000),
     aliases: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
     sessionId: id.optional(),
+    compact,
+  }),
+  'wiki.patch': z.object({
+    pageId: id,
+    edits: z
+      .array(z.object({ find: z.string().min(1).max(10_000), replace: z.string().max(100_000) }))
+      .max(50)
+      .default([]),
+    append: z.string().max(100_000).optional(),
   }),
   'wiki.delete': z.object({ pageId: id }),
   'wiki.revisions': z.object({ pageId: id }),
   'wiki.restore': z.object({ pageId: id, revision: z.number().int().min(1) }),
+  'wiki.lint': z.object({ showId: id }),
 
   // ── media ─────────────────────────────────────────────────
   'media.list': z.object({ sessionId: id }),
@@ -328,7 +405,18 @@ export const opInputs = {
   'media.completeUpload': z.object({ segmentId: id, durationSec: sec.optional() }),
   'media.playbackUrl': z.object({ segmentId: id }),
   'media.importYoutube': z.object({ sessionId: id, url: z.url() }),
-  'media.retranscribe': z.object({ sessionId: id, segmentId: id.optional() }),
+  'media.importPlaylist': z.object({
+    showId: id,
+    url: z.url().max(2048),
+    order: z.enum(['playlist', 'reverse']).default('playlist'),
+    titleTemplate: z.string().trim().min(1).max(200).optional(),
+    dryRun: z.boolean().default(false),
+  }),
+  'media.retranscribe': z.object({
+    sessionId: id,
+    segmentId: id.optional(),
+    keyTerms: keyTermList.optional(),
+  }),
   'media.delete': z.object({ segmentId: id }),
   'jobs.list': z
     .object({
@@ -340,6 +428,7 @@ export const opInputs = {
         .max(4)
         .optional(),
       limit: z.number().int().min(1).max(500).default(100),
+      waitSec: z.number().int().min(1).max(55).optional(),
     })
     .refine((v) => (v.sessionId === undefined) !== (v.showId === undefined), {
       message: 'Pass exactly one of sessionId or showId.',
@@ -413,8 +502,36 @@ export interface CompanionState {
 export type CompactEvent = Pick<SessionEvent, 'id' | 'atSec' | 'category'>;
 export type CompactTopic = Pick<Topic, 'id' | 'startSec' | 'level' | 'title'>;
 export type CompactDashboard = Pick<Dashboard, 'id' | 'revision'>;
+// Compact read / write results for the ops agents call most on long sessions.
+export type CompactEventLine = Pick<SessionEvent, 'id' | 'atSec' | 'category' | 'message'>;
+export type CompactWikiPage = Pick<WikiPage, 'id' | 'title' | 'kind' | 'revision'> & {
+  /** [[link]] targets in the body that match no page title or alias in the show. */
+  unresolvedLinks: string[];
+};
 
 export type DashboardRows = Record<string, string | number | boolean | null>[];
+
+export interface PlaylistImport {
+  playlistTitle: string | null;
+  /** True when nothing was written (dryRun): sessionId and jobId are then null. */
+  dryRun: boolean;
+  /** One new session per video, in episode order, each with its queued youtube_import job. */
+  created: {
+    sessionId: string | null;
+    title: string;
+    episode: string;
+    videoId: string;
+    durationSec: number | null;
+    jobId: string | null;
+  }[];
+  /** Videos not imported: already in the show (sessionId set) or private/deleted. */
+  skipped: {
+    videoId: string;
+    title: string;
+    reason: 'already_imported' | 'unavailable';
+    sessionId: string | null;
+  }[];
+}
 
 export interface OpOutputs {
   'me.get': Me;
@@ -449,17 +566,28 @@ export interface OpOutputs {
   'transport.reset': Session;
   'events.list': SessionEvent[];
   'events.create': SessionEvent;
-  'events.createMany': SessionEvent[] | CompactEvent[];
+  'events.createMany': SessionEvent[];
   'events.update': SessionEvent;
+  'events.updateMany': SessionEvent[];
   'events.delete': { deleted: true };
   'events.importCsv': { imported: number; skipped: { line: number; reason: string }[] };
   'transcript.get': TranscriptSegment[];
-  'transcript.text': { text: string; segments: number };
+  'transcript.text': {
+    text: string;
+    segments: number;
+    /** Characters in `text`. */
+    chars: number;
+    /** Segments in the whole session, regardless of fromSec/toSec. */
+    totalSegments: number;
+    /** End of the last segment in the session, seconds from session start. */
+    durationSec: number;
+  };
   'transcript.updateSegment': TranscriptSegment;
-  'transcript.find': TranscriptFindLine[];
-  'transcript.updateSegments':
-    | { updated: number; segments: TranscriptLine[] }
-    | { updated: number; ids: string[] };
+  'transcript.find':
+    | { total: number; lines: TranscriptFindLine[] }
+    | { total: number; counts: number[] }
+    | { total: number; lines: TranscriptFindId[] };
+  'transcript.updateSegments': { updated: number; segments: TranscriptLine[] };
   'transcript.renameSpeaker': { updated: number };
   'transcript.mergeSegments': TranscriptSegment;
   'transcript.splitSegment': TranscriptSegment[];
@@ -468,18 +596,22 @@ export interface OpOutputs {
   'topics.create': Topic;
   'topics.update': Topic;
   'topics.delete': { deleted: true };
-  'topics.replace': Topic[] | CompactTopic[];
+  'topics.replace': Topic[];
   'dashboards.list': Dashboard[];
   'dashboards.get': Dashboard;
-  'dashboards.save': Dashboard | CompactDashboard;
+  'dashboards.save': Dashboard;
+  'dashboards.updateWidgets': Dashboard;
   'dashboards.delete': { deleted: true };
   'dashboards.query': DashboardRows;
-  'wiki.list': WikiPageSummary[];
+  'wiki.list': WikiList;
   'wiki.get': WikiPage;
   'wiki.upsert': WikiPage;
+  // The page summary (WikiPageSummary), spelled via WikiPage so it doesn't depend on that import.
+  'wiki.patch': Omit<WikiPage, 'bodyMd' | 'backlinks'>;
   'wiki.delete': { deleted: true };
   'wiki.revisions': WikiRevision[];
   'wiki.restore': WikiPage;
+  'wiki.lint': WikiLint;
   'media.list': AudioSegment[];
   'media.createUpload': {
     segment: AudioSegment;
@@ -489,6 +621,7 @@ export interface OpOutputs {
   'media.completeUpload': AudioSegment;
   'media.playbackUrl': { url: string; expiresAt: string };
   'media.importYoutube': Job;
+  'media.importPlaylist': PlaylistImport;
   'media.retranscribe': Job[];
   'media.delete': { deleted: true };
   'jobs.list': Job[];
@@ -507,6 +640,39 @@ export interface OpOutputs {
   'admin.setStatus': AdminUser;
   'admin.setSuperadmin': AdminUser;
 }
+
+/** What ops that take `compact` return with `compact: true`, in place of their OpOutputs. */
+export interface CompactOpOutputs {
+  'events.list': CompactEventLine[];
+  'events.createMany': CompactEvent[];
+  'events.updateMany': CompactEvent[];
+  'transcript.updateSegments': { updated: number; ids: string[] };
+  'transcript.replace': TranscriptReplaceCompactResult;
+  'topics.replace': CompactTopic[];
+  'dashboards.save': CompactDashboard;
+  'dashboards.updateWidgets': CompactDashboard;
+  'wiki.upsert': CompactWikiPage;
+}
+
+/**
+ * What op N returns for input I: the compact shape when I has `compact: true`, the full one when
+ * I has no `compact` or `compact: false`, and either when that is only known at run time
+ * (`compact: boolean`, or an unknown input).
+ */
+export type OpResult<N extends OpName, I = OpInput<N>> = N extends keyof CompactOpOutputs
+  ? unknown extends I
+    ? OpOutputs[N] | CompactOpOutputs[N]
+    : I extends { compact?: infer C }
+      ? [C] extends [false | undefined]
+        ? OpOutputs[N]
+        : [C] extends [true]
+          ? CompactOpOutputs[N]
+          : OpOutputs[N] | CompactOpOutputs[N]
+      : OpOutputs[N]
+  : OpOutputs[N];
+
+/** An op input that never asks for `compact` (the web app), so its result is the full shape. */
+export type FullOpInput<N extends OpName> = OpInput<N> & { compact?: false };
 
 // Compile-time check: every op has an output type and vice versa.
 type _MissingOutputs = Exclude<OpName, keyof OpOutputs>;

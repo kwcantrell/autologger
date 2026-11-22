@@ -26,10 +26,22 @@ function rangeWhere(sessionId: string, fromSec?: number, toSec?: number) {
   );
 }
 
+/**
+ * Segments that START in [fromSec, toSec): the paging rule of the read ops (get, text, find), so
+ * consecutive windows never return the same segment twice.
+ */
+function startWhere(sessionId: string, fromSec?: number, toSec?: number) {
+  return and(
+    eq(ts.sessionId, sessionId),
+    fromSec !== undefined ? gte(ts.startSec, fromSec) : undefined,
+    toSec !== undefined ? lt(ts.startSec, toSec) : undefined,
+  );
+}
+
 defineOp({
   name: 'transcript.get',
   description:
-    'Transcript segments (speaker turns) with word timings. Times are seconds from session start. Prefer transcript.text for reading.',
+    'Transcript segments (speaker turns) with word timings. Times are seconds from session start. Optional fromSec/toSec select the segments that START in [fromSec, toSec) (the same rule as transcript.text and transcript.find). Prefer transcript.text for reading.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, fromSec, toSec }) {
@@ -37,32 +49,88 @@ defineOp({
     const rows = await ctx.db
       .select()
       .from(ts)
-      .where(rangeWhere(sessionId, fromSec, toSec))
+      .where(startWhere(sessionId, fromSec, toSec))
       .orderBy(asc(ts.startSec));
     return rows.map(toTranscriptSegment);
   },
 });
 
+/** Seconds between `[@…]` stamps inside one long compact paragraph. */
+const COMPACT_STAMP_EVERY_SEC = 60;
+
+type TextRow = { id: string; startSec: number; speaker: string; text: string };
+
+/** One line per segment: `[HH:MM:SS @123.4s] Speaker: text`, optionally prefixed with the id. */
+function linesText(rows: TextRow[], ids: boolean): string {
+  return rows
+    .map(
+      (r) =>
+        `${ids ? `${r.id} ` : ''}[${secondsToClock(r.startSec)} @${r.startSec.toFixed(1)}s] ${r.speaker || 'Speaker'}: ${r.text}`,
+    )
+    .join('\n');
+}
+
+/**
+ * One paragraph per run of consecutive segments by the same speaker: `@123.4 Speaker: text text`,
+ * with an inline `[@183.4]` stamp at the first segment starting a minute or more after the last
+ * stamp. With `ids`, each segment's text is preceded by `{segmentId}`.
+ */
+function compactText(rows: TextRow[], ids: boolean): string {
+  const out: string[] = [];
+  let line = '';
+  let speaker: string | undefined;
+  let stampSec = 0;
+  for (const r of rows) {
+    const id = ids ? `{${r.id}} ` : '';
+    if (r.speaker !== speaker) {
+      if (speaker !== undefined) out.push(line);
+      speaker = r.speaker;
+      stampSec = r.startSec;
+      line = `@${r.startSec.toFixed(1)} ${r.speaker || 'Speaker'}: ${id}${r.text}`;
+    } else if (r.startSec - stampSec >= COMPACT_STAMP_EVERY_SEC) {
+      stampSec = r.startSec;
+      line += ` [@${r.startSec.toFixed(1)}] ${id}${r.text}`;
+    } else {
+      line += ` ${id}${r.text}`;
+    }
+  }
+  if (speaker !== undefined) out.push(line);
+  return out.join('\n');
+}
+
 defineOp({
   name: 'transcript.text',
   description:
-    'The transcript as compact text, one speaker turn per line: `[HH:MM:SS @123.4s] Speaker: text`. The `@seconds` value is what atSec / startSec fields in events.create and topics.create expect. Use fromSec/toSec to page through long sessions. Lines carry no segment ids; use transcript.find to get ids of lines to correct.',
+    'The transcript as text for reading. Default `format: "lines"`: one segment (speaker turn) per line, `[HH:MM:SS @123.4s] Speaker: text`. ' +
+    '`format: "compact"` is much shorter (use it to read long sessions): consecutive segments by the same speaker are merged into one paragraph `@123.4 Speaker: text text ...`, with an inline `[@183.4]` stamp about every 60 s inside long paragraphs. ' +
+    'The @seconds values are what atSec / startSec fields in events.create and topics.create expect. ' +
+    "`ids: true` adds segment ids for targeting edits (transcript.updateSegments, mergeSegments, splitSegment): the lines format prefixes each line with its id (`seg_… [HH:MM:SS @123.4s] Speaker: text`), the compact format puts `{seg_…}` before each segment's text. " +
+    'Paging: fromSec/toSec (seconds from session start) select the segments that START in [fromSec, toSec), so consecutive pages (0-1500, 1500-3000, ...) never repeat a line. ' +
+    'Returns `{ text, segments, chars, totalSegments, durationSec }`: segments and chars describe this page; totalSegments and durationSec (end of the last segment) describe the whole session, so the first call tells you how to page. Over MCP the text comes first, then the numbers as JSON.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, fromSec, toSec }) {
+  async run(ctx, { sessionId, fromSec, toSec, format, ids }) {
     await requireSession(ctx, sessionId, 'read');
     const rows = await ctx.db
-      .select({ startSec: ts.startSec, speaker: ts.speaker, text: ts.text })
+      .select({ id: ts.id, startSec: ts.startSec, speaker: ts.speaker, text: ts.text })
       .from(ts)
-      .where(rangeWhere(sessionId, fromSec, toSec))
+      .where(startWhere(sessionId, fromSec, toSec))
       .orderBy(asc(ts.startSec));
-    const text = rows
-      .map(
-        (r) =>
-          `[${secondsToClock(r.startSec)} @${r.startSec.toFixed(1)}s] ${r.speaker || 'Speaker'}: ${r.text}`,
-      )
-      .join('\n');
-    return { text, segments: rows.length };
+    const [whole] = await ctx.db
+      .select({
+        totalSegments: sql<number>`count(*)::int`,
+        durationSec: sql<number>`coalesce(max(${ts.endSec}), 0)::float8`,
+      })
+      .from(ts)
+      .where(eq(ts.sessionId, sessionId));
+    const text = format === 'compact' ? compactText(rows, ids) : linesText(rows, ids);
+    return {
+      text,
+      segments: rows.length,
+      chars: text.length,
+      totalSegments: whole?.totalSegments ?? 0,
+      durationSec: Math.round((whole?.durationSec ?? 0) * 10) / 10,
+    };
   },
 });
 
@@ -183,18 +251,45 @@ async function findContext(ctx: Ctx, sessionId: string, ids: string[], context: 
 defineOp({
   name: 'transcript.find',
   description:
-    'Find transcript segments (speaker turns) in one session whose text matches `pattern`, or any of `patterns` (up to 20, OR-ed; pass exactly one of the two), case-insensitive. By default patterns are plain text (substring match); set `regex: true` to use PostgreSQL regular expressions (POSIX style, e.g. `\\mdoctor\\M` for whole words, `x ?2`). Beware: `\\m`/`\\M` treat apostrophes as word boundaries, so `\\mm\\M` also matches "I\'m". Optional fromSec/toSec (seconds from session start) narrow the range. Regex searches time out after 2 seconds (bad_request). ' +
-    'Returns `{ id, startSec, endSec, speaker, text, edited, matches, patternIndexes }` per matching line in time order, without word timings: `matches` lists the distinct matched substrings as written in the text, `patternIndexes` the 0-based indexes into `patterns` that matched (always `[0]` with `pattern`). At most `limit` matching lines (default 500); page with fromSec if you hit the limit. ' +
-    'Optional `context` (0-3, default 0) also returns up to that many neighbouring lines before and after each match (from the whole session, ignoring fromSec/toSec), flagged `context: true` and without matches or patternIndexes; use it when an error may span two segments. Pass the ids to transcript.updateSegments to fix them.',
+    'Find transcript segments (speaker turns) in one session whose text matches `pattern`, or any of `patterns` (up to 20, OR-ed; pass exactly one of the two), case-insensitive. By default patterns are plain text (substring match); set `regex: true` to use PostgreSQL regular expressions (POSIX style, e.g. `\\mdoctor\\M` for whole words, `x ?2`). Beware: `\\m`/`\\M` treat apostrophes as word boundaries, so `\\mm\\M` also matches "I\'m". Optional fromSec/toSec (seconds from session start) narrow the search to segments that START in [fromSec, toSec), the same rule as transcript.text, so consecutive windows never return a line twice. Regex searches time out after 2 seconds (bad_request). ' +
+    'Returns `{ total, lines }`: `total` is the number of matching lines in the range before `limit` is applied; `lines` holds `{ id, startSec, endSec, speaker, text, edited, matches, patternIndexes }` per matching line in time order, without word timings: `matches` lists the distinct matched substrings as written in the text, `patternIndexes` the 0-based indexes into `patterns` that matched (always `[0]` with `pattern`). At most `limit` matching lines (default 500); if total > lines returned, page with fromSec = the startSec of the last line returned (that line comes back again). ' +
+    'Optional `context` (0-3, default 0) also returns up to that many neighbouring lines before and after each match (from the whole session, ignoring fromSec/toSec), flagged `context: true` and without matches or patternIndexes; use it when an error may span two segments. Pass the ids to transcript.updateSegments to fix them. ' +
+    'Cheaper modes (context is ignored): `countOnly: true` returns only `{ total, counts }`, where counts[i] is the number of lines matching patterns[i] (use it to size a pattern before fetching lines); `idsOnly: true` returns `{ total, lines }` with only `{ id, startSec, speaker }` per line, up to `limit` (use it to collect ids to edit, e.g. regex `.` over a time range to relabel every line in it).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
-    const { sessionId, regex, fromSec, toSec, limit, context } = input;
+    const { sessionId, regex, fromSec, toSec, limit, context, countOnly, idsOnly } = input;
     const patterns = input.patterns ?? [input.pattern ?? ''];
     await requireSession(ctx, sessionId, 'read');
     try {
       // Bound regex cost: this op's transaction is read-only, so a local timeout is safe.
       if (regex) await ctx.db.execute(sql`set local statement_timeout = '2s'`);
+      const conditions = patterns.map((p) => findCondition(p, regex));
+      const where = and(startWhere(sessionId, fromSec, toSec), or(...conditions));
+      const countAll = async () => {
+        const [c] = await ctx.db
+          .select({
+            total: sql<number>`count(*)::int`,
+            counts: sql<number[]>`jsonb_build_array(${sql.join(
+              conditions.map((cond) => sql`count(*) filter (where ${cond})`),
+              sql`, `,
+            )})`,
+          })
+          .from(ts)
+          .where(where);
+        return { total: c?.total ?? 0, counts: c?.counts ?? patterns.map(() => 0) };
+      };
+      if (countOnly) return countAll();
+      if (idsOnly) {
+        const lines = await ctx.db
+          .select({ id: ts.id, startSec: ts.startSec, speaker: ts.speaker })
+          .from(ts)
+          .where(where)
+          .orderBy(asc(ts.startSec), asc(ts.id))
+          .limit(limit);
+        const total = lines.length < limit ? lines.length : (await countAll()).total;
+        return { total, lines };
+      }
       const rows = await ctx.db
         .select({
           row: ts,
@@ -204,12 +299,7 @@ defineOp({
           )})`,
         })
         .from(ts)
-        .where(
-          and(
-            rangeWhere(sessionId, fromSec, toSec),
-            or(...patterns.map((p) => findCondition(p, regex))),
-          ),
-        )
+        .where(where)
         .orderBy(asc(ts.startSec), asc(ts.id))
         .limit(limit);
       const lines: TranscriptFindLine[] = rows.map(({ row, hits }) => ({
@@ -217,17 +307,21 @@ defineOp({
         matches: [...new Set(hits.flat())],
         patternIndexes: hits.flatMap((h, i) => (h.length > 0 ? [i] : [])),
       }));
+      const total = rows.length < limit ? rows.length : (await countAll()).total;
       const around = await findContext(
         ctx,
         sessionId,
         lines.map((l) => l.id),
         context,
       );
-      if (around.length === 0) return lines;
-      return [
-        ...lines,
-        ...around.map((r): TranscriptFindLine => ({ ...toTranscriptLine(r), context: true })),
-      ].sort((a, b) => a.startSec - b.startSec || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      if (around.length === 0) return { total, lines };
+      return {
+        total,
+        lines: [
+          ...lines,
+          ...around.map((r): TranscriptFindLine => ({ ...toTranscriptLine(r), context: true })),
+        ].sort((a, b) => a.startSec - b.startSec || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+      };
     } catch (e) {
       const err = e as { code?: string; cause?: { code?: string; message?: string } };
       const code = err.code ?? err.cause?.code;
@@ -288,16 +382,46 @@ defineOp({
 defineOp({
   name: 'transcript.renameSpeaker',
   description:
-    'Rename a speaker label across the whole session transcript (e.g. "Speaker 1" → "Dana").',
+    'Rename a speaker label in a session transcript (e.g. "Speaker 1" → "Dana"): every segment labelled `from` gets the label `to`. ' +
+    'Optional fromSec/toSec (seconds from session start, as in transcript_text `@seconds`) limit it to segments that START in [fromSec, toSec), e.g. `{ fromSec: 0, toSec: 47, to: "Promo" }` for an intro. With a range, `from` may be omitted to relabel every segment in it whatever its speaker; without a range `from` is required and the whole session is renamed. ' +
+    'A segment that starts inside the range but runs past it is renamed whole: split it first with transcript.splitSegment (atSec or atText). ' +
+    'Undo: each renamed segment is its own change-log entry (op transcript.renameSpeaker), so undoing a rename means reverting every one of those entries (Agents tab or changes.revert, any order); a whole-session rename of a long transcript creates hundreds. Renaming back (from = the new label, to = the old one, same range) is quicker, but also relabels segments that already had the new label before.Prefer a narrow fromSec/toSec when only part of the session is wrong. Returns `{ updated }`, the number of segments renamed.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, from, to }) {
-    await requireSession(ctx, sessionId, 'write');
+  async run(ctx, { sessionId, from, to, fromSec, toSec }) {
+    const { session } = await requireSession(ctx, sessionId, 'write');
+    const where = and(
+      eq(ts.sessionId, sessionId),
+      from !== undefined ? eq(ts.speaker, from) : undefined,
+      fromSec !== undefined ? gte(ts.startSec, fromSec) : undefined,
+      toSec !== undefined ? lt(ts.startSec, toSec) : undefined,
+      sql`${ts.speaker} <> ${to}`,
+    );
+    const before = await ctx.db.select().from(ts).where(where).orderBy(asc(ts.startSec));
+    if (before.length === 0) return { updated: 0 };
     const rows = await ctx.db
       .update(ts)
       .set({ speaker: to, updatedAt: new Date() })
-      .where(and(eq(ts.sessionId, sessionId), eq(ts.speaker, from)))
-      .returning({ id: ts.id });
+      .where(
+        inArray(
+          ts.id,
+          before.map((r) => r.id),
+        ),
+      )
+      .returning();
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const r of before) {
+      await ctx.record({
+        entity: 'transcript_segment',
+        entityId: r.id,
+        kind: 'update',
+        summary: `Renamed speaker "${r.speaker}" to "${to}" at ${secondsToClock(r.startSec)}`,
+        showId: session.showId,
+        sessionId,
+        before: snapshot(r),
+        after: snapshot(byId.get(r.id)),
+      });
+    }
     ctx.publish(`session:${sessionId}`, { type: 'invalidate', entity: 'transcript_segment' });
     return { updated: rows.length };
   },
@@ -314,6 +438,43 @@ function timedWords(row: SegmentRow): SegmentRow['words'] {
 }
 
 const wordsText = (words: SegmentRow['words']) => words.map((w) => w.w).join(' ');
+
+/** Lower-case a word and drop punctuation, so "Okay." matches "okay". */
+const normWord = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
+/** Word index where `phrase` starts (split before it); it must occur exactly once, not at the start. */
+function splitIndexOfText(words: SegmentRow['words'], phrase: string): number {
+  const want = phrase.split(/\s+/).map(normWord).filter(Boolean);
+  if (want.length === 0) throw badRequest('atText has no words to look for.');
+  const have = words.map((w) => normWord(w.w));
+  const hits: number[] = [];
+  for (let i = 0; i + want.length <= have.length; i++) {
+    if (want.every((t, k) => have[i + k] === t)) hits.push(i);
+  }
+  if (hits.length === 0)
+    throw badRequest(
+      `atText "${phrase}" is not in this segment (matched word by word, ignoring case and punctuation).`,
+    );
+  if (hits.length > 1)
+    throw badRequest(
+      `atText "${phrase}" occurs ${hits.length} times in this segment; give more words or use atSec.`,
+    );
+  if (hits[0] === 0)
+    throw badRequest(
+      `atText "${phrase}" starts the segment; there is nothing to split off before it.`,
+    );
+  return hits[0]!;
+}
+
+/** Index of the first word starting at or after `atSec`; it must leave words on both sides. */
+function splitIndexOfSec(words: SegmentRow['words'], atSec: number): number {
+  const i = words.findIndex((w) => w.s >= atSec);
+  if (i < 1)
+    throw badRequest(
+      `atSec ${atSec} must fall after the first word (${words[0]?.s ?? '?'}s) and at or before the last word's start (${words.at(-1)?.s ?? '?'}s) of this segment.`,
+    );
+  return i;
+}
 
 defineOp({
   name: 'transcript.mergeSegments',
@@ -416,14 +577,20 @@ defineOp({
 defineOp({
   name: 'transcript.splitSegment',
   description:
-    "Split one transcript segment (segmentId from transcript.find or transcript.get) in two at word index `atWord`: a 0-based index into the segment's `words` from transcript.get, at least 1 and less than the word count. The original keeps its id and the words before `atWord`; a new segment gets that word and the rest. The split time is that word's start (seconds from session start). Both texts are rebuilt from their words. The new segment keeps the speaker unless `speaker` is given (use it when the speaker changes mid-segment). Change log: one entry per row (an update for the original and a create for the new segment), not one entry for the split; to undo the split, revert both together (any order) to restore the original exactly. Reverting only one leaves duplicate or missing words. Returns both segments in time order, with word timings.",
+    "Split one transcript segment (segmentId from transcript.find or transcript.get) in two. Say where with exactly one of: `atText`, a phrase from the segment's text to split before (e.g. the first words of the second speaker's reply; matched word by word ignoring case and punctuation; it must occur exactly once and not at the very start, else bad_request: add words or use atSec); `atSec`, seconds from session start (split before the first word starting at or after it, e.g. a time read from transcript_text `@seconds`); or `atWord`, a 0-based index into the segment's `words` from transcript.get, at least 1 and less than the word count. The original keeps its id and the words before `atWord`; a new segment gets that word and the rest. The split time is that word's start (seconds from session start). Both texts are rebuilt from their words. The new segment keeps the speaker unless `speaker` is given (use it when the speaker changes mid-segment). Change log: one entry per row (an update for the original and a create for the new segment), not one entry for the split; to undo the split, revert both together (any order) to restore the original exactly. Reverting only one leaves duplicate or missing words. Returns both segments in time order, with word timings.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { segmentId, atWord, speaker }) {
+  async run(ctx, { segmentId, atWord: givenWord, atText, atSec, speaker }) {
     const [row] = await ctx.db.select().from(ts).where(eq(ts.id, segmentId));
     if (!row) throw notFound('Transcript segment');
     const { session } = await requireSession(ctx, row.sessionId, 'write');
     const words = timedWords(row);
+    const atWord =
+      atText !== undefined
+        ? splitIndexOfText(words, atText)
+        : atSec !== undefined
+          ? splitIndexOfSec(words, atSec)
+          : givenWord!;
     if (atWord >= words.length)
       throw badRequest(
         `atWord must be between 1 and ${words.length - 1} for this segment (it has ${words.length} words).`,
@@ -484,6 +651,50 @@ const MAX_REPLACE_WORK = 200_000;
 /** Total time all rules of one transcript.replace call may take in PostgreSQL. */
 const REPLACE_BUDGET_MS = 5000;
 
+/** Changes a compact transcript.replace dry run shows as samples. */
+const REPLACE_SAMPLES = 5;
+const isSpace = (ch: string | undefined) => ch !== undefined && /\s/.test(ch);
+
+/** Where the last `words` words of `cs` (and any word cut at its end) begin. */
+function wordsBack(cs: readonly string[], words: number): number {
+  let i = cs.length;
+  while (i > 0 && !isSpace(cs[i - 1])) i--;
+  for (let w = 0; w < words && i > 0; w++) {
+    while (i > 0 && isSpace(cs[i - 1])) i--;
+    while (i > 0 && !isSpace(cs[i - 1])) i--;
+  }
+  return i;
+}
+
+/**
+ * `before` and `after` cut to the span from the first to the last difference plus `words` words
+ * of context either side (`…` marks a cut); a span over `maxSpan` characters is cut in the
+ * middle. Works on code points, so a surrogate pair is never split.
+ */
+function diffExcerpt(
+  before: string,
+  after: string,
+  words = 3,
+  maxSpan = 120,
+): { before: string; after: string } {
+  const b = Array.from(before);
+  const a = Array.from(after);
+  const max = Math.min(b.length, a.length);
+  let p = 0;
+  while (p < max && b[p] === a[p]) p++;
+  let q = 0;
+  while (q < max - p && b[b.length - 1 - q] === a[a.length - 1 - q]) q++;
+  const start = wordsBack(b.slice(0, p), words);
+  const tail = b.slice(b.length - q);
+  const end = tail.length - wordsBack([...tail].reverse(), words);
+  const cut = (cs: string[]) => {
+    let mid = cs.slice(start, cs.length - q + end);
+    if (mid.length > maxSpan) mid = [...mid.slice(0, maxSpan / 2), '…', ...mid.slice(-maxSpan / 2)];
+    return `${start > 0 ? '…' : ''}${mid.join('')}${end < tail.length ? '…' : ''}`;
+  };
+  return { before: cut(b), after: cut(a) };
+}
+
 defineOp({
   name: 'transcript.replace',
   description:
@@ -492,10 +703,11 @@ defineOp({
     "Omit `rules` to apply the show's saved transcriptRules (e.g. to a session transcribed before they were set, without re-transcribing and losing manual edits). Optional fromSec/toSec (seconds from session start) limit it to segments overlapping that range. " +
     'Set `dryRun: true` first to preview: nothing is written and the result lists the would-be changes. Otherwise all changes apply in one transaction; each changed segment is its own change-log entry, undoable one by one from the Agents tab, and unchanged words keep their word timings. Segments a rule would empty are left unchanged. ' +
     'Limits (bad_request): invalid regexes or ones matching empty text; segments × rules over 200000 (narrow fromSec/toSec); a rule running over 2 s or all rules over 5 s. Segments over 20000 characters are skipped. ' +
-    'Returns `{ dryRun, changed, rules: [{ find, replace, count }], segments: [{ id, startSec, endSec, speaker, before, after }], truncated }`; `segments` lists at most 500 changes in time order (truncated is then true; narrow fromSec/toSec to see the rest).',
+    'Returns `{ dryRun, changed, rules: [{ find, replace, count }], segments: [{ id, startSec, endSec, speaker, before, after }], truncated }`; `segments` lists at most 500 changes in time order (truncated is then true; narrow fromSec/toSec to see the rest). ' +
+    `Pass \`compact: true\` (recommended for agents; full results run to tens of KB on long sessions) to get \`{ dryRun, changed, replacements, rules: [{ find, count }], samples? }\` instead: \`replacements\` is the total match count, \`rules\` lists only rules that matched, and a dry run adds \`samples\`: the first ${REPLACE_SAMPLES} changes as \`{ id, startSec, before, after }\`, each cut to the span from its first to its last changed word plus 3 words of context either side (\`…\` marks a cut). Check specific lines with transcript_find.`,
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, rules: given, fromSec, toSec, dryRun }) {
+  async run(ctx, { sessionId, rules: given, fromSec, toSec, dryRun, compact }) {
     const { session } = await requireSession(ctx, sessionId, 'write');
     let rules = given;
     if (!rules) {
@@ -545,6 +757,22 @@ defineOp({
     }
     if (!dryRun && changes.length)
       ctx.publish(`session:${sessionId}`, { type: 'invalidate', entity: 'transcript_segment' });
+    if (compact)
+      return {
+        dryRun,
+        changed: changes.length,
+        replacements: run.counts.reduce((n, c) => n + c, 0),
+        rules: rules.flatMap((r, i) =>
+          run.counts[i] ? [{ find: r.find, count: run.counts[i] }] : [],
+        ),
+        ...(dryRun && {
+          samples: changes.slice(0, REPLACE_SAMPLES).map((c) => ({
+            id: c.id,
+            startSec: c.startSec,
+            ...diffExcerpt(c.before, c.after),
+          })),
+        }),
+      };
     return {
       dryRun,
       changed: changes.length,

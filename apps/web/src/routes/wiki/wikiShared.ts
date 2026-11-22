@@ -1,6 +1,6 @@
 // Wiki labels, formatting, link resolution and the write hooks shared by the wiki screens.
 
-import type { WikiKind, WikiPageSummary } from '@autologger/contract';
+import { normTitle, type WikiKind, type WikiPageSummary } from '@autologger/contract';
 import { useMemo } from 'react';
 import { qk, useOpMutation, useWikiList } from '@/api/queries';
 
@@ -14,7 +14,7 @@ export const WIKI_KIND_LABEL: Record<WikiKind, string> = {
 export const wikiHref = (pageId: string) => `/wiki/${encodeURIComponent(pageId)}`;
 
 /** Same normalisation as the server's title matching (trim, lower-case, collapse spaces). */
-export const normTitle = (t: string) => t.trim().toLowerCase().replace(/\s+/g, ' ');
+export { normTitle };
 
 /** Lower-case with accents dropped, so "jose" finds "José" (list filter). */
 export const fold = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
@@ -57,7 +57,7 @@ export function useWikiResolver(showId: string | undefined): {
 export function useWikiUpsert() {
   return useOpMutation('wiki.upsert', {
     onSuccess: (page, _input, qc) => qc.setQueryData(qk.wikiPage(page.id), page),
-    invalidate: (page) => [qk.wikiList(page.showId), qk.wikiRevisions(page.id)],
+    invalidate: (page, input) => [qk.wikiList(input.showId), qk.wikiRevisions(page.id)],
   });
 }
 

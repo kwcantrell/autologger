@@ -1,7 +1,7 @@
 // Edit a dashboard's spec as JSON. Validated locally with the contract's zod schema before save;
 // server errors are shown inline too.
 
-import { type Dashboard, DashboardSpec } from '@autologger/contract';
+import { type Dashboard, DashboardSpec, formatIssues } from '@autologger/contract';
 import { useMemo, useState } from 'react';
 import { qk, useOpMutation } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
@@ -31,9 +31,7 @@ function check(text: string): Check {
   if (r.success) return { ok: true, spec: r.data };
   return {
     ok: false,
-    issues: r.error.issues
-      .slice(0, 20)
-      .map((i) => ({ path: i.path.map(String).join('.'), message: i.message })),
+    issues: formatIssues(r.error.issues).slice(0, 20),
   };
 }
 

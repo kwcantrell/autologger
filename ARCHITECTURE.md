@@ -72,6 +72,9 @@ export const createEvent = defineOp({
 - **Companion WS**: ops with `'companion'` in `surfaces`.
 - `ctx` carries `actor` (`{ userId, via: 'web'|'mcp'|'companion'|'worker', clientName, tokenId }`),
   `db` (the transaction), `record()` (change-log writer) and `publish()` (realtime, flushed after commit).
+- Long-poll ops (`jobs.list` with `waitSec`) define `watch`: it starts listening on the realtime bus
+  before the transaction, waits after commit (no DB connection held; ends early on client
+  disconnect via the request's AbortSignal), then the op runs again in a new transaction.
 - Authorization is explicit inside `run` via helpers in `core/authz.ts`: `requireTeamRole`,
   `requireShow(ctx, showId, 'read'|'write')`, `requireSession(ctx, sessionId, 'read'|'write')`.
 - Errors: `AppError(code, message)`; codes `bad_request`, `unauthenticated`, `forbidden`,
@@ -109,6 +112,8 @@ while stopped), `take`, `frame_rate`, `start_offset_frames`. Current timecode =
 4. Worker `transcribe`: streams the object from S3 to Deepgram (`nova-3`, diarize, utterances),
    writes `transcript_segments` offset by the segment's session time.
 5. Playback: `media.playbackUrl` returns a presigned GET.
+6. Queue order (`claimJob`): `run_after`, transcriptions first, `created_at`, `id`. An import's
+   transcription gets `run_after` = the import's `created_at`, so it runs before later imports.
 
 Without `DEEPGRAM_API_KEY` / S3 config the ops return `unavailable` and the UI says so.
 

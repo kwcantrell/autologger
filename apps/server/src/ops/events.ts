@@ -133,10 +133,10 @@ async function publishEvents(
 defineOp({
   name: 'events.list',
   description:
-    'All events logged in a session, in timecode order. Each event has `atSec` (seconds from the session start, rounded to ms; lines up with transcript_text @seconds and is the same value events.create/update accept as atSec) and `timecodeFrames` (frame count on the session clock, including startOffsetFrames — see sessions.get for frameRate). atSec is null only when the event has no timecode.',
+    'All events logged in a session, in timecode order. Each event has `atSec` (seconds from the session start, rounded to ms; lines up with transcript_text @seconds and is the same value events.create/update accept as atSec) and `timecodeFrames` (frame count on the session clock, including startOffsetFrames — see sessions.get for frameRate). atSec is null only when the event has no timecode. Pass `compact: true` (recommended for agents, e.g. to check an events_createMany batch) to get only `[{ id, atSec, category, message }]` per event.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, categoryIds, source }) {
+  async run(ctx, { sessionId, categoryIds, source, compact }) {
     const { session } = await requireSession(ctx, sessionId, 'read');
     const rows = await ctx.db
       .select()
@@ -149,7 +149,10 @@ defineOp({
         ),
       )
       .orderBy(asc(events.timecodeFrames), asc(events.createdAt));
-    return eventEntities(ctx, session, rows);
+    const out = await eventEntities(ctx, session, rows);
+    return compact
+      ? out.map(({ id, atSec, category, message }) => ({ id, atSec, category, message }))
+      : out;
   },
 });
 
@@ -189,40 +192,88 @@ async function loadEvent(ctx: Ctx, eventId: string, need: 'read' | 'write') {
   return { row, session };
 }
 
+type EventPatch = {
+  categoryId?: string | null;
+  category?: string;
+  message?: string;
+  value?: string | null;
+  timecode?: string;
+  atSec?: number;
+};
+
+/** Apply one event edit and record it in the change log (before/after) for undo. */
+async function updateEventRow(
+  ctx: Ctx,
+  session: SessionRow,
+  row: EventRow,
+  { categoryId, category, message, value, timecode, atSec }: EventPatch,
+): Promise<EventRow> {
+  const set: Partial<typeof events.$inferInsert> = { updatedAt: new Date() };
+  if (categoryId !== undefined || category !== undefined) {
+    Object.assign(
+      set,
+      await resolveCategory(ctx, session.showId, {
+        categoryId,
+        category: category ?? row.category,
+      }),
+    );
+  }
+  if (message !== undefined) set.message = message;
+  if (value !== undefined) set.value = value;
+  if (timecode !== undefined || atSec !== undefined)
+    set.timecodeFrames = resolveFrames(session, { timecode, atSec });
+  const [after] = await ctx.db.update(events).set(set).where(eq(events.id, row.id)).returning();
+  await ctx.record({
+    entity: 'event',
+    entityId: row.id,
+    kind: 'update',
+    summary: `Edited ${after!.category} event`,
+    showId: session.showId,
+    sessionId: session.id,
+    before: snapshot(row),
+    after: snapshot(after),
+  });
+  return after!;
+}
+
 defineOp({
   name: 'events.update',
   description: 'Edit an event’s button, message, value or time.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { eventId, categoryId, category, message, value, timecode, atSec }) {
+  async run(ctx, { eventId, ...patch }) {
     const { row, session } = await loadEvent(ctx, eventId, 'write');
-    const set: Partial<typeof events.$inferInsert> = { updatedAt: new Date() };
-    if (categoryId !== undefined || category !== undefined) {
-      Object.assign(
-        set,
-        await resolveCategory(ctx, session.showId, {
-          categoryId,
-          category: category ?? row.category,
-        }),
-      );
-    }
-    if (message !== undefined) set.message = message;
-    if (value !== undefined) set.value = value;
-    if (timecode !== undefined || atSec !== undefined)
-      set.timecodeFrames = resolveFrames(session, { timecode, atSec });
-    const [after] = await ctx.db.update(events).set(set).where(eq(events.id, eventId)).returning();
-    await ctx.record({
-      entity: 'event',
-      entityId: eventId,
-      kind: 'update',
-      summary: `Edited ${after!.category} event`,
-      showId: session.showId,
-      sessionId: session.id,
-      before: snapshot(row),
-      after: snapshot(after),
-    });
-    const [out] = await publishEvents(ctx, session, [after!]);
+    const after = await updateEventRow(ctx, session, row, patch);
+    const [out] = await publishEvents(ctx, session, [after]);
     return out!;
+  },
+});
+
+defineOp({
+  name: 'events.updateMany',
+  description:
+    'Edit up to 500 events of one session in one call. Each item is { id (event id from events_list), and only the fields to change: categoryId | category (button), message, value, atSec (seconds from the session start, as in transcript_text) | timecode }; omitted fields stay as they are. All-or-nothing: an unknown id or an event from another session fails the whole call with nothing changed. Each edit is its own entry in the change log, so it can be undone per event. Returns the updated events in input order; pass `compact: true` to get only `[{ id, atSec, category }]`.',
+  kind: 'write',
+  surfaces: ['web', 'mcp'],
+  async run(ctx, { sessionId, events: list, compact }) {
+    const { session } = await requireSession(ctx, sessionId, 'write');
+    const ids = list.map((e) => e.id);
+    if (new Set(ids).size !== ids.length) throw badRequest('Each event id may appear only once.');
+    const rows = await ctx.db
+      .select()
+      .from(events)
+      .where(and(eq(events.sessionId, sessionId), inArray(events.id, ids)));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const missing = ids.filter((i) => !byId.has(i));
+    if (missing.length)
+      throw notFound(
+        `Event${missing.length > 1 ? 's' : ''} ${missing.slice(0, 10).join(', ')} in this session`,
+      );
+    const updated: EventRow[] = [];
+    for (const { id, ...patch } of list)
+      updated.push(await updateEventRow(ctx, session, byId.get(id)!, patch));
+    const out = await publishEvents(ctx, session, updated);
+    return compact ? out.map(({ id, atSec, category }) => ({ id, atSec, category })) : out;
   },
 });
 

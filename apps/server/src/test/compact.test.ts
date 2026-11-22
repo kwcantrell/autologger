@@ -99,4 +99,129 @@ describe('compact responses for bulk writes', () => {
       revision: 1,
     });
   });
+
+  it('events.list returns [{ id, atSec, category, message }] and checks access', async () => {
+    const { owner, session } = await studio();
+    await call(owner, 'events.create', {
+      sessionId: session.id,
+      category: 'Laugh',
+      atSec: 3,
+      message: 'ha',
+    });
+    const res = await call(asAgent(owner), 'events.list', { sessionId: session.id, compact: true });
+    expect(res).toEqual([{ id: expect.any(String), atSec: 3, category: 'Laugh', message: 'ha' }]);
+    const outsider = await makeUser('outsider@example.com');
+    await failsWith(
+      call(outsider, 'events.list', { sessionId: session.id, compact: true }),
+      'not_found',
+    );
+  });
+
+  it('wiki.upsert returns { id, title, kind, revision, unresolvedLinks } and stays undoable', async () => {
+    const { owner, show } = await studio();
+    const agent = asAgent(owner);
+    await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'person',
+      title: 'Dana Lee',
+      aliases: ['Dana'],
+      bodyMd: 'Host.',
+    });
+    const body = 'With [[dana]], [[Dana Lee|the host]], [[Tom Talks]] and [[ tom talks ]].';
+    const created = await call(agent, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'topic',
+      title: 'Episode notes',
+      bodyMd: body,
+      compact: true,
+    });
+    expect(created).toEqual({
+      id: expect.any(String),
+      title: 'Episode notes',
+      kind: 'topic',
+      revision: 1,
+      unresolvedLinks: ['Tom Talks'],
+    });
+    const updated = await call(agent, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'topic',
+      title: 'Episode notes',
+      bodyMd: 'Links to [[Episode notes]] only.',
+      compact: true,
+    });
+    expect(updated).toMatchObject({ id: created.id, revision: 2, unresolvedLinks: [] });
+
+    const [latest] = await call(owner, 'changes.list', { showId: show.id, via: 'mcp' });
+    await call(owner, 'changes.revert', { changeId: latest!.id });
+    expect(await call(owner, 'wiki.get', { pageId: created.id })).toMatchObject({ bodyMd: body });
+
+    const outsider = await makeUser('outsider@example.com');
+    await failsWith(
+      call(outsider, 'wiki.upsert', {
+        showId: show.id,
+        kind: 'topic',
+        title: 'X',
+        bodyMd: '',
+        compact: true,
+      }),
+      'not_found',
+    );
+  });
+
+  it('transcript.replace returns counts, and trimmed samples on a dry run', async () => {
+    const { owner, session } = await studio();
+    const agent = asAgent(owner);
+    const filler = 'and then we talked about it for a while longer than planned';
+    const ids = Array.from({ length: 100 }, () => newId('seg'));
+    await db.insert(schema.transcriptSegments).values(
+      ids.map((id, i) => ({
+        id,
+        sessionId: session.id,
+        startSec: i * 10,
+        endSec: i * 10 + 9,
+        text: `${filler} so the doctor said ${filler} and ${filler}`,
+        words: [],
+      })),
+    );
+    const rules = [
+      { find: 'doctor', replace: 'dr', wholeWord: true },
+      { find: 'nowhere', replace: 'x' },
+    ];
+    const preview = await call(agent, 'transcript.replace', {
+      sessionId: session.id,
+      rules,
+      dryRun: true,
+      compact: true,
+    });
+    expect(preview).toMatchObject({
+      dryRun: true,
+      changed: 100,
+      replacements: 100,
+      rules: [{ find: 'doctor', count: 100 }],
+    });
+    // compact: true types the result as the compact shape: no narrowing needed.
+    expect(preview.samples).toHaveLength(5);
+    expect(preview.samples?.[0]).toEqual({
+      id: ids[0],
+      startSec: 0,
+      before: '…planned so the doctor said and then…',
+      after: '…planned so the dr said and then…',
+    });
+    expect(JSON.stringify(preview).length).toBeLessThan(2048);
+
+    const applied = await call(agent, 'transcript.replace', {
+      sessionId: session.id,
+      rules,
+      compact: true,
+    });
+    expect(applied).toEqual({
+      dryRun: false,
+      changed: 100,
+      replacements: 100,
+      rules: [{ find: 'doctor', count: 100 }],
+    });
+    expect(JSON.stringify(applied).length).toBeLessThan(2048);
+    const [first] = await call(owner, 'transcript.get', { sessionId: session.id, toSec: 5 });
+    expect(first!.text).toContain('so the dr said');
+  });
 });

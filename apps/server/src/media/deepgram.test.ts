@@ -1,8 +1,10 @@
 import { keyTermsChars, MAX_KEY_TERMS_TOTAL_CHARS, opInputs } from '@autologger/contract';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  countKeyTerms,
   type DeepgramResponse,
   deepgramUrl,
+  describeKeyTermCounts,
   mapDeepgram,
   PermanentError,
   transcribeAudio,
@@ -51,10 +53,10 @@ describe('mapDeepgram', () => {
         speaker: 'Speaker 1',
         text: 'Hello there, welcome back.',
         words: [
-          { w: 'Hello', s: 100.24, e: 100.6 },
-          { w: 'there,', s: 100.6, e: 101 },
-          { w: 'welcome', s: 101.2, e: 101.9 },
-          { w: 'back.', s: 101.9, e: 102.8 },
+          { w: 'Hello', s: 100.24, e: 100.6, sp: 0 },
+          { w: 'there,', s: 100.6, e: 101, sp: 0 },
+          { w: 'welcome', s: 101.2, e: 101.9, sp: 0 },
+          { w: 'back.', s: 101.9, e: 102.8, sp: 0 },
         ],
       },
       {
@@ -63,11 +65,62 @@ describe('mapDeepgram', () => {
         speaker: 'Speaker 2',
         text: 'Yes, thanks.',
         words: [
-          { w: 'Yes,', s: 106.1, e: 106.5 },
-          { w: 'thanks.', s: 106.6, e: 108.4 },
+          { w: 'Yes,', s: 106.1, e: 106.5, sp: 1 },
+          { w: 'thanks.', s: 106.6, e: 108.4, sp: 1 },
         ],
       },
     ]);
+  });
+
+  it('splits an utterance where the word-level speaker changes, ignoring short blips', () => {
+    const word = (w: string, start: number, end: number, speaker: number) => ({
+      word: w.toLowerCase(),
+      punctuated_word: w,
+      start,
+      end,
+      speaker,
+    });
+    const rows = mapDeepgram(
+      {
+        results: {
+          utterances: [
+            {
+              start: 1,
+              end: 6,
+              transcript: 'How did it go? Yeah. Great, thanks. Mm. Really well.',
+              speaker: 0,
+              words: [
+                word('How', 1, 1.2, 0),
+                word('did', 1.2, 1.4, 0),
+                word('it', 1.4, 1.5, 0),
+                word('go?', 1.5, 1.9, 0),
+                // A long-enough answer from speaker 1 …
+                word('Yeah.', 2.2, 2.6, 1),
+                word('Great,', 2.7, 3.1, 1),
+                word('thanks.', 3.1, 3.6, 1),
+                // … with a 0.2 s one-word blip labelled speaker 0 inside it.
+                word('Mm.', 3.7, 3.9, 0),
+                word('Really', 4, 4.5, 1),
+                word('well.', 4.5, 5.8, 1),
+              ],
+            },
+          ],
+        },
+      },
+      10,
+    );
+    expect(
+      rows.map(({ startSec, endSec, speaker, text }) => ({ startSec, endSec, speaker, text })),
+    ).toEqual([
+      { startSec: 11, endSec: 11.9, speaker: 'Speaker 1', text: 'How did it go?' },
+      {
+        startSec: 12.2,
+        endSec: 16,
+        speaker: 'Speaker 2',
+        text: 'Yeah. Great, thanks. Mm. Really well.',
+      },
+    ]);
+    expect(rows[1]!.words[3]).toEqual({ w: 'Mm.', s: 13.7, e: 13.9, sp: 0 });
   });
 
   it('falls back to the channel transcript when there are no utterances', () => {
@@ -171,6 +224,28 @@ describe('deepgramUrl', () => {
     const sent = params(deepgramUrl({ smartFormat: true, keyTerms: terms })).getAll('keyterm');
     expect(sent).toEqual(terms.slice(0, 25));
     expect(keyTermsChars(sent)).toBeLessThanOrEqual(MAX_KEY_TERMS_TOTAL_CHARS);
+  });
+});
+
+describe('key term hit counts', () => {
+  it('counts whole-word, case-insensitive occurrences of each term', () => {
+    const counts = countKeyTerms(
+      ['Tom Segura is here. tom segura!', 'Rotten Tom Segura', 'Seguras', "O'Leary and Olu Dara"],
+      ['Tom Segura', "O'Leary", 'Akinyele', 'a+b'],
+    );
+    expect(counts).toEqual([
+      { term: 'Tom Segura', count: 3 },
+      { term: "O'Leary", count: 1 },
+      { term: 'Akinyele', count: 0 },
+      { term: 'a+b', count: 0 },
+    ]);
+    expect(describeKeyTermCounts(counts)).toBe(
+      "key terms: Akinyele ×0, a+b ×0, Tom Segura ×3, O'Leary ×1",
+    );
+    expect(describeKeyTermCounts([])).toBe('');
+    const many = Array.from({ length: 20 }, (_, i) => ({ term: `t${i}`, count: i === 19 ? 0 : 1 }));
+    const listed = many.slice(0, 14).map((c) => `${c.term} ×1`);
+    expect(describeKeyTermCounts(many)).toBe(`key terms: t19 ×0, ${listed.join(', ')}, +5 more`);
   });
 });
 

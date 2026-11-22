@@ -172,6 +172,7 @@ export const sessions = pgTable(
     take: integer('take').notNull().default(0),
     sourceKind: text('source_kind', { enum: ['recorded', 'file', 'youtube'] }),
     sourceUrl: text('source_url'),
+    keyTerms: text('key_terms').array().notNull().default(sql`'{}'::text[]`),
     archivedAt: ts('archived_at'),
     createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: created(),
@@ -256,7 +257,10 @@ export const transcriptSegments = pgTable(
     endSec: doublePrecision('end_sec').notNull(),
     speaker: text('speaker').notNull().default(''),
     text: text('text').notNull(),
-    words: jsonb('words').$type<{ w: string; s: number; e: number }[]>().notNull().default([]),
+    words: jsonb('words')
+      .$type<{ w: string; s: number; e: number; sp?: number }[]>()
+      .notNull()
+      .default([]),
     edited: boolean('edited').notNull().default(false),
     createdAt: created(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
