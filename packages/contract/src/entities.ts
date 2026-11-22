@@ -77,6 +77,10 @@ export interface Show {
   nextEpisode: number;
   defaultFrameRate: number;
   titleSuffix: 'date' | 'episode' | 'none';
+  /** Transcription: Deepgram smart formatting (numerals, dates, currency…). Default true. */
+  smartFormat: boolean;
+  /** Transcription: key terms the transcriber should favour (Deepgram keyterm prompting). */
+  keyTerms: string[];
   createdAt: string;
   access: ShowAccess;
   sessionCount: number;
@@ -122,6 +126,8 @@ export interface SessionEvent {
   /** Dropdown option / toggle state ("ON"/"OFF") when the category has one. */
   value: string | null;
   timecodeFrames: number | null;
+  /** Seconds from the session start (lines up with transcript times); null without a timecode. */
+  atSec: number | null;
   wallTime: string;
   take: number;
   source: EventSource;
@@ -162,6 +168,16 @@ export interface TranscriptSegment {
   speaker: string;
   text: string;
   words: TranscriptWord[];
+  edited: boolean;
+}
+
+/** A transcript segment without word timings — the compact shape agents search and edit. */
+export interface TranscriptLine {
+  id: string;
+  startSec: number;
+  endSec: number;
+  speaker: string;
+  text: string;
   edited: boolean;
 }
 

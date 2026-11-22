@@ -1,5 +1,5 @@
 import type { DashboardQuery, DashboardRows } from '@autologger/contract';
-import { asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, lte, sql } from 'drizzle-orm';
 import { requireSession } from '../core/authz.ts';
 import { changeMessage } from '../core/bus.ts';
 import { notFound } from '../core/errors.ts';
@@ -78,7 +78,12 @@ export async function runDashboardQuery(
           summary: topics.summary,
         })
         .from(topics)
-        .where(eq(topics.sessionId, sessionId))
+        .where(
+          and(
+            eq(topics.sessionId, sessionId),
+            q.maxLevel ? lte(topics.level, q.maxLevel) : undefined,
+          ),
+        )
         .orderBy(asc(topics.startSec));
     case 'events': {
       const rows = await ctx.db
@@ -106,9 +111,18 @@ export async function runDashboardQuery(
           speakers: sql<number>`(select count(distinct speaker)::int from transcript_segments where session_id = ${sessionId})`,
           words: sql<number>`(select coalesce(sum(jsonb_array_length(words)),0)::int from transcript_segments where session_id = ${sessionId})`,
           audioSec: sql<number>`(select coalesce(sum(duration_sec),0)::float from audio_segments where session_id = ${sessionId})`,
+          speechSec: sql<number>`(select coalesce(max(end_sec) - min(start_sec),0)::float from transcript_segments where session_id = ${sessionId})`,
         })
         .from(sql`(select 1) as one`);
-      return [r!];
+      // Speaking pace over the transcript span (first segment start → last segment end).
+      const speechSec = Math.max(0, r!.speechSec);
+      return [
+        {
+          ...r!,
+          speechSec: Math.round(speechSec * 10) / 10,
+          wpm: speechSec > 0 ? Math.round(r!.words / (speechSec / 60)) : null,
+        },
+      ];
     }
   }
 }
@@ -152,8 +166,10 @@ Widget types: stat {value|data+field, unit?, caption?}; bar {x, y, horizontal?};
 table {columns?: [{key,label}]}; timeline {at (seconds field), label, duration?}; markdown {markdown}.
 Data widgets take either static \`data\` rows you computed, or a live \`query\` re-evaluated on every view:
 events_by_category → {category,color,count}; events_over_time {bucketSec} → {atSec,category,count};
-speaker_talk_time → {speaker,seconds,turns}; topics → {atSec,durationSec,label,level,summary};
-events {categories?,limit} → {atSec,label,category,message,value,color}; summary_stats → {events,topics,speakers,words,audioSec}.
+speaker_talk_time → {speaker,seconds,turns}; topics {maxLevel?} → {atSec,durationSec,label,level,summary} (maxLevel 1 = chapters only, best for a timeline);
+events {categories?,limit} → {atSec,label,category,message,value,color}; summary_stats → {events,topics,speakers,words,audioSec,speechSec,wpm}
+(speechSec = last transcript segment end − first segment start, 0 without a transcript; wpm = words per minute
+over speechSec, rounded, null when speechSec is 0 — use it for speaking pace).
 Prefer live queries for counts so the dashboard stays current. Markdown is rendered without HTML.`,
   kind: 'write',
   surfaces: ['web', 'mcp'],

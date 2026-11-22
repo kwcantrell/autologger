@@ -6,7 +6,13 @@ import { changeMessage, publish } from '../core/bus.ts';
 import { newId } from '../core/ids.ts';
 import { db, schema } from '../db/client.ts';
 import { env, transcriptionConfigured } from '../env.ts';
-import { mapDeepgram, PermanentError, transcribeAudio } from '../media/deepgram.ts';
+import {
+  DEFAULT_TRANSCRIPTION_OPTIONS,
+  mapDeepgram,
+  PermanentError,
+  type TranscriptionOptions,
+  transcribeAudio,
+} from '../media/deepgram.ts';
 import { enqueueJob, type JobRow, toJob } from '../media/jobs.ts';
 import { getObjectStream, objectKeyFor, putObjectFromFile, requireStorage } from '../media/s3.ts';
 import { lockSession, nextSegmentSlot } from '../media/segments.ts';
@@ -14,7 +20,7 @@ import { downloadAudio } from '../media/youtube.ts';
 import { toAudioSegment } from '../ops/map.ts';
 import { setProgress } from './queue.ts';
 
-const { audioSegments, transcriptSegments, sessions } = schema;
+const { audioSegments, transcriptSegments, sessions, shows } = schema;
 type SegmentRow = typeof audioSegments.$inferSelect;
 
 export interface Handler {
@@ -39,6 +45,19 @@ async function updateSegment(
   return row ?? null;
 }
 
+/**
+ * The show's transcription settings for a session, read when the job runs (not when it is
+ * queued) so `media.retranscribe` picks up edits made in Show details.
+ */
+export async function transcriptionOptionsFor(sessionId: string): Promise<TranscriptionOptions> {
+  const [row] = await db
+    .select({ smartFormat: shows.smartFormat, keyTerms: shows.keyTerms })
+    .from(sessions)
+    .innerJoin(shows, eq(shows.id, sessions.showId))
+    .where(eq(sessions.id, sessionId));
+  return row ?? DEFAULT_TRANSCRIPTION_OPTIONS;
+}
+
 const segmentIdOf = (job: JobRow) => (job.payload as { segmentId?: string }).segmentId;
 
 const transcribe: Handler = {
@@ -54,8 +73,9 @@ const transcribe: Handler = {
 
     await updateSegment(seg.id, { status: 'transcribing', error: null });
     await setProgress(job, 'Transcribing');
+    const opts = await transcriptionOptionsFor(seg.sessionId);
     const { body, size } = await getObjectStream(seg.objectKey);
-    const resp = await transcribeAudio(env.deepgramApiKey!, body, seg.mimeType, size);
+    const resp = await transcribeAudio(env.deepgramApiKey!, body, seg.mimeType, size, opts);
     const mapped = mapDeepgram(resp, seg.startSec);
 
     const updated = await db.transaction(async (tx) => {

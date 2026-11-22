@@ -104,6 +104,10 @@ export const shows = pgTable(
     titleSuffix: text('title_suffix', { enum: ['date', 'episode', 'none'] })
       .notNull()
       .default('date'),
+    /** Deepgram `smart_format` for this show's transcription jobs. */
+    smartFormat: boolean('smart_format').notNull().default(true),
+    /** Deepgram keyterm prompting (nova-3): terms the transcriber should favour. */
+    keyTerms: text('key_terms').array().notNull().default(sql`'{}'::text[]`),
     createdAt: created(),
   },
   (t) => [index('shows_team').on(t.teamId)],

@@ -21,6 +21,7 @@ import type {
   Team,
   TeamDetail,
   Topic,
+  TranscriptLine,
   TranscriptSegment,
   WikiPage,
   WikiPageSummary,
@@ -29,6 +30,15 @@ import type {
 
 const id = z.string().min(1).max(64);
 const name = z.string().trim().min(1).max(200);
+
+/** Show transcription key terms (Deepgram keyterm prompting caps a request at ~500 tokens). */
+export const MAX_KEY_TERMS = 50;
+export const MAX_KEY_TERM_LENGTH = 50;
+/** Budget for all key terms together (trimmed characters), keeping a request under ~500 tokens. */
+export const MAX_KEY_TERMS_TOTAL_CHARS = 1000;
+/** Characters a key term list spends of MAX_KEY_TERMS_TOTAL_CHARS. */
+export const keyTermsChars = (terms: string[]): number =>
+  terms.reduce((n, t) => n + t.trim().length, 0);
 const teamRole = z.enum(['owner', 'admin', 'member']);
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 const sec = z
@@ -113,6 +123,14 @@ export const opInputs = {
     defaultFrameRate: z.number().positive().max(120).optional(),
     titleSuffix: z.enum(['date', 'episode', 'none']).optional(),
     nextEpisode: z.number().int().min(1).optional(),
+    smartFormat: z.boolean().optional(),
+    keyTerms: z
+      .array(z.string().trim().min(1).max(MAX_KEY_TERM_LENGTH))
+      .max(MAX_KEY_TERMS)
+      .refine((terms) => keyTermsChars(terms) <= MAX_KEY_TERMS_TOTAL_CHARS, {
+        message: `Key terms may total at most ${MAX_KEY_TERMS_TOTAL_CHARS} characters (Deepgram limits key terms to about 500 tokens per request).`,
+      })
+      .optional(),
   }),
   'shows.delete': z.object({ showId: id }),
   'categories.list': z.object({ showId: id }),
@@ -179,6 +197,27 @@ export const opInputs = {
     segmentId: id,
     text: z.string().max(20000).optional(),
     speaker: z.string().trim().max(80).optional(),
+  }),
+  'transcript.find': z.object({
+    sessionId: id,
+    pattern: z.string().min(1).max(500),
+    regex: z.boolean().default(false),
+    fromSec: sec.optional(),
+    toSec: sec.optional(),
+    limit: z.number().int().min(1).max(2000).default(500),
+  }),
+  'transcript.updateSegments': z.object({
+    sessionId: id,
+    updates: z
+      .array(
+        z.object({
+          segmentId: id,
+          text: z.string().max(20000).optional(),
+          speaker: z.string().trim().max(80).optional(),
+        }),
+      )
+      .min(1)
+      .max(500),
   }),
   'transcript.renameSpeaker': z.object({
     sessionId: id,
@@ -357,6 +396,8 @@ export interface OpOutputs {
   'transcript.get': TranscriptSegment[];
   'transcript.text': { text: string; segments: number };
   'transcript.updateSegment': TranscriptSegment;
+  'transcript.find': TranscriptLine[];
+  'transcript.updateSegments': { updated: number; segments: TranscriptLine[] };
   'transcript.renameSpeaker': { updated: number };
   'topics.list': Topic[];
   'topics.create': Topic;

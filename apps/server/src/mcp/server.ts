@@ -26,7 +26,9 @@ export const SERVER_INSTRUCTIONS = `AutoLogger is a logging tool for live produc
 
 Data model: teams → shows → sessions. A session has events (timecoded log entries tied to category buttons), a transcript (speaker turns), topics (chapters), dashboards and recap wiki pages; each show has a wiki.
 
-Finding ids: shows_list → sessions_list (filter by showId) → sessions_get. Read the transcript with transcript_text (page long sessions with fromSec/toSec) and the log with events_list. search does full-text search across everything you can read.
+Finding ids: shows_list → sessions_list (filter by showId) → sessions_get. Read the transcript with transcript_text (page long sessions with fromSec/toSec) and the log with events_list. search does full-text search across everything you can read. To fix transcript errors, transcript_find returns matching segment ids and transcript_updateSegments corrects many segments in one call.
+
+Setup: if a team has no show yet, a team owner/admin can create one with shows_create (teamId from teams_list) and set its event buttons with categories_save. Shows are deleted only in the web app.
 
 Time conventions: atSec / startSec / durationSec are seconds from the session start and line up with transcript_text, where each line looks like \`[HH:MM:SS @123.4s] Speaker: text\` — use the @seconds value. timecode strings (HH:MM:SS:FF) are on the session clock (frame rate and start offset in sessions_get). Prefer atSec when working from the transcript.
 
@@ -39,7 +41,9 @@ Wiki: wiki_upsert writes Markdown pages per show (people, recurring bits, sessio
 /** `events.create` → `events_create`. */
 export const toolName = (op: string) => op.replace(/\./g, '_');
 
-const DESTRUCTIVE = /\.(delete|replace|revert|restore|archive|removeMember|leave|revoke)/;
+// categories.save deletes every button missing from the list.
+const DESTRUCTIVE =
+  /\.(delete|replace|revert|restore|archive|removeMember|leave|revoke)|^categories\.save$/;
 
 let toolCache: { tools: Tool[]; byTool: Map<string, OpName> } | null = null;
 
