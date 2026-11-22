@@ -28,6 +28,7 @@ async function connect(userId: string, showId: string) {
   const ws = new WebSocket(`${base}/ws/show/${showId}`, { headers: { cookie } });
   const got: ShowServerMessage[] = [];
   const waiters: (() => void)[] = [];
+  const closed = new Promise<number>((r) => ws.on('close', (code) => r(code)));
   ws.on('message', (raw) => {
     got.push(JSON.parse(String(raw)) as ShowServerMessage);
     for (const w of waiters.splice(0)) w();
@@ -48,7 +49,7 @@ async function connect(userId: string, showId: string) {
       };
       check();
     });
-  return { ws, status, got, next };
+  return { ws, status, got, next, closed };
 }
 
 describe('/ws/show/:id', () => {
@@ -77,10 +78,26 @@ describe('/ws/show/:id', () => {
     await live.next((m) => m.type === 'invalidate' && m.entity === 'session');
     await call(owner, 'sessions.delete', { sessionId: created.id });
     await live.next((m) => m.type === 'invalidate' && m.entity === 'session');
+    // Its jobs were deleted with it.
+    await live.next((m) => m.type === 'invalidate' && m.entity === 'job');
     expect(live.got.some((m) => m.type === 'change')).toBe(false);
 
     await call(owner, 'shows.delete', { showId: show.id });
     await live.next((m) => m.type === 'closed' && m.reason === 'deleted');
     live.ws.close();
+  });
+
+  it('closes with 4403 when the reader loses access to the show', async () => {
+    const { owner, team, show } = await studio();
+    const member = await makeUser('member@example.com');
+    await call(owner, 'teams.invite', { teamId: team.id, email: 'member@example.com' });
+    const grant = { teamId: team.id, userId: member.user.id, showId: show.id };
+    await call(owner, 'teams.setGrant', { ...grant, access: 'read' });
+
+    const live = await connect(member.user.id, show.id);
+    expect(live.status).toBe(101);
+    await call(owner, 'teams.setGrant', { ...grant, access: 'none' });
+    await live.next((m) => m.type === 'closed' && m.reason === 'access_revoked');
+    expect(await live.closed).toBe(4403);
   });
 });

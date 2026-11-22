@@ -5,7 +5,7 @@
 // of the show (the rail's jobs indicator and session list). Server → client only, apart from ping.
 // Companion socket: GET /ws/companion with `Authorization: Bearer <device token>` (or ?token=).
 
-import type { Session } from './entities.ts';
+import type { Job, Session } from './entities.ts';
 import type { CompanionState, OpName, RpcError } from './ops.ts';
 
 export type LiveEntity =
@@ -39,7 +39,7 @@ export type SessionClientMessage = { type: 'ping' };
 export type ShowServerMessage =
   | { type: 'hello'; showId: string; serverTime: string }
   /** A job of one of the show's sessions changed (data: the Job, without estimates). */
-  | { type: 'change'; entity: 'job'; op: 'upsert' | 'delete'; id: string; data?: unknown }
+  | { type: 'change'; entity: 'job'; op: 'upsert' | 'delete'; id: string; data?: Job }
   /**
    * `job`: jobs of the show changed, refetch them. `session`: the show's session list changed
    * (a session was created, deleted, renamed, archived, imported into or started rolling).

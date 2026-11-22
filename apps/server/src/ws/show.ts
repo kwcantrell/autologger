@@ -5,7 +5,7 @@
 // only knows the job's session), so the socket watches every topic and keeps the messages of the
 // show's sessions; session-list changes made by ops also arrive as `show_changed` on `show:<id>`.
 
-import type { ShowClientMessage, ShowServerMessage } from '@autologger/contract';
+import type { Job, ShowClientMessage, ShowServerMessage } from '@autologger/contract';
 import { eq } from 'drizzle-orm';
 import { canReadShow } from '../core/authz.ts';
 import { type BusMessage, subscribe, subscribeAll, type Topic } from '../core/bus.ts';
@@ -18,6 +18,8 @@ const showIdFrom = (url: URL) => decodeURIComponent(url.pathname.slice('/ws/show
 /** Session id → its show id (null: no such session). Sessions never move between shows. */
 const sessionShow = new Map<string, Promise<string | null>>();
 const SESSION_SHOW_MAX = 50_000;
+/** A client this far behind (bytes queued) is closed with 1013 rather than buffered forever. */
+const MAX_BUFFERED = 1024 * 1024;
 
 export function showOfSession(sessionId: string): Promise<string | null> {
   const cached = sessionShow.get(sessionId);
@@ -42,7 +44,7 @@ export function showOfSession(sessionId: string): Promise<string | null> {
 /** What a message on a session topic means for the show socket, if anything. */
 export function showMessageFor(m: BusMessage): ShowServerMessage | null {
   if (m.type === 'change' && m.entity === 'job')
-    return { type: 'change', entity: 'job', op: m.op, id: m.id, data: m.data };
+    return { type: 'change', entity: 'job', op: m.op, id: m.id, data: m.data as Job | undefined };
   if (m.type === 'invalidate' && m.entity === 'job') return { type: 'invalidate', entity: 'job' };
   // Title, archive state, episode date or audio length (shown on rail cards) changed.
   if (
@@ -58,10 +60,14 @@ registerWs(
   async (ws, req, url) => {
     const showId = showIdFrom(url);
     const actor = await actorFromSessionToken(sessionTokenFromCookieHeader(req.headers.cookie));
+    // The client may have gone while the actor was loading: subscribe nothing.
+    if (ws.readyState !== ws.OPEN) return;
     if (!actor) return ws.close(4401, 'unauthenticated');
 
     const send = (m: ShowServerMessage) => {
-      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(m));
+      if (ws.readyState !== ws.OPEN) return;
+      if (ws.bufferedAmount > MAX_BUFFERED) return ws.close(1013, 'too slow');
+      ws.send(JSON.stringify(m));
     };
     // Keeps pushes in publish order while a session's show is being looked up.
     let queue = Promise.resolve();
@@ -73,6 +79,9 @@ registerWs(
       if (topic === `show:${showId}`) {
         if (m.type === 'show_changed' && m.entity === 'show')
           push(() => send({ type: 'invalidate', entity: 'session' }));
+        // A session was deleted: its jobs went with it.
+        else if (m.type === 'invalidate' && m.entity === 'job')
+          push(() => send({ type: 'invalidate', entity: 'job' }));
         else if (m.type === 'closed')
           push(() => {
             send({ type: 'closed', reason: m.reason });
@@ -85,7 +94,16 @@ registerWs(
       if (!out) return;
       const lookup = showOfSession(topic.slice('session:'.length));
       push(async () => {
-        if ((await lookup) === showId) send(out);
+        let owner: string | null;
+        try {
+          owner = await lookup;
+        } catch {
+          // Can't tell whose session it is: let the client refetch rather than miss a change.
+          send({ type: 'invalidate', entity: 'job' });
+          send({ type: 'invalidate', entity: 'session' });
+          return;
+        }
+        if (owner === showId) send(out);
       });
     });
     // Re-check access whenever the user's grants or roles change.

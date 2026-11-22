@@ -279,12 +279,13 @@ defineOp({
     const { session } = await requireSession(ctx, sessionId, 'manage');
     await ctx.db.delete(sessions).where(eq(sessions.id, sessionId));
     ctx.publish(`session:${sessionId}`, { type: 'closed', reason: 'deleted' });
-    // The show's session list (show socket) changed.
+    // The show's session list and jobs (deleted with the session) changed: show socket.
     ctx.publish(`show:${session.showId}`, {
       type: 'show_changed',
       showId: session.showId,
       entity: 'show',
     });
+    ctx.publish(`show:${session.showId}`, { type: 'invalidate', entity: 'job' });
     return { deleted: true };
   },
 });
