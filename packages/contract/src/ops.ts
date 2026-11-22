@@ -79,6 +79,9 @@ const TopicFields = {
   summary: z.string().max(10000).default(''),
 };
 
+/** Bulk write ops: return a small acknowledgement instead of echoing every written entity. */
+const compact = z.boolean().default(false);
+
 export const opInputs = {
   // ── me / auth ─────────────────────────────────────────────
   'me.get': z.object({}),
@@ -177,6 +180,7 @@ export const opInputs = {
   'events.createMany': z.object({
     sessionId: id,
     events: z.array(z.object(EventFields)).min(1).max(500),
+    compact,
   }),
   'events.update': z.object({
     eventId: id,
@@ -218,6 +222,7 @@ export const opInputs = {
       )
       .min(1)
       .max(500),
+    compact,
   }),
   'transcript.renameSpeaker': z.object({
     sessionId: id,
@@ -237,12 +242,21 @@ export const opInputs = {
     summary: z.string().max(10000).optional(),
   }),
   'topics.delete': z.object({ topicId: id }),
-  'topics.replace': z.object({ sessionId: id, topics: z.array(z.object(TopicFields)).max(500) }),
+  'topics.replace': z.object({
+    sessionId: id,
+    topics: z.array(z.object(TopicFields)).max(500),
+    compact,
+  }),
 
   // ── dashboards ────────────────────────────────────────────
   'dashboards.list': z.object({ sessionId: id }),
   'dashboards.get': z.object({ dashboardId: id }),
-  'dashboards.save': z.object({ sessionId: id, dashboardId: id.optional(), spec: DashboardSpec }),
+  'dashboards.save': z.object({
+    sessionId: id,
+    dashboardId: id.optional(),
+    spec: DashboardSpec,
+    compact,
+  }),
   'dashboards.delete': z.object({ dashboardId: id }),
   'dashboards.query': z.object({ sessionId: id, query: DashboardQuery }),
 
@@ -289,7 +303,20 @@ export const opInputs = {
   'media.importYoutube': z.object({ sessionId: id, url: z.url() }),
   'media.retranscribe': z.object({ sessionId: id, segmentId: id.optional() }),
   'media.delete': z.object({ segmentId: id }),
-  'jobs.list': z.object({ sessionId: id }),
+  'jobs.list': z
+    .object({
+      sessionId: id.optional(),
+      showId: id.optional(),
+      status: z
+        .array(z.enum(['queued', 'running', 'done', 'failed']))
+        .min(1)
+        .max(4)
+        .optional(),
+      limit: z.number().int().min(1).max(500).default(100),
+    })
+    .refine((v) => (v.sessionId === undefined) !== (v.showId === undefined), {
+      message: 'Pass exactly one of sessionId or showId.',
+    }),
 
   // ── search ────────────────────────────────────────────────
   search: z.object({
@@ -354,6 +381,12 @@ export interface CompanionState {
   lastEvent: Pick<SessionEvent, 'id' | 'category' | 'message' | 'timecodeFrames'> | null;
 }
 
+// Compact write acknowledgements, returned instead of the full echo when a bulk write op is
+// called with `compact: true` (meant for MCP agents, to save context).
+export type CompactEvent = Pick<SessionEvent, 'id' | 'atSec' | 'category'>;
+export type CompactTopic = Pick<Topic, 'id' | 'startSec' | 'level' | 'title'>;
+export type CompactDashboard = Pick<Dashboard, 'id' | 'revision'>;
+
 export type DashboardRows = Record<string, string | number | boolean | null>[];
 
 export interface OpOutputs {
@@ -389,7 +422,7 @@ export interface OpOutputs {
   'transport.reset': Session;
   'events.list': SessionEvent[];
   'events.create': SessionEvent;
-  'events.createMany': SessionEvent[];
+  'events.createMany': SessionEvent[] | CompactEvent[];
   'events.update': SessionEvent;
   'events.delete': { deleted: true };
   'events.importCsv': { imported: number; skipped: { line: number; reason: string }[] };
@@ -397,16 +430,18 @@ export interface OpOutputs {
   'transcript.text': { text: string; segments: number };
   'transcript.updateSegment': TranscriptSegment;
   'transcript.find': TranscriptLine[];
-  'transcript.updateSegments': { updated: number; segments: TranscriptLine[] };
+  'transcript.updateSegments':
+    | { updated: number; segments: TranscriptLine[] }
+    | { updated: number; ids: string[] };
   'transcript.renameSpeaker': { updated: number };
   'topics.list': Topic[];
   'topics.create': Topic;
   'topics.update': Topic;
   'topics.delete': { deleted: true };
-  'topics.replace': Topic[];
+  'topics.replace': Topic[] | CompactTopic[];
   'dashboards.list': Dashboard[];
   'dashboards.get': Dashboard;
-  'dashboards.save': Dashboard;
+  'dashboards.save': Dashboard | CompactDashboard;
   'dashboards.delete': { deleted: true };
   'dashboards.query': DashboardRows;
   'wiki.list': WikiPageSummary[];

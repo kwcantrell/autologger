@@ -140,9 +140,10 @@ defineOp({
 
 defineOp({
   name: 'teams.create',
-  description: 'Create a team; you become its owner.',
+  description:
+    'Create a new team (the top level of teams → shows → sessions); the signed-in user becomes its owner. Returns the team with its id (prefix team_) — pass it as teamId to shows_create to add a show. Use only when asked for a new team; check teams_list first so you do not create a duplicate (names need not be unique). Does not switch the active team in the web app, invite anyone or create shows; member management is web-only. Accounts still waiting for approval cannot create teams (forbidden).',
   kind: 'write',
-  surfaces: ['web'],
+  surfaces: ['web', 'mcp'],
   async run(ctx, { name }) {
     const id = newId('team');
     const [t] = await ctx.db.insert(teams).values({ id, name }).returning();

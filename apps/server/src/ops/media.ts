@@ -5,8 +5,8 @@
 // `transcribe`). The worker (src/worker) does the Deepgram and yt-dlp work.
 
 import type { AudioSegment } from '@autologger/contract';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
-import { requireSession } from '../core/authz.ts';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { requireSession, requireShow } from '../core/authz.ts';
 import { changeMessage } from '../core/bus.ts';
 import { badRequest, conflict, notFound, unavailable } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
@@ -284,17 +284,30 @@ defineOp({
 defineOp({
   name: 'jobs.list',
   description:
-    'Background jobs of a session (transcription, YouTube import), newest first, with status, progress and errors.',
+    'Background jobs (transcription, YouTube import), newest first, with status, progress and errors. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"). Optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Jobs take seconds to minutes: when waiting, poll every 15–30 seconds, not in a tight loop.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId }) {
-    await requireSession(ctx, sessionId, 'read');
+  async run(ctx, { sessionId, showId, status, limit }) {
+    const statusCond = status ? inArray(jobs.status, status) : undefined;
+    if (sessionId) {
+      await requireSession(ctx, sessionId, 'read');
+      const rows = await ctx.db
+        .select()
+        .from(jobs)
+        .where(and(eq(jobs.sessionId, sessionId), statusCond))
+        .orderBy(desc(jobs.createdAt))
+        .limit(limit);
+      return rows.map(toJob);
+    }
+    // Read access is per show, so every session of a readable show is readable.
+    await requireShow(ctx, showId!, 'read');
     const rows = await ctx.db
-      .select()
+      .select({ job: jobs, sessionTitle: sessions.title })
       .from(jobs)
-      .where(eq(jobs.sessionId, sessionId))
+      .innerJoin(sessions, eq(sessions.id, jobs.sessionId))
+      .where(and(eq(sessions.showId, showId!), statusCond))
       .orderBy(desc(jobs.createdAt))
-      .limit(100);
-    return rows.map(toJob);
+      .limit(limit);
+    return rows.map((r) => ({ ...toJob(r.job), sessionTitle: r.sessionTitle }));
   },
 });
