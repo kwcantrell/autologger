@@ -239,13 +239,23 @@ function ChangeFeed({ session }: { session: Session }) {
   const undo = async (c: Change) => {
     const group = c.groupSize && c.groupId ? c.groupId : null;
     const left = (c.groupSize ?? 1) - (c.groupUndone ?? 0);
+    // The call also changed other sessions: revertGroup undoes those too (groupTotal counts all).
+    const elsewhere = (c.groupTotal ?? 0) - (c.groupSize ?? 0);
     const ok = await confirm({
-      title: group ? `Undo all ${left} changes?` : 'Undo this change?',
+      title: !group
+        ? 'Undo this change?'
+        : elsewhere > 0
+          ? `Undo all ${c.groupTotal} changes of this call?`
+          : `Undo all ${left} changes?`,
       message: group ? (
         <>
           Everything this {c.op} call by {c.actor?.name ?? 'the system'} changed will be reverted in
-          one step ({left} change{left === 1 ? '' : 's'}, e.g. “{c.summary}”). If any of it changed
-          again since, nothing is undone. The undo is recorded too and can itself be undone.
+          one step ({left} change{left === 1 ? '' : 's'} here, e.g. “{c.summary}”
+          {elsewhere > 0 && (
+            <>, and {elsewhere} more in other sessions — you need edit access to all of them</>
+          )}
+          ). Changes already undone are skipped. If any of it changed again since, nothing is
+          undone. The undo is recorded too and can itself be undone.
         </>
       ) : (
         <>
@@ -409,14 +419,17 @@ function ChangeRow({
           {c.revertOf && <SmallBadge title="This change undid an earlier one">undo</SmallBadge>}
           {c.groupSize && (
             <SmallBadge
-              title={`One ${c.op} call: ${c.groupSize} changes, newest shown${c.groupUndone ? `; ${c.groupUndone} already undone` : ''}`}
+              title={`One ${c.op} call: ${c.groupSize} changes here${c.groupTotal ? ` (${c.groupTotal} in all sessions)` : ''}, newest shown${c.groupUndone ? `; ${c.groupUndone} already undone` : ''}`}
             >
-              {c.groupSize} changes{c.groupUndone ? ` · ${c.groupUndone} undone` : ''}
+              {c.groupTotal ? `${c.groupSize} of ${c.groupTotal}` : c.groupSize} changes
+              {c.groupUndone ? ` · ${c.groupUndone} undone` : ''}
             </SmallBadge>
           )}
           <span className="[overflow-wrap:anywhere]">
             {c.summary}
-            {c.groupSize && <span className="text-si-muted"> and {c.groupSize - 1} more</span>}
+            {(c.groupSize ?? 0) > 1 && (
+              <span className="text-si-muted"> and {(c.groupSize ?? 1) - 1} more</span>
+            )}
           </span>
         </div>
         {error && (

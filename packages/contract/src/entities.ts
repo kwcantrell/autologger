@@ -353,6 +353,11 @@ export interface Change {
   groupSize?: number;
   /** With groupSize: how many of them are already undone. */
   groupUndone?: number;
+  /**
+   * With groupSize: how many changes the whole group has, in every session (the session filter
+   * only counts its own). changes.revertGroup undoes all of them.
+   */
+  groupTotal?: number;
 }
 
 export interface ApiToken {

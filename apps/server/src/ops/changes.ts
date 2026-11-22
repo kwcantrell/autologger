@@ -49,7 +49,7 @@ type ChangeRow = typeof changes.$inferSelect;
 
 async function toChanges(
   ctx: Ctx,
-  rows: (ChangeRow & { groupSize?: number; groupUndone?: number })[],
+  rows: (ChangeRow & { groupSize?: number; groupUndone?: number; groupTotal?: number })[],
 ): Promise<Change[]> {
   const users = await userRefs(
     ctx.db,
@@ -71,8 +71,12 @@ async function toChanges(
     revertedAt: iso(r.revertedAt),
     revertOf: r.revertOf,
     groupId: r.groupId,
-    ...(r.groupSize && r.groupSize > 1
-      ? { groupSize: r.groupSize, groupUndone: r.groupUndone }
+    ...((r.groupSize ?? 0) > 1 || (r.groupTotal ?? 0) > 1
+      ? {
+          groupSize: r.groupSize,
+          groupUndone: r.groupUndone,
+          ...(r.groupTotal !== r.groupSize ? { groupTotal: r.groupTotal } : {}),
+        }
       : {}),
   }));
 }
@@ -80,7 +84,7 @@ async function toChanges(
 defineOp({
   name: 'changes.list',
   description:
-    'The change log: who changed what, from where (web, mcp agent, companion), newest first. Filter by session, show, surface or groupId. Every change one op call wrote shares a groupId (a bulk call such as transcript_renameSpeaker writes one change per segment). grouped: true folds each group into one row — its newest change, with groupSize (how many changes, when more than one) and groupUndone (how many are already undone); revertedAt is then set only when the whole group is undone, and limit counts rows. Undo one change with changes_revert(changeId) or a whole op call with changes_revertGroup(groupId).',
+    'The change log: who changed what, from where (web, mcp agent, companion), newest first. Filter by session, show, surface or groupId. Every change one op call wrote shares a groupId (a bulk call such as transcript_renameSpeaker writes one change per segment). grouped: true (needs sessionId or showId) folds each group into one row — its newest change, with groupSize (how many changes match the filter, set when the group has more than one), groupUndone (how many of those are already undone) and, when the group also reaches other sessions, groupTotal (its size everywhere); revertedAt is then set only when the whole group is undone, and limit counts rows. Undo one change with changes_revert(changeId) or a whole op call with changes_revertGroup(groupId).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, showId, via, groupId, grouped, limit }) {
@@ -119,7 +123,11 @@ defineOp({
       .where(where)
       .as('folded');
     const rows = await ctx.db
-      .select()
+      .select({
+        ...folded._.selectedFields,
+        // The whole group, beyond this filter: changes.revertGroup undoes all of it.
+        groupTotal: sql<number>`(select count(*) from changes g where g.group_id = folded.group_id)`,
+      })
       .from(folded)
       .where(eq(folded.rank, 1))
       .orderBy(desc(folded.at))
@@ -129,9 +137,10 @@ defineOp({
       rows.map(({ rank: _, ...r }) => {
         const groupSize = Number(r.groupSize);
         const groupUndone = Number(r.groupUndone);
+        const groupTotal = Math.max(Number(r.groupTotal), groupSize);
         // A folded row reads as undone only once every change in it is.
         const revertedAt = groupUndone < groupSize ? null : r.revertedAt;
-        return { ...r, groupSize, groupUndone, revertedAt };
+        return { ...r, groupSize, groupUndone, groupTotal, revertedAt };
       }),
     );
   },
@@ -175,7 +184,7 @@ defineOp({
 defineOp({
   name: 'changes.revertGroup',
   description:
-    'Undo every change one op call made, in one step — e.g. a transcript_renameSpeaker, transcript_replace or transcript_updateSegments call that touched hundreds of segments. groupId comes from changes_list (every change has one; grouped: true lists one row per call). All or nothing: if any item in the group was changed again later by another call, nothing is undone and it fails with conflict (undo the newer change first). Changes in the group that were already undone one by one are skipped. The undo is recorded as a new group (the returned groupId); reverting that group redoes the call. Returns how many changes were undone.',
+    'Undo every change one op call made, in one step — e.g. a transcript_renameSpeaker, transcript_replace or transcript_updateSegments call that touched hundreds of segments. groupId comes from changes_list (every change has one; grouped: true lists one row per call). All or nothing: if any item in the group was changed again later by another call, nothing is undone and it fails with conflict (undo the newer change first). Changes in the group that were already undone one by one are skipped. The undo is recorded as a new group (the returned groupId); reverting that group redoes the call. It undoes every change in the group, in every session it touched, and needs write access to each of those sessions (or the show); without it, it fails with not_found and nothing is undone. Returns how many changes were undone.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { groupId }) {

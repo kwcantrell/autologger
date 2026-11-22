@@ -445,14 +445,18 @@ export const opInputs = {
   }),
 
   // ── change log ────────────────────────────────────────────
-  'changes.list': z.object({
-    sessionId: id.optional(),
-    showId: id.optional(),
-    via: z.enum(['web', 'mcp', 'companion', 'worker', 'system']).optional(),
-    groupId: id.optional(),
-    grouped: z.boolean().default(false),
-    limit: z.number().int().min(1).max(500).default(100),
-  }),
+  'changes.list': z
+    .object({
+      sessionId: id.optional(),
+      showId: id.optional(),
+      via: z.enum(['web', 'mcp', 'companion', 'worker', 'system']).optional(),
+      groupId: id.optional(),
+      grouped: z.boolean().default(false),
+      limit: z.number().int().min(1).max(500).default(100),
+    })
+    .refine((v) => !v.grouped || v.sessionId !== undefined || v.showId !== undefined, {
+      message: 'grouped: true needs a sessionId or showId.',
+    }),
   'changes.revert': z.object({ changeId: id }),
   'changes.revertGroup': z.object({ groupId: id }),
 
