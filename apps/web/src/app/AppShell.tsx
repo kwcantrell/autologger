@@ -11,7 +11,6 @@ import {
   useStore,
 } from '@/lib/store';
 import { HomeRoute } from '@/routes/HomeRoute';
-import { NewSessionModal } from '@/routes/NewSessionModal';
 import { ShortcutsDialog } from '@/session/ShortcutsDialog';
 import { Button } from '@/shared/components/ui/button';
 import { SidebarProvider, useSidebar } from '@/shared/components/ui/sidebar';
@@ -33,6 +32,9 @@ const WikiPageView = lazy(() =>
 );
 const SettingsView = lazy(() =>
   import('@/settings/SettingsView').then((m) => ({ default: m.SettingsView })),
+);
+const NewSessionModal = lazy(() =>
+  import('@/routes/NewSessionModal').then((m) => ({ default: m.NewSessionModal })),
 );
 
 /** `[` toggles the rail (not while typing or with an overlay other than Settings open). */
@@ -122,7 +124,11 @@ export function AppShell() {
           className="relative m-0 block min-h-0 w-full min-w-0 max-w-none flex-1 [overflow-x:clip] overflow-y-visible md:overflow-y-auto"
         >
           {showNew && (
-            <NewSessionModal initialMode={showNew} onClose={() => newSessionOpen.set(false)} />
+            <ErrorBoundary>
+              <Suspense fallback={null}>
+                <NewSessionModal initialMode={showNew} onClose={() => newSessionOpen.set(false)} />
+              </Suspense>
+            </ErrorBoundary>
           )}
           {settings && (
             <ErrorBoundary>
