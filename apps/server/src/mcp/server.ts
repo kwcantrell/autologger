@@ -26,7 +26,7 @@ export const SERVER_INSTRUCTIONS = `AutoLogger is a logging tool for live produc
 
 Data model: teams → shows → sessions. A session has events (timecoded log entries tied to category buttons), a transcript (speaker turns), topics (chapters), dashboards and recap wiki pages; each show has a wiki.
 
-Finding ids: shows_list → sessions_list (filter by showId) → sessions_get. Read the transcript with transcript_text (page long sessions with fromSec/toSec) and the log with events_list. search does full-text search across everything you can read. To fix transcript errors, transcript_find returns matching segment ids and transcript_updateSegments corrects many segments in one call; transcript_mergeSegments and transcript_splitSegment fix segments that are split mid-phrase, out of order or span a speaker change.
+Finding ids: shows_list → sessions_list (filter by showId) → sessions_get. Read the transcript with transcript_text (format "compact" for long sessions; page with fromSec/toSec, using totalSegments/durationSec from the first call) and the log with events_list. search does full-text search across everything you can read. To fix transcript errors, transcript_find returns matching segment ids and transcript_updateSegments corrects many segments in one call; transcript_mergeSegments and transcript_splitSegment fix segments that are split mid-phrase, out of order or span a speaker change.
 
 Setup: if the user asks for a new team, create it with teams_create (you become its owner). If a team has no show yet, a team owner/admin can create one with shows_create (teamId from teams_list) and set its event buttons with categories_save. Shows are deleted only in the web app.
 
@@ -86,8 +86,13 @@ export function mcpTools(): { tools: Tool[]; byTool: Map<string, OpName> } {
 function resultContent(op: OpName, data: unknown): CallToolResult {
   // The transcript is meant to be read as text; everything else is JSON.
   if (op === 'transcript.text' && data && typeof (data as { text?: unknown }).text === 'string') {
-    const d = data as { text: string; segments: number };
-    return { content: [{ type: 'text', text: d.text || '(no transcript yet)' }] };
+    const { text, ...counts } = data as { text: string };
+    return {
+      content: [
+        { type: 'text', text: text || '(no transcript yet)' },
+        { type: 'text', text: JSON.stringify(counts) },
+      ],
+    };
   }
   return { content: [{ type: 'text', text: JSON.stringify(data ?? null) }] };
 }
