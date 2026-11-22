@@ -87,7 +87,7 @@ describe('media sweep', () => {
       .insert(schema.compilations)
       .values({ id: compId, showId: show.id, title: 'Best of', clips: [], durationSec: 5 });
     const live = [
-      `sessions/${session.id}/aud_old.wav`, // old object of a live session: never touched
+      `sessions/${session.id}/aud_old.wav`, // live session: left to the live-session pass
       `shows/${show.id}/notes/keep.json`, // unknown shape under a live show: kept
       `shows/${show.id}/compilations/${compId}.mp4`,
     ];
@@ -104,7 +104,15 @@ describe('media sweep', () => {
     bucket.set(`sessions/${recent}/new.wav`, ago(1));
     bucket.set(`shows/${show.id}/compilations/cmp_new.mp4`, ago(1));
 
-    const r = await sweepMedia({ orphanGraceMs: 24 * HOUR, dryRun: false });
+    const log = vi.spyOn(console, 'log');
+    const r = await sweepMedia({ orphanGraceMs: 24 * HOUR, dryRun: false, liveSessionsPerRun: 0 });
+    expect(log).toHaveBeenLastCalledWith(
+      expect.stringMatching(
+        /^media sweep: 0 stuck uploads, 2 orphan prefixes, 1 compilation object, 0 unreferenced live-session objects removed; 2 orphans within grace; checked 0 of \d+ live sessions?; \d+ s$/,
+      ),
+    );
+    log.mockRestore();
+    expect(r.withinGrace).toBe(2);
     expect(r.prefixes.sort()).toEqual([`sessions/${goneSession}/`, `shows/${goneShow}/`].sort());
     expect(r.objects).toEqual([`shows/${show.id}/compilations/cmp_deleted.mp4`]);
     expect([...bucket.keys()].sort()).toEqual(
@@ -115,6 +123,40 @@ describe('media sweep', () => {
         `shows/${show.id}/compilations/cmp_new.mp4`,
       ].sort(),
     );
+  });
+
+  it('removes objects of live sessions no segment points at, a few sessions per run', async () => {
+    const { owner, show, session } = await studio();
+    const seg = await upload(owner, session.id);
+    const peaks = `sessions/${session.id}/${seg.id}.peaks.json`;
+    await db.update(audioSegments).set({ peaksKey: peaks }).where(eq(audioSegments.id, seg.id));
+    bucket.set(seg.objectKey, ago(48));
+    bucket.set(peaks, ago(48));
+    const stray = `sessions/${session.id}/aud_crashed.m4a`; // uploaded, row never inserted
+    const strayPeaks = `sessions/${session.id}/aud_deleted.peaks.json`;
+    const fresh = `sessions/${session.id}/aud_importing.m4a`; // import still running
+    bucket.set(stray, ago(48));
+    bucket.set(strayPeaks, ago(30));
+    bucket.set(fresh, ago(1));
+    // A second live session with no segments: its old object is an orphan too.
+    const other = await call(owner, 'sessions.create', { showId: show.id, title: 'Two' });
+    const otherKey = `sessions/${other.id}/aud_x.wav`;
+    bucket.set(otherKey, ago(48));
+    const [first, second] = [session.id, other.id].sort();
+    const keysOf = (id: string) => (id === session.id ? [stray, strayPeaks] : [otherKey]);
+
+    // One session per run, in id order, then around again.
+    const opts = { orphanGraceMs: 24 * HOUR, liveSessionsPerRun: 1 };
+    const r1 = await sweepMedia({ ...opts, dryRun: true, liveCursor: '' });
+    expect(r1).toMatchObject({ liveSessionsChecked: 1, liveCursor: first });
+    expect(r1.liveObjects.sort()).toEqual(keysOf(first!).sort());
+    expect(bucket.size).toBe(6);
+    const r2 = await sweepMedia({ ...opts, dryRun: false, liveCursor: first });
+    expect(r2).toMatchObject({ liveSessionsChecked: 1, liveCursor: '' });
+    expect(r2.liveObjects.sort()).toEqual(keysOf(second!).sort());
+    const r3 = await sweepMedia({ ...opts, dryRun: false });
+    expect(r3.liveObjects.sort()).toEqual(keysOf(first!).sort());
+    expect([...bucket.keys()].sort()).toEqual([seg.objectKey, peaks, fresh].sort());
   });
 
   it('dry run reports but deletes nothing', async () => {
@@ -128,7 +170,14 @@ describe('media sweep', () => {
     bucket.set(gone, ago(48));
     const before = [...bucket.keys()].sort();
 
+    const log = vi.spyOn(console, 'log');
     const r = await sweepMedia({ dryRun: true });
+    expect(log).toHaveBeenLastCalledWith(
+      expect.stringMatching(
+        /^media sweep \(dry run\): 1 stuck upload, 1 orphan prefix, 0 compilation objects, 0 unreferenced live-session objects would be removed; 0 orphans within grace; checked 1 of 1 live session; \d+ s$/,
+      ),
+    );
+    log.mockRestore();
     expect(r).toMatchObject({
       dryRun: true,
       uploads: [stale.id],
@@ -140,10 +189,15 @@ describe('media sweep', () => {
 
   it('skips while another worker holds the sweep lock', async () => {
     bucket.set(`sessions/${newId('ses')}/a.wav`, ago(48));
+    const log = vi.spyOn(console, 'log');
     const r = await db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext('autologger:media-sweep'))`);
       return sweepMedia({ dryRun: false });
     });
+    expect(log).toHaveBeenLastCalledWith(
+      'media sweep: skipped, another worker holds the sweep lock',
+    );
+    log.mockRestore();
     expect(r.ran).toBe(false);
     expect(bucket.size).toBe(1);
   });

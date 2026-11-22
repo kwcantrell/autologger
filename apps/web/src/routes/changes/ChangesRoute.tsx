@@ -1,13 +1,20 @@
 // `/changes`: the active show's change log — every change in any of its sessions plus the
 // show-level ones no session's Agents tab lists (wiki pages, event buttons) — with the same
-// Undo / Undo all flow. Filters live in the URL (?where=show|<sessionId>&kind=<entity>&who=…), so
-// the Wiki links here with show-level wiki changes preselected. New entries arrive as show-socket
-// hints (liveShow.ts).
+// Undo / Undo all flow. Filters live in the URL (?where=show|<sessionId>&kind=<entity>&who=…, who
+// being all / mcp / operators / mcp:<clientName>), so the Wiki links here with show-level wiki
+// changes preselected. All filters run on the server. Session content rows jump to their moment
+// (changes.list atSec). New entries arrive as show-socket hints (liveShow.ts).
 
 import type { Change, ChangeEntity, Session } from '@autologger/contract';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearch as useLocationSearch } from 'wouter';
-import { type ShowChangesFilter, useOpMutation, useSessions, useShowChanges } from '@/api/queries';
+import {
+  type ShowChangesFilter,
+  useOpMutation,
+  useSessions,
+  useShow,
+  useShowChanges,
+} from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { useActive } from '@/app/useActive';
 import { PageFrame, RouteLoadingState } from '@/components/RouteState';
@@ -31,12 +38,29 @@ import { wikiHref } from '../wiki/wikiShared';
 
 const LIMIT = 300;
 
-type Who = 'all' | 'mcp' | 'operators';
-const WHO_LABEL: Record<Who, string> = {
+/** `mcp:<clientName>`: one MCP client. */
+type Who = 'all' | 'mcp' | 'operators' | `mcp:${string}`;
+const WHO_LABEL: Record<'all' | 'mcp' | 'operators', string> = {
   all: 'Everyone',
   mcp: 'Agents only',
   operators: 'Operators',
 };
+const CLIENT_PREFIX = 'mcp:';
+const whoLabel = (who: Who) =>
+  who.startsWith(CLIENT_PREFIX)
+    ? `Agent: ${who.slice(CLIENT_PREFIX.length)}`
+    : WHO_LABEL[who as keyof typeof WHO_LABEL];
+
+function whoFilter(who: Who): Pick<ShowChangesFilter, 'via' | 'clientName'> {
+  if (who === 'mcp') return { via: 'mcp' };
+  if (who === 'operators') return { via: ['web', 'companion'] };
+  if (who.startsWith(CLIENT_PREFIX))
+    return { via: 'mcp', clientName: who.slice(CLIENT_PREFIX.length) };
+  return {};
+}
+
+const sessionHref = (id: string, sec?: number) =>
+  `/sessions/${encodeURIComponent(id)}${sec == null ? '' : `?t=${Math.round(sec * 100) / 100}`}`;
 
 type Kind = ChangeEntity | 'all';
 const KIND_LABEL: Record<Kind, string> = {
@@ -66,7 +90,11 @@ function readFilters(search: string): Filters {
   return {
     where: p.get('where') || 'all',
     kind: kind && kind in KIND_LABEL ? (kind as Kind) : 'all',
-    who: who && who in WHO_LABEL ? (who as Who) : 'all',
+    who:
+      who &&
+      (who in WHO_LABEL || (who.startsWith(CLIENT_PREFIX) && who.length > CLIENT_PREFIX.length))
+        ? (who as Who)
+        : 'all',
   };
 }
 
@@ -131,7 +159,7 @@ function ChangeContext({ c, sessions }: { c: Change; sessions: Map<string, Sessi
   if (c.sessionId) {
     const s = sessions.get(c.sessionId);
     return s ? (
-      <Link href={`/sessions/${encodeURIComponent(s.id)}`} className={link}>
+      <Link href={sessionHref(s.id, c.atSec)} className={link}>
         {s.title || 'Untitled session'}
       </Link>
     ) : (
@@ -184,12 +212,14 @@ function ChangeLog({
     () => new Map((sessionsQ.data ?? []).map((s) => [s.id, s] as const)),
     [sessionsQ.data],
   );
+  const showQ = useShow(showId);
+  const [, navigate] = useLocation();
   const query: ShowChangesFilter = {
     ...(filters.where === 'all'
       ? {}
       : { sessionId: filters.where === 'show' ? null : filters.where }),
     ...(filters.kind === 'all' ? {} : { entity: filters.kind }),
-    ...(filters.who === 'mcp' ? { via: 'mcp' as const } : {}),
+    ...whoFilter(filters.who),
   };
   const changes = useShowChanges(showId, query);
   const now = useNow();
@@ -212,12 +242,7 @@ function ChangeLog({
   const revert = useOpMutation('changes.revert', { invalidate: touched });
   const revertGroup = useOpMutation('changes.revertGroup', { invalidate: touched });
 
-  const rows = useMemo(() => {
-    const all = changes.data ?? [];
-    return filters.who === 'operators'
-      ? all.filter((c) => c.via === 'web' || c.via === 'companion')
-      : all;
-  }, [changes.data, filters.who]);
+  const rows = changes.data ?? [];
 
   const undo = async (c: Change) => {
     const group = c.groupSize && c.groupId ? c.groupId : null;
@@ -281,6 +306,13 @@ function ChangeLog({
   if (!sessionOptions.some(([v]) => v === filters.where))
     sessionOptions.push([filters.where, 'Another session']);
   const whereLabel = sessionOptions.find(([v]) => v === filters.where)?.[1] ?? 'Whole show';
+  const whoOptions: [Who, string][] = [
+    ...(Object.entries(WHO_LABEL) as [Who, string][]),
+    ...(showQ.data?.mcpClients ?? []).map((n): [Who, string] => [`mcp:${n}`, `Agent: ${n}`]),
+  ];
+  // A client from a link may have no changes in this show (yet).
+  if (!whoOptions.some(([v]) => v === filters.who))
+    whoOptions.push([filters.who, whoLabel(filters.who)]);
 
   const toolbar = (
     <>
@@ -300,9 +332,9 @@ function ChangeLog({
       />
       <FilterMenu
         title="Who"
-        label={WHO_LABEL[filters.who]}
+        label={whoLabel(filters.who)}
         value={filters.who}
-        options={Object.entries(WHO_LABEL) as [Who, string][]}
+        options={whoOptions}
         onChange={(who) => setFilters({ ...filters, who })}
       />
     </>
@@ -348,8 +380,8 @@ function ChangeLog({
               key={c.id}
               change={c}
               now={now}
-              sec={null}
-              onJump={() => {}}
+              sec={c.sessionId && sessions.has(c.sessionId) ? (c.atSec ?? null) : null}
+              onJump={(sec) => c.sessionId && navigate(sessionHref(c.sessionId, sec))}
               canWrite={canWrite}
               busy={
                 (revert.isPending && revert.variables?.changeId === c.id) ||
