@@ -34,6 +34,7 @@ import type {
   WikiList,
   WikiPage,
   WikiRevision,
+  WikiSavedCitations,
 } from './entities.ts';
 import { MAX_TRANSCRIPT_RULES, TranscriptRuleInput } from './transcriptRules.ts';
 
@@ -265,9 +266,16 @@ export const opInputs = {
       context: z.number().int().min(0).max(3).default(0),
       countOnly: z.boolean().default(false),
       idsOnly: z.boolean().default(false),
+      /** Instead of a pattern: turns likely to hold two speakers (see SUSPECT_TURN_REASONS). */
+      suspect: z.boolean().default(false),
     })
-    .refine((v) => (v.pattern === undefined) !== (v.patterns === undefined), {
-      message: 'Pass exactly one of pattern or patterns',
+    .refine(
+      (v) =>
+        [v.pattern !== undefined, v.patterns !== undefined, v.suspect].filter(Boolean).length === 1,
+      { message: 'Pass exactly one of pattern, patterns or suspect: true' },
+    )
+    .refine((v) => !(v.suspect && v.regex), {
+      message: 'regex applies to pattern or patterns, not to suspect',
     })
     .refine((v) => !(v.countOnly && v.idsOnly), {
       message: 'Pass at most one of countOnly or idsOnly',
@@ -368,6 +376,8 @@ export const opInputs = {
     include: z.enum(['summary', 'body']).optional(),
     linksTo: id.optional(),
     citesSession: id.optional(),
+    /** With citesSession: per-page `citationCount` instead of the `citations` ranges. */
+    countOnly: z.boolean().optional(),
     limit: z.number().int().min(1).max(200).optional(),
     offset: z.number().int().min(0).optional(),
   }),
@@ -569,7 +579,7 @@ export type CompactEventLine = Pick<SessionEvent, 'id' | 'atSec' | 'category' | 
 export type CompactWikiPage = Pick<WikiPage, 'id' | 'title' | 'kind' | 'revision'> & {
   /** [[link]] targets in the body that match no page title or alias in the show. */
   unresolvedLinks: string[];
-};
+} & WikiSavedCitations;
 
 export type DashboardRows = Record<string, string | number | boolean | null>[];
 
@@ -667,9 +677,9 @@ export interface OpOutputs {
   'dashboards.query': DashboardRows;
   'wiki.list': WikiList;
   'wiki.get': WikiPage;
-  'wiki.upsert': WikiPage;
+  'wiki.upsert': WikiPage & WikiSavedCitations;
   // The page summary (WikiPageSummary), spelled via WikiPage so it doesn't depend on that import.
-  'wiki.patch': Omit<WikiPage, 'bodyMd' | 'backlinks' | 'backlinkCount'>;
+  'wiki.patch': Omit<WikiPage, 'bodyMd' | 'backlinks' | 'backlinkCount'> & WikiSavedCitations;
   'wiki.delete': { deleted: true };
   'wiki.revisions': WikiRevision[];
   'wiki.restore': WikiPage;

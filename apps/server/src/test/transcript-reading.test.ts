@@ -180,6 +180,39 @@ describe('transcript reading', () => {
     );
   });
 
+  it('transcript.find suspect: true lists turns that may hold two speakers', async () => {
+    const { owner, session } = await studio();
+    const sessionId = session.id;
+    // A merged question and answer as diarization produced it (Tom Talks Ep16, 244 s).
+    const merged =
+      'and you were a surprise guest, right? Yeah. The way that the audience responded to you, they lost their shit. It was wild to me. They lost... They were like, Oh my God. It was';
+    const [a, , c] = await seed(sessionId, [
+      { startSec: 244, endSec: 254, speaker: 'Talib', text: merged },
+      { startSec: 255, endSec: 260, speaker: 'Tom', text: 'Did you feel nervous on stage?' },
+      { startSec: 261, endSec: 330, speaker: 'Talib', text: 'A long story without questions.' },
+    ]);
+
+    const res = await call(owner, 'transcript.find', { sessionId, suspect: true });
+    expect(res).toMatchObject({
+      total: 2,
+      lines: [
+        { id: a, reasons: ['question'], matches: ['and you were a surprise guest, right?'] },
+        { id: c, reasons: ['long'], matches: [] },
+      ],
+    });
+    expect(
+      await call(owner, 'transcript.find', { sessionId, suspect: true, countOnly: true }),
+    ).toEqual({ total: 2, counts: [1, 1] });
+    await failsWith(
+      call(owner, 'transcript.find', { sessionId, suspect: true, pattern: 'x' }),
+      'bad_request',
+    );
+    await failsWith(
+      call(await makeUser('stranger@x.test'), 'transcript.find', { sessionId, suspect: true }),
+      'not_found',
+    );
+  });
+
   it('find and get page by start time like text', async () => {
     const { owner, session } = await studio();
     const sessionId = session.id;

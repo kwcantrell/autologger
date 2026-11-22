@@ -2,11 +2,13 @@ import {
   normTitle,
   setCitationEnds,
   type WikiCitation,
+  type WikiCitationProblem,
   type WikiLint,
   type WikiList,
   type WikiListItem,
   type WikiPage,
   type WikiPageSummary,
+  type WikiSavedCitations,
   wikiCitations,
   wikiLinkTargets,
 } from '@autologger/contract';
@@ -254,12 +256,13 @@ defineOp({
   name: 'wiki.list',
   description:
     'Wiki pages of a show (people, topics, recurring bits, session recaps, answered questions), sorted by kind then title, as { pages, total, nextOffset }. Paged: limit (default 50, max 200) and offset; when nextOffset is not null, call again with offset = nextOffset for the rest. Metadata only by default. Bulk read: include "summary" adds each page\'s first paragraph (headings skipped, max 400 chars); include "body" adds the full bodyMd of every page, which is large (pages run to several KB each) — narrow it with kind (e.g. kind "session" for all recaps, kind "question" for questions already answered — check these before answering a question again) and a smaller limit. linksTo (a pageId of this show, from wiki_list / wiki_get) keeps only the pages whose [[links]] point to that page: its full backlinks list, of which wiki_get returns only the first 50 (backlinkCount has the total). ' +
-    'citesSession (a sessionId of this show, from sessions_list) keeps only the pages that cite that session ([label](/sessions/<sessionId>?t=…) links, any page kind) and adds to each page `citations`: [{ startSec, endSec?, label }] — the cited ranges of that session in seconds from its start, in body order. Use it to find what the wiki already says about a session (e.g. question pages answered from it) before answering again or rewriting its recap.',
+    'citesSession (a sessionId of this show, from sessions_list) keeps only the pages that cite that session ([label](/sessions/<sessionId>?t=…) links, any page kind) and adds to each page `citations`: [{ startSec, endSec?, label }] — the cited ranges of that session in seconds from its start, in body order — plus `citationTotal`, the number of citations of that session across all matching pages (every page, not just this one). Use it to find what the wiki already says about a session (e.g. question pages answered from it) before answering again or rewriting its recap. ' +
+    'countOnly: true (only with citesSession) replaces each page\'s `citations` with `citationCount` (how many times it cites that session) — use it to check coverage or report progress without pulling every range; with limit 1, `total` (citing pages) and `citationTotal` answer "how much of the wiki cites this session" in one small call.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(
     ctx,
-    { showId, kind, include, linksTo, citesSession, limit = 50, offset = 0 },
+    { showId, kind, include, linksTo, citesSession, countOnly, limit = 50, offset = 0 },
   ): Promise<WikiList> {
     await requireShow(ctx, showId, 'read');
     let linking: SQL | undefined;
@@ -269,6 +272,7 @@ defineOp({
       linking = await linkingTo(ctx, target);
       if (!linking) return { pages: [], total: 0, nextOffset: null };
     }
+    if (countOnly && !citesSession) throw badRequest('countOnly needs citesSession.');
     if (citesSession) {
       const { session } = await requireSession(ctx, citesSession, 'read');
       if (session.showId !== showId) throw badRequest('citesSession is a session of another show.');
@@ -300,7 +304,37 @@ defineOp({
       .limit(limit)
       .offset(offset);
     let list: WikiListItem[] = await summaries(ctx, rows);
-    if (citesSession && rows.length) {
+    let citationTotal: number | undefined;
+    if (citesSession) {
+      const [{ n } = { n: 0 }] = await ctx.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(citations)
+        .where(
+          and(
+            eq(citations.sessionId, citesSession),
+            inArray(citations.fromPageId, ctx.db.select({ id: pages.id }).from(pages).where(where)),
+          ),
+        );
+      citationTotal = n;
+    }
+    if (citesSession && countOnly && rows.length) {
+      const counts = new Map<string, number>();
+      for (const c of await ctx.db
+        .select({ id: citations.fromPageId, n: sql<number>`count(*)::int` })
+        .from(citations)
+        .where(
+          and(
+            eq(citations.sessionId, citesSession),
+            inArray(
+              citations.fromPageId,
+              rows.map((r) => r.id),
+            ),
+          ),
+        )
+        .groupBy(citations.fromPageId))
+        counts.set(c.id, c.n);
+      list = list.map((p) => ({ ...p, citationCount: counts.get(p.id) ?? 0 }));
+    } else if (citesSession && rows.length) {
       const ranges = new Map<string, NonNullable<WikiListItem['citations']>>();
       for (const c of await ctx.db
         .select()
@@ -331,14 +365,21 @@ defineOp({
         pages: list.map((p, i) => ({ ...p, bodyMd: rows[i]!.bodyMd })),
         total,
         nextOffset,
+        ...(citationTotal != null ? { citationTotal } : {}),
       };
     if (include === 'summary')
       return {
         pages: list.map((p, i) => ({ ...p, summary: firstParagraph(rows[i]!.bodyMd) })),
         total,
         nextOffset,
+        ...(citationTotal != null ? { citationTotal } : {}),
       };
-    return { pages: list, total, nextOffset };
+    return {
+      pages: list,
+      total,
+      nextOffset,
+      ...(citationTotal != null ? { citationTotal } : {}),
+    };
   },
 });
 
@@ -394,11 +435,64 @@ async function clampCitationEnds(ctx: Ctx, showId: string, bodyMd: string): Prom
   });
 }
 
+/** `H:MM:SS` or `M:SS`, fraction allowed (the web shows a citation's range as HH:MM:SS). */
+const TIMECODE = String.raw`(?:\d{1,2}:[0-5]\d|\d{1,3}):[0-5]\d(?:\.\d+)?`;
+/** A label that starts with a timecode or timecode range: "01:01:01", "[1:01:01–1:02:00] …". */
+const TIMECODE_LABEL = new RegExp(
+  String.raw`^\[?(${TIMECODE})(?:\s*[–—-]\s*(${TIMECODE}))?(?![\d:.])`,
+);
+const timecodeSec = (tc: string) => tc.split(':').reduce((sec, part) => sec * 60 + Number(part), 0);
+
 /**
- * Check every citation of a show's live pages against its sessions: the session must be in this
- * show (another show's session counts as unknown, revealing nothing about it), `to` must be after
- * `t`, and the range must end within the session's audio (sessions without measured audio are not
- * range-checked). Reads the citation index; no bodies are parsed.
+ * True when a citation's label starts with a timecode that is not its range (more than a second
+ * off `t`, or off `to` for a range label), e.g. [00:01:01](…?t=3661.5): the chip plays the right
+ * range, but the Markdown misleads anyone reading the source or an export.
+ */
+function labelMismatch(c: WikiCitation): boolean {
+  const m = TIMECODE_LABEL.exec(c.label);
+  if (!m) return false;
+  if (Math.abs(timecodeSec(m[1]!) - c.startSec) > 1) return true;
+  return m[2] != null && c.endSec != null && Math.abs(timecodeSec(m[2]) - c.endSec) > 1;
+}
+
+/**
+ * What is wrong with one citation, given its session's audio end from sessionAudioEnds (undefined:
+ * not a session of this show). The session must be in this show (another show's session counts as
+ * unknown, revealing nothing about it), `to` must be after `t`, the range must end within the
+ * session's audio (sessions without measured audio are not range-checked), and a label that
+ * starts with a timecode must match the range.
+ */
+function citationProblem(
+  c: WikiCitation,
+  end: number | null | undefined,
+): WikiCitationProblem | null {
+  if (end === undefined) return 'unknown_session';
+  if (c.endSec != null && c.endSec <= c.startSec) return 'bad_range';
+  if (end != null && (c.endSec ?? c.startSec) > end + AUDIO_END_SLACK_SEC) return 'past_end';
+  if (labelMismatch(c)) return 'label_mismatch';
+  return null;
+}
+
+/** Citation count and bad citations of a page body just saved by wiki.upsert / wiki.patch. */
+async function savedCitations(
+  ctx: Ctx,
+  showId: string,
+  bodyMd: string,
+): Promise<WikiSavedCitations> {
+  const cites = wikiCitations(bodyMd);
+  const ids = [...new Set(cites.map((c) => c.sessionId))];
+  const audioEnd = await sessionAudioEnds(ctx, showId, ids);
+  const badCitations: WikiSavedCitations['badCitations'] = [];
+  for (const c of cites) {
+    const problem = citationProblem(c, audioEnd.get(c.sessionId));
+    if (problem) badCitations.push({ ...c, problem });
+  }
+  return { citationCount: cites.length, badCitations };
+}
+
+/**
+ * Check every citation of a show's live pages against its sessions (citationProblem). Reads the
+ * citation index; no bodies are parsed.
  */
 async function lintCitations(
   ctx: Ctx,
@@ -435,12 +529,8 @@ async function lintCitations(
     const problems: WikiLint['badCitations'][number]['citations'] = [];
     for (const c of r.cites) {
       count++;
-      const end = audioEnd.get(c.sessionId);
-      if (end === undefined) problems.push({ ...c, problem: 'unknown_session' });
-      else if (c.endSec != null && c.endSec <= c.startSec)
-        problems.push({ ...c, problem: 'bad_range' });
-      else if (end != null && (c.endSec ?? c.startSec) > end + AUDIO_END_SLACK_SEC)
-        problems.push({ ...c, problem: 'past_end' });
+      const problem = citationProblem(c, audioEnd.get(c.sessionId));
+      if (problem) problems.push({ ...c, problem });
     }
     if (problems.length)
       bad.push({ pageId: r.id, title: r.title, kind: r.kind, citations: problems });
@@ -451,7 +541,7 @@ async function lintCitations(
 defineOp({
   name: 'wiki.lint',
   description:
-    'Check the links of a whole show wiki in one call, the way the wiki renders them. unresolved: pages with [[Target]] / [[Target|label]] links (also [[Target\\|label]] in table cells; links inside code are ignored) that match no page title or alias (case-insensitive, spaces collapsed), with the missing targets as written — create those pages with wiki_upsert or fix the links. orphans: person, topic and bit pages no other page links to (session recaps and question pages are left out). badCitations: pages whose citations ([label](/sessions/<sessionId>?t=<startSec>&to=<endSec>)) are wrong, each with problem "unknown_session" (no session with that id in this show), "bad_range" (to is not greater than t) or "past_end" (the range ends after the session\'s audio, audioSeconds in sessions_get; sessions without audio are not range-checked; wiki_upsert and wiki_patch clamp a `to` at most 5 s past the end, so these overshoot by more or come from older saves) — fix them with wiki_patch. counts: pages, distinct links, unresolved links, orphans, citations, bad citations. Read-only.',
+    'Check the links of a whole show wiki in one call, the way the wiki renders them. unresolved: pages with [[Target]] / [[Target|label]] links (also [[Target\\|label]] in table cells; links inside code are ignored) that match no page title or alias (case-insensitive, spaces collapsed), with the missing targets as written — create those pages with wiki_upsert or fix the links. orphans: person, topic and bit pages no other page links to (session recaps and question pages are left out). badCitations: pages whose citations ([label](/sessions/<sessionId>?t=<startSec>&to=<endSec>)) are wrong, each with problem "unknown_session" (no session with that id in this show), "bad_range" (to is not greater than t) or "past_end" (the range ends after the session\'s audio, audioSeconds in sessions_get; sessions without audio are not range-checked; wiki_upsert and wiki_patch clamp a `to` at most 5 s past the end, so these overshoot by more or come from older saves) or "label_mismatch" (the label starts with a timecode such as 01:01:01 or 1:01:01–1:02:00 that is more than a second off t / to — label timecodes are HH:MM:SS from the session start, like the chip) — fix them with wiki_patch; wiki_upsert and wiki_patch also report a page\'s bad citations when it is saved. counts: pages, distinct links, unresolved links, orphans, citations, bad citations. Read-only.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId }): Promise<WikiLint> {
@@ -531,8 +621,8 @@ defineOp({
   name: 'wiki.upsert',
   description:
     'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated (keeping its title), otherwise a new one is created; pass pageId to rename. bodyMd is raw Markdown text, stored exactly as sent (apart from clamping a citation end slightly past the audio, below): write real newlines and quotes, not JSON escapes like \\n or \\" inside the text. Link other pages with [[Title]] or [[Title|label]]; wiki_lint finds links to missing pages. Kind "session" pages are recaps tied to sessionId. Kind "question" pages store an answered question: title = the question as asked (e.g. "When did Dana talk about her dog?"), bodyMd = the answer, with a citation for every claim. ' +
-    "A citation is a Markdown link to a range of a session: [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), seconds from the session start (the @seconds of transcript_text; `to` optional and greater than t; the range must end within the session's audio — audioSeconds in sessions_get / sessions_list is the bound — and a `to` up to 5 s past the audio end is clamped to it on save, so the stored body then differs from what was sent there), e.g. [Dana on the dog](/sessions/ses_abc?t=754.2&to=811). The web shows it as a chip with the session title and range (HH:MM:SS–HH:MM:SS) that plays that range, the label as its tooltip. Prefer citations over bare timecodes on every page kind; wiki_lint checks them. Every save keeps a revision. To fix a few sentences of an existing page, use wiki_patch instead of resending the whole body. " +
-    'Returns the saved page with its body and backlinks; pass `compact: true` (recommended for agents) to get only `{ id, title, kind, revision, unresolvedLinks }`, where unresolvedLinks lists the [[link]] targets in the body that match no page title or alias in the show yet (create those pages, or fix the link; wiki_lint checks the whole wiki).',
+    'A citation is a Markdown link to a range of a session: [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), seconds from the session start (the @seconds of transcript_text; `to` optional and greater than t; the range must end within the session\'s audio — audioSeconds in sessions_get / sessions_list is the bound — and a `to` up to 5 s past the audio end is clamped to it on save, so the stored body then differs from what was sent there), e.g. [Dana on the dog](/sessions/ses_abc?t=754.2&to=811). The web shows it as a chip with the session title and range (HH:MM:SS–HH:MM:SS) that plays that range, the label as its tooltip. Prefer citations over bare timecodes on every page kind; wiki_lint checks them. Every save keeps a revision. To fix a few sentences of an existing page, use wiki_patch instead of resending the whole body. ' +
+    'Returns the saved page with its body and backlinks; pass `compact: true` (recommended for agents) to get only `{ id, title, kind, revision, unresolvedLinks, citationCount, badCitations }`, where unresolvedLinks lists the [[link]] targets in the body that match no page title or alias in the show yet (create those pages, or fix the link; wiki_lint checks the whole wiki). Both shapes include citationCount (citations in the saved body, repeats counted) and badCitations: the saved page\'s citations that wiki_lint would flag, in body order, as [{ sessionId, startSec, endSec?, label, problem }] with problem "unknown_session", "bad_range", "past_end" or "label_mismatch" (see wiki_lint) — the page is saved anyway; fix them with wiki_patch.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
@@ -603,6 +693,7 @@ defineOp({
     }
     await addRevision(ctx, row);
     await indexWikiLinks(ctx.db, row.id, row.bodyMd);
+    const cited = await savedCitations(ctx, row.showId, row.bodyMd);
     if (input.compact)
       return {
         id: row.id,
@@ -610,8 +701,9 @@ defineOp({
         kind: row.kind,
         revision: row.revision,
         unresolvedLinks: await unresolvedTargets(ctx.db, row.showId, row.bodyMd),
+        ...cited,
       };
-    return fullPage(ctx, row);
+    return { ...(await fullPage(ctx, row)), ...cited };
   },
 });
 
@@ -625,7 +717,7 @@ function occurrences(text: string, find: string): number {
 defineOp({
   name: 'wiki.patch',
   description:
-    "Fix part of a wiki page without resending its body. edits: [{ find, replace }] are exact, case-sensitive text replacements applied in order; each `find` must occur exactly once in the page at that point (otherwise bad_request saying how often it matched; include more surrounding text to make it unique), and nothing is saved unless every edit applies. append (optional) adds Markdown on a new line at the end. As in wiki_upsert, a citation `to` up to 5 s past its session's audio end is clamped to that end. Saved as one new revision, undoable from the change log. pageId comes from wiki_list / wiki_get. Returns the page summary (id, title, revision) without the body; read it with wiki_get if needed.",
+    'Fix part of a wiki page without resending its body. edits: [{ find, replace }] are exact, case-sensitive text replacements applied in order; each `find` must occur exactly once in the page at that point (otherwise bad_request saying how often it matched; include more surrounding text to make it unique), and nothing is saved unless every edit applies. append (optional) adds Markdown on a new line at the end. As in wiki_upsert, a citation `to` up to 5 s past its session\'s audio end is clamped to that end. Saved as one new revision, undoable from the change log. pageId comes from wiki_list / wiki_get. Returns the page summary (id, title, revision) without the body, plus citationCount and badCitations for the saved body (as in wiki_upsert); read the body with wiki_get if needed.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { pageId, edits, append }) {
@@ -669,7 +761,7 @@ defineOp({
     await addRevision(ctx, after);
     await indexWikiLinks(ctx.db, after.id, after.bodyMd);
     const [summary] = await summaries(ctx, [after]);
-    return summary!;
+    return { ...summary!, ...(await savedCitations(ctx, after.showId, after.bodyMd)) };
   },
 });
 
