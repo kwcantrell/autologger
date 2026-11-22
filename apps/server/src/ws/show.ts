@@ -7,6 +7,8 @@
 // Show-level jobs (compile, no session) publish their changes on `show:<id>` directly.
 // Event changes only move a rail card's event count, so they become a throttled session-list hint:
 // live logging refetches each open rail's list at most once per EVENT_HINT_MS, not per event.
+// New change-log entries (of any session, or show-level ones on `show:<id>`) become a `change`
+// hint for the show's change log, throttled the same way.
 
 import type { Job, ShowClientMessage, ShowServerMessage } from '@autologger/contract';
 import { eq } from 'drizzle-orm';
@@ -63,6 +65,29 @@ export function showMessageFor(m: BusMessage): ShowServerMessage | null {
 /** An event of the session was logged, edited or deleted (its rail card's count may change). */
 const isEventChange = (m: BusMessage) =>
   (m.type === 'change' || m.type === 'invalidate') && m.entity === 'event';
+/** An op call wrote to the change log. */
+const isLogChange = (m: BusMessage) => m.type === 'invalidate' && m.entity === 'change';
+
+/** Leading + trailing throttle: `fire` at once, then at most once per EVENT_HINT_MS. */
+function throttled(fire: () => void) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let again = false;
+  const hint = () => {
+    if (timer) {
+      again = true;
+      return;
+    }
+    fire();
+    timer = setTimeout(() => {
+      timer = undefined;
+      if (again) {
+        again = false;
+        hint();
+      }
+    }, EVENT_HINT_MS);
+  };
+  return { hint, stop: () => clearTimeout(timer) };
+}
 
 registerWs(
   '/ws/show/',
@@ -83,23 +108,9 @@ registerWs(
     const push = (step: () => void | Promise<void>) => {
       queue = queue.then(step).catch(() => {});
     };
-    // Leading + trailing throttle of event-count hints (see EVENT_HINT_MS).
-    let hintTimer: ReturnType<typeof setTimeout> | undefined;
-    let hintAgain = false;
-    const hintEvents = () => {
-      if (hintTimer) {
-        hintAgain = true;
-        return;
-      }
-      send({ type: 'invalidate', entity: 'session' });
-      hintTimer = setTimeout(() => {
-        hintTimer = undefined;
-        if (hintAgain) {
-          hintAgain = false;
-          hintEvents();
-        }
-      }, EVENT_HINT_MS);
-    };
+    // Throttled event-count and change-log hints (see EVENT_HINT_MS).
+    const events = throttled(() => send({ type: 'invalidate', entity: 'session' }));
+    const log = throttled(() => send({ type: 'invalidate', entity: 'change' }));
     const stopBeat = heartbeat(ws);
     const offAll = subscribeAll((topic: Topic, m: BusMessage) => {
       if (topic === `show:${showId}`) {
@@ -111,6 +122,7 @@ registerWs(
           if (out) push(() => send(out));
         } else if (m.type === 'compilation_changed')
           push(() => send({ type: 'invalidate', entity: 'compilation' }));
+        else if (isLogChange(m)) push(log.hint);
         else if (m.type === 'closed')
           push(() => {
             send({ type: 'closed', reason: m.reason });
@@ -119,7 +131,7 @@ registerWs(
         return;
       }
       if (!topic.startsWith('session:')) return;
-      const out = isEventChange(m) ? 'events' : showMessageFor(m);
+      const out = isEventChange(m) ? 'events' : isLogChange(m) ? 'log' : showMessageFor(m);
       if (!out) return;
       const lookup = showOfSession(topic.slice('session:'.length));
       push(async () => {
@@ -133,7 +145,8 @@ registerWs(
           return;
         }
         if (owner !== showId) return;
-        if (out === 'events') hintEvents();
+        if (out === 'events') events.hint();
+        else if (out === 'log') log.hint();
         else send(out);
       });
     });
@@ -148,7 +161,8 @@ registerWs(
     });
     ws.on('close', () => {
       stopBeat();
-      clearTimeout(hintTimer);
+      events.stop();
+      log.stop();
       offAll();
       offUser();
     });

@@ -1,5 +1,15 @@
 import type { Job, Session } from '@autologger/contract';
-import { AudioLines, Film, MoreVertical, Plus, Search, Settings, Upload, X } from 'lucide-react';
+import {
+  AudioLines,
+  Film,
+  History,
+  MoreVertical,
+  Plus,
+  Search,
+  Settings,
+  Upload,
+  X,
+} from 'lucide-react';
 import { lazy, type ReactElement, Suspense, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useLocation } from 'wouter';
@@ -302,6 +312,22 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
               <span>Compilations</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
+          {active.show && (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip="Changes"
+                title="Every change to this show, with undo"
+                onClick={() => {
+                  closeSheet();
+                  settingsOpen.set(null);
+                  navigate('/changes');
+                }}
+              >
+                <History aria-hidden="true" />
+                <span>Changes</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
           <SidebarMenuItem>
             <SidebarMenuButton
               id="v6-btn-settings"
