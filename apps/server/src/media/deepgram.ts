@@ -108,7 +108,11 @@ export interface DeepgramUtterance {
 }
 
 export interface DeepgramResponse {
-  metadata?: { duration?: number };
+  metadata?: {
+    duration?: number;
+    /** Present only when a diarizer ran; `arch` is the family `diarize_model` resolved to ("v1", "v2"). */
+    diarize_info?: { model_uuid?: string; arch?: string };
+  };
   results?: {
     utterances?: DeepgramUtterance[];
     channels?: { alternatives?: { transcript?: string; words?: DeepgramWord[] }[] }[];
