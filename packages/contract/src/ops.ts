@@ -26,7 +26,7 @@ import type {
   TranscriptReplaceResult,
   TranscriptSegment,
   WikiLint,
-  WikiListItem,
+  WikiList,
   WikiPage,
   WikiRevision,
 } from './entities.ts';
@@ -293,6 +293,8 @@ export const opInputs = {
     showId: id,
     kind: z.enum(['person', 'topic', 'bit', 'session']).optional(),
     include: z.enum(['summary', 'body']).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+    offset: z.number().int().min(0).optional(),
   }),
   'wiki.get': z.object({
     pageId: id.optional(),
@@ -477,7 +479,7 @@ export interface OpOutputs {
   'dashboards.save': Dashboard | CompactDashboard;
   'dashboards.delete': { deleted: true };
   'dashboards.query': DashboardRows;
-  'wiki.list': WikiListItem[];
+  'wiki.list': WikiList;
   'wiki.get': WikiPage;
   'wiki.upsert': WikiPage;
   'wiki.delete': { deleted: true };

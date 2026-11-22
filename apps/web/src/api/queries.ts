@@ -8,6 +8,8 @@ import type {
   OpOutputs,
   Via,
   WikiKind,
+  WikiList,
+  WikiListItem,
 } from '@autologger/contract';
 import {
   type QueryClient,
@@ -158,13 +160,27 @@ export const useChanges = (sessionId: string, via: Via | 'all') =>
     ...(via === 'all' ? {} : { via }),
     limit: 300,
   });
+/** Every page of a show's wiki (wiki.list is paged; the screens need all of it for links). */
+export async function listAllWikiPages(showId: string, kind?: WikiKind) {
+  const out: WikiListItem[] = [];
+  for (let offset: number | null = 0; offset !== null; ) {
+    const page: WikiList = await rpc('wiki.list', {
+      showId,
+      ...(kind ? { kind } : {}),
+      limit: 200,
+      offset,
+    });
+    out.push(...page.pages);
+    offset = page.nextOffset;
+  }
+  return out;
+}
 export const useWikiList = (showId: string | undefined, kind?: WikiKind) =>
-  useOpQuery(
-    [...qk.wikiList(showId ?? ''), kind ?? 'all'],
-    'wiki.list',
-    { showId: showId ?? '', ...(kind ? { kind } : {}) },
-    { enabled: !!showId },
-  );
+  useQuery<WikiListItem[], RpcError>({
+    queryKey: [...qk.wikiList(showId ?? ''), kind ?? 'all'],
+    queryFn: () => listAllWikiPages(showId ?? '', kind),
+    enabled: !!showId,
+  });
 export const useWikiPage = (pageId: string | undefined) =>
   useOpQuery(
     qk.wikiPage(pageId ?? ''),

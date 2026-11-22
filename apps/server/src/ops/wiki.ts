@@ -1,4 +1,11 @@
-import type { WikiLint, WikiListItem, WikiPage, WikiPageSummary } from '@autologger/contract';
+import {
+  normTitle,
+  type WikiLint,
+  type WikiList,
+  type WikiPage,
+  type WikiPageSummary,
+  wikiLinkTargets,
+} from '@autologger/contract';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { requireSession, requireShow } from '../core/authz.ts';
 import { badRequest, conflict, notFound } from '../core/errors.ts';
@@ -13,7 +20,7 @@ type PageRow = typeof pages.$inferSelect;
 /** Deleted pages are kept (with their revisions) for undo, but are invisible everywhere else. */
 const live = isNull(pages.deletedAt);
 
-export const normTitle = (t: string) => t.trim().toLowerCase().replace(/\s+/g, ' ');
+export { normTitle };
 
 async function summaries(ctx: Ctx, rows: PageRow[]): Promise<WikiPageSummary[]> {
   const users = await userRefs(
@@ -33,17 +40,32 @@ async function summaries(ctx: Ctx, rows: PageRow[]): Promise<WikiPageSummary[]> 
   }));
 }
 
-// Same syntax the web renderer links: [[Title]] and [[Title|label]].
-const WIKI_LINK = /\[\[([^[\]|\n]+?)(?:\|([^[\]\n]+?))?\]\]/g;
+/**
+ * Every title and alias of a show's live pages (normalised like the web's link resolver) → the
+ * page id it names. Titles win over aliases.
+ */
+export async function wikiNames(db: Ctx['db'], showId: string): Promise<Map<string, string>> {
+  const rows = await db
+    .select({ id: pages.id, title: pages.title, aliases: pages.aliases })
+    .from(pages)
+    .where(and(live, eq(pages.showId, showId)));
+  const byName = new Map<string, string>();
+  for (const r of rows) byName.set(normTitle(r.title), r.id);
+  for (const r of rows)
+    for (const a of r.aliases) if (!byName.has(normTitle(a))) byName.set(normTitle(a), r.id);
+  return byName;
+}
 
-/** Distinct link targets of a body, as written (trimmed), in order of first appearance. */
-function linkTargets(bodyMd: string): string[] {
-  const seen = new Map<string, string>();
-  for (const m of bodyMd.matchAll(WIKI_LINK)) {
-    const t = (m[1] ?? '').trim();
-    if (t && !seen.has(normTitle(t))) seen.set(normTitle(t), t);
-  }
-  return [...seen.values()];
+/** The [[link]] targets of a body that name no live page of the show (as written). */
+export async function unresolvedTargets(
+  db: Ctx['db'],
+  showId: string,
+  bodyMd: string,
+): Promise<string[]> {
+  const targets = wikiLinkTargets(bodyMd);
+  if (!targets.length) return [];
+  const byName = await wikiNames(db, showId);
+  return targets.filter((t) => !byName.has(normTitle(t)));
 }
 
 /** First paragraph of a body, skipping headings, capped at 400 characters. */
@@ -126,55 +148,62 @@ async function findByTitle(ctx: Ctx, showId: string, title: string): Promise<Pag
 defineOp({
   name: 'wiki.list',
   description:
-    'Wiki pages of a show (people, topics, recurring bits, session recaps), sorted by kind then title. Metadata only by default. Bulk read: include "summary" adds each page\'s first paragraph (headings skipped, max 400 chars); include "body" adds the full bodyMd of every page — narrow it with kind (e.g. kind "session" for all recaps) to keep the response small. Backlinks are only in wiki_get.',
+    'Wiki pages of a show (people, topics, recurring bits, session recaps), sorted by kind then title, as { pages, total, nextOffset }. Paged: limit (default 50, max 200) and offset; when nextOffset is not null, call again with offset = nextOffset for the rest. Metadata only by default. Bulk read: include "summary" adds each page\'s first paragraph (headings skipped, max 400 chars); include "body" adds the full bodyMd of every page, which is large (pages run to several KB each) — narrow it with kind (e.g. kind "session" for all recaps) and a smaller limit. Backlinks are only in wiki_get.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { showId, kind, include }): Promise<WikiListItem[]> {
+  async run(ctx, { showId, kind, include, limit = 50, offset = 0 }): Promise<WikiList> {
     await requireShow(ctx, showId, 'read');
+    const where = and(live, eq(pages.showId, showId), kind ? eq(pages.kind, kind) : undefined);
+    const [{ total } = { total: 0 }] = await ctx.db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(pages)
+      .where(where);
     const rows = await ctx.db
       .select()
       .from(pages)
-      .where(and(live, eq(pages.showId, showId), kind ? eq(pages.kind, kind) : undefined))
-      .orderBy(asc(pages.kind), asc(pages.title));
+      .where(where)
+      .orderBy(asc(pages.kind), asc(pages.title), asc(pages.id))
+      .limit(limit)
+      .offset(offset);
     const list = await summaries(ctx, rows);
-    if (include === 'body') return list.map((p, i) => ({ ...p, bodyMd: rows[i]!.bodyMd }));
+    const nextOffset = offset + rows.length < total ? offset + rows.length : null;
+    if (include === 'body')
+      return {
+        pages: list.map((p, i) => ({ ...p, bodyMd: rows[i]!.bodyMd })),
+        total,
+        nextOffset,
+      };
     if (include === 'summary')
-      return list.map((p, i) => ({ ...p, summary: firstParagraph(rows[i]!.bodyMd) }));
-    return list;
+      return {
+        pages: list.map((p, i) => ({ ...p, summary: firstParagraph(rows[i]!.bodyMd) })),
+        total,
+        nextOffset,
+      };
+    return { pages: list, total, nextOffset };
   },
 });
 
 defineOp({
   name: 'wiki.lint',
   description:
-    'Check the links of a whole show wiki in one call. unresolved: pages with [[Target]] / [[Target|label]] links that match no page title or alias (case-insensitive), with the missing targets as written — create those pages with wiki_upsert or fix the links. orphans: pages no other page links to. counts: pages, distinct links, unresolved links, orphans. Read-only.',
+    'Check the links of a whole show wiki in one call, the way the wiki renders them. unresolved: pages with [[Target]] / [[Target|label]] links (also [[Target\\|label]] in table cells; links inside code are ignored) that match no page title or alias (case-insensitive, spaces collapsed), with the missing targets as written — create those pages with wiki_upsert or fix the links. orphans: person, topic and bit pages no other page links to (session recaps are left out; they are reached from their session). counts: pages, distinct links, unresolved links, orphans. Read-only.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId }): Promise<WikiLint> {
     await requireShow(ctx, showId, 'read');
     const rows = await ctx.db
-      .select({
-        id: pages.id,
-        title: pages.title,
-        kind: pages.kind,
-        aliases: pages.aliases,
-        bodyMd: pages.bodyMd,
-      })
+      .select({ id: pages.id, title: pages.title, kind: pages.kind, bodyMd: pages.bodyMd })
       .from(pages)
       .where(and(live, eq(pages.showId, showId)))
       .orderBy(asc(pages.kind), asc(pages.title));
-    // Every title and alias → the page it names.
-    const byName = new Map<string, string>();
-    for (const r of rows)
-      for (const n of [r.title, ...r.aliases])
-        if (!byName.has(normTitle(n))) byName.set(normTitle(n), r.id);
+    const byName = await wikiNames(ctx.db, showId);
     const linked = new Set<string>();
     const unresolved: WikiLint['unresolved'] = [];
     let links = 0;
     let unresolvedLinks = 0;
     for (const r of rows) {
       const missing: string[] = [];
-      for (const t of linkTargets(r.bodyMd)) {
+      for (const t of wikiLinkTargets(r.bodyMd)) {
         links++;
         const target = byName.get(normTitle(t));
         if (!target) missing.push(t);
@@ -186,7 +215,7 @@ defineOp({
       }
     }
     const orphans = rows
-      .filter((r) => !linked.has(r.id))
+      .filter((r) => r.kind !== 'session' && !linked.has(r.id))
       .map((r) => ({ pageId: r.id, title: r.title, kind: r.kind }));
     return {
       unresolved,
