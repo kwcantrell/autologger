@@ -213,6 +213,57 @@ describe('compilations ops', () => {
       'bad_request',
     );
   });
+  it('retries a failed compilation with a new compile job, for show writers only', async () => {
+    const { owner, team, show, session } = await studio();
+    await youtubeSession(session.id);
+    const c = await call(owner, 'compilations.create', {
+      showId: show.id,
+      title: 'Flaky',
+      clips: [{ sessionId: session.id, startSec: 0, endSec: 10 }],
+    });
+    const agent = asAgent(owner);
+    await failsWith(call(agent, 'compilations.retry', { compilationId: c.id }), 'conflict');
+    const [first] = await db.select().from(jobs);
+    await failJob(first!, 'network down', true);
+    await db
+      .update(compilations)
+      .set({ status: 'failed', error: 'network down', progress: null })
+      .where(eq(compilations.id, c.id));
+
+    const reader = await makeUser('reader@example.com');
+    await call(owner, 'teams.invite', { teamId: team.id, email: reader.user.email });
+    await call(owner, 'teams.setGrant', {
+      teamId: team.id,
+      userId: reader.user.id,
+      showId: show.id,
+      access: 'read',
+    });
+    await failsWith(call(reader, 'compilations.retry', { compilationId: c.id }), 'forbidden');
+    const stranger = await makeUser('stranger@example.com');
+    await failsWith(call(stranger, 'compilations.retry', { compilationId: c.id }), 'not_found');
+
+    const retried = await call(agent, 'compilations.retry', { compilationId: c.id });
+    expect(retried).toMatchObject({ id: c.id, status: 'queued', queuePosition: 0 });
+    expect(retried.error).toBeUndefined();
+    const all = await call(owner, 'jobs.list', { showId: show.id, kinds: ['compile'] });
+    expect(all.map((j) => [j.status, j.compilationId])).toEqual([
+      ['queued', c.id],
+      ['failed', c.id],
+    ]);
+    await failsWith(call(agent, 'compilations.retry', { compilationId: c.id }), 'conflict');
+
+    // Clips that cannot be compiled any more: nothing changes.
+    await db.update(compilations).set({ status: 'failed' }).where(eq(compilations.id, c.id));
+    await db
+      .update(sessions)
+      .set({ sourceKind: null, sourceUrl: null })
+      .where(eq(sessions.id, session.id));
+    await failsWith(call(agent, 'compilations.retry', { compilationId: c.id }), 'bad_request');
+    expect(await call(owner, 'compilations.get', { compilationId: c.id })).toMatchObject({
+      status: 'failed',
+    });
+    expect(await db.select().from(jobs)).toHaveLength(2);
+  });
 });
 
 describe('compile jobs in jobs.list and compilation estimates', () => {

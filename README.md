@@ -58,6 +58,9 @@ docker compose up -d --build
 
 Google OAuth redirect URI: `$PUBLIC_URL/auth/google/callback`.
 
+Signed-out visitors at `/` see a public landing page about AutoLogger. For a private instance, set
+`LANDING_PAGE=0` to send them straight to sign-in instead (read at startup; restart the app to apply).
+
 ## Connecting an agent
 
 ```bash
