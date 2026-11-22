@@ -137,8 +137,10 @@ export function mapDeepgram(resp: DeepgramResponse, offsetSec: number): MappedSe
       ...(typeof w.speaker === 'number' ? { sp: w.speaker } : {}),
     }));
 
-  // Without a speaker change a row keeps the utterance's own span, speaker and text. Split rows
-  // take their words' span (the outer edges keep the utterance bounds) and text.
+  // Without a speaker change a row keeps the utterance's own span, speaker and transcript text
+  // (Deepgram's smart-format spacing for numbers and currency stays intact). Only split rows
+  // rebuild their text by joining punctuated words, and take their words' span (the outer edges
+  // keep the utterance bounds).
   const toRows = (
     start: number,
     end: number,

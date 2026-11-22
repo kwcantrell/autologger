@@ -291,7 +291,7 @@ defineOp({
     'Rename a speaker label in a session transcript (e.g. "Speaker 1" → "Dana"): every segment labelled `from` gets the label `to`. ' +
     'Optional fromSec/toSec (seconds from session start, as in transcript_text `@seconds`) limit it to segments that START in [fromSec, toSec), e.g. `{ fromSec: 0, toSec: 47, to: "Promo" }` for an intro. With a range, `from` may be omitted to relabel every segment in it whatever its speaker; without a range `from` is required and the whole session is renamed. ' +
     'A segment that starts inside the range but runs past it is renamed whole: split it first with transcript.splitSegment (atSec or atText). ' +
-    'Each renamed segment is its own change-log entry, undoable from the Agents tab. Returns `{ updated }`, the number of segments renamed.',
+    'Undo: each renamed segment is its own change-log entry (op transcript.renameSpeaker), so undoing a rename means reverting every one of those entries (Agents tab or changes.revert, any order); a whole-session rename of a long transcript creates hundreds. Renaming back (from = the new label, to = the old one, same range) is quicker, but also relabels segments that already had the new label before.Prefer a narrow fromSec/toSec when only part of the session is wrong. Returns `{ updated }`, the number of segments renamed.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, from, to, fromSec, toSec }) {

@@ -244,6 +244,9 @@ export const opInputs = {
     })
     .refine((v) => v.from !== undefined || v.fromSec !== undefined || v.toSec !== undefined, {
       message: 'Pass from, or a fromSec/toSec range to relabel every speaker in it',
+    })
+    .refine((v) => v.fromSec === undefined || v.toSec === undefined || v.fromSec <= v.toSec, {
+      message: 'fromSec must not be after toSec',
     }),
   // Segment structure fixes (merge / split).
   'transcript.mergeSegments': z.object({

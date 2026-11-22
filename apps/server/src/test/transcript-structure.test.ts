@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { subscribe } from '../core/bus.ts';
 import { newId } from '../core/ids.ts';
 import { db, schema } from '../db/client.ts';
 import { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
@@ -195,6 +196,7 @@ describe('transcript.renameSpeaker', () => {
       { start: 20, end: 47, speaker: 'Speaker 3', words: [['music', 20, 47]] },
       { start: 47, end: 60, speaker: 'Speaker 2', words: [['Welcome', 47, 60]] },
       { start: 60, end: 70, speaker: 'Speaker 1', words: [['Thanks', 60, 70]] },
+      { start: 70, end: 80, speaker: 'Speaker 2', words: [['Sure', 70, 80]] },
     ]);
     const before = await call(owner, 'transcript.get', { sessionId: session.id });
     const speakers = async () =>
@@ -208,7 +210,7 @@ describe('transcript.renameSpeaker', () => {
         toSec: 47,
       }),
     ).toEqual({ updated: 1 });
-    expect(await speakers()).toEqual(['Promo', 'Speaker 3', 'Speaker 2', 'Speaker 1']);
+    expect(await speakers()).toEqual(['Promo', 'Speaker 3', 'Speaker 2', 'Speaker 1', 'Speaker 2']);
 
     expect(
       await call(agent, 'transcript.renameSpeaker', {
@@ -218,11 +220,41 @@ describe('transcript.renameSpeaker', () => {
         toSec: 47,
       }),
     ).toEqual({ updated: 1 });
-    expect(await speakers()).toEqual(['Promo', 'Promo', 'Speaker 2', 'Speaker 1']);
+    expect(await speakers()).toEqual(['Promo', 'Promo', 'Speaker 2', 'Speaker 1', 'Speaker 2']);
 
-    // Without a range `from` is required.
+    // A whole-session rename records one change per segment but publishes each message once.
+    const sent: string[] = [];
+    const stop = subscribe(`session:${session.id}`, (m) => sent.push(JSON.stringify(m)));
+    expect(
+      await call(agent, 'transcript.renameSpeaker', {
+        sessionId: session.id,
+        from: 'Speaker 2',
+        to: 'Guest',
+      }),
+    ).toEqual({ updated: 2 });
+    stop();
+    expect(await speakers()).toEqual(['Promo', 'Promo', 'Guest', 'Speaker 1', 'Guest']);
+    expect(sent.sort()).toEqual(
+      [
+        { type: 'invalidate', entity: 'change' },
+        { type: 'invalidate', entity: 'transcript_segment' },
+      ]
+        .map((m) => JSON.stringify(m))
+        .sort(),
+    );
+
+    // Without a range `from` is required, and the range must not be reversed.
     await failsWith(
       call(agent, 'transcript.renameSpeaker', { sessionId: session.id, to: 'X' }),
+      'bad_request',
+    );
+    await failsWith(
+      call(agent, 'transcript.renameSpeaker', {
+        sessionId: session.id,
+        to: 'X',
+        fromSec: 50,
+        toSec: 10,
+      }),
       'bad_request',
     );
     const stranger = await makeUser('stranger@example.com');
