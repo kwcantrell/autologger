@@ -80,4 +80,29 @@ describe('job queue order', () => {
     expect((await claimJob())?.id).toBe(transcribe.id);
     expect((await claimJob())?.id).toBe(rest[0]!.id);
   });
+
+  it('also when the imports were queued in one transaction (same timestamps)', async () => {
+    const { owner, session } = await studio();
+    const spec = {
+      kind: 'youtube_import' as const,
+      sessionId: session.id,
+      actorId: owner.user.id,
+      payload: { url: 'https://youtu.be/x' },
+    };
+    const imports = await db.transaction(async (tx) => [
+      await enqueueJob(tx, spec),
+      await enqueueJob(tx, spec),
+      await enqueueJob(tx, spec),
+    ]);
+    expect(new Set(imports.map((j) => j.createdAt.getTime())).size).toBe(1);
+
+    const first = (await claimJob())!;
+    const transcribe = await enqueueJob(
+      db,
+      { kind: 'transcribe', sessionId: session.id, actorId: null, payload: { segmentId: 'aud_x' } },
+      { after: first },
+    );
+    expect((await claimJob())?.id).toBe(transcribe.id);
+    expect(imports.map((j) => j.id)).toContain((await claimJob())?.id);
+  });
 });

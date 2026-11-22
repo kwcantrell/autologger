@@ -40,7 +40,10 @@ export async function enqueueJob(
       payload: spec.payload,
       actorId: spec.actorId,
       progress: 'Queued',
-      ...(opts.after ? { runAfter: opts.after.createdAt } : {}),
+      // Read in SQL: a JS Date would truncate created_at's microseconds.
+      ...(opts.after
+        ? { runAfter: sql`(select created_at from jobs where id = ${opts.after.id})` }
+        : {}),
     })
     .returning();
   // Delivered on commit; harmless when the worker isn't listening.
