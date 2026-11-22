@@ -1,10 +1,11 @@
 // Public landing page for signed-out visitors at `/` (RootGate lazy-loads it). Static: no RPC,
-// no session state. The document is viewport-locked on desktop (tailwind.css), so the page is its
+// no session state; only /api/capabilities (already loaded by RootGate) for the docs base URL. The document is viewport-locked on desktop (tailwind.css), so the page is its
 // own scroll container and the header sticks inside it.
 
 import { ArrowRight, ChevronDown, ExternalLink, Menu } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { createContext, type ReactNode, useContext, useMemo, useState } from 'react';
 import { Link } from 'wouter';
+import { useCapabilities } from '@/api/queries';
 import { Button } from '@/shared/components/ui/button';
 import {
   DropdownMenu,
@@ -23,8 +24,8 @@ import {
 import { cn } from '@/shared/lib/utils';
 import {
   ASK_PLUGIN_HREF,
-  MCP_DOCS_HREF,
-  NAV_GROUPS,
+  type LandingLinks,
+  landingLinks,
   type NavLink,
   PRODUCT_LINKS,
   SIGN_IN_HREF,
@@ -50,7 +51,14 @@ const LEAD = 'm-0 text-[1rem] leading-[1.6] text-si-muted sm:text-[1.0625rem]';
 const FOCUS =
   'outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:rounded-ctl';
 
-const MENU_GROUPS = [{ id: 'product', label: 'Product', links: PRODUCT_LINKS }, ...NAV_GROUPS];
+// Doc links follow the server's DOCS_URL (capabilities.docsUrl); upstream docs until it loads.
+const LinksContext = createContext<LandingLinks>(landingLinks());
+const useLinks = () => useContext(LinksContext);
+
+function useMenuGroups() {
+  const { navGroups } = useLinks();
+  return [{ id: 'product', label: 'Product', links: PRODUCT_LINKS }, ...navGroups];
+}
 
 function isExternal(href: string) {
   return href.startsWith('http');
@@ -94,9 +102,10 @@ function SignInButton({ className, size }: { className?: string; size?: 'default
 }
 
 function DesktopNav() {
+  const menuGroups = useMenuGroups();
   return (
     <nav aria-label="Main" className="flex items-center gap-1 max-md:hidden">
-      {MENU_GROUPS.map((g) => (
+      {menuGroups.map((g) => (
         <DropdownMenu key={g.id}>
           <DropdownMenuTrigger
             render={
@@ -135,6 +144,7 @@ function DesktopNav() {
 
 function MobileNav() {
   const [open, setOpen] = useState(false);
+  const menuGroups = useMenuGroups();
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger
@@ -155,7 +165,7 @@ function MobileNav() {
           <SheetDescription>Product tour, docs and developer links.</SheetDescription>
         </SheetHeader>
         <nav aria-label="Main" className="flex flex-col gap-5 px-4 pb-6">
-          {MENU_GROUPS.map((g) => (
+          {menuGroups.map((g) => (
             <section key={g.id} aria-labelledby={`m-nav-${g.id}`}>
               <h2
                 id={`m-nav-${g.id}`}
@@ -193,6 +203,7 @@ function MobileNav() {
 }
 
 function Header() {
+  const { mcpDocsHref } = useLinks();
   return (
     <header className="sticky top-0 z-30 border-b border-[color-mix(in_oklab,var(--si-accent)_22%,var(--si-line))] bg-[color-mix(in_oklab,var(--si-accent)_10%,#0c0d10)]">
       <div className={cn(WRAP, 'flex h-14 items-center gap-4 lg:gap-8')}>
@@ -203,7 +214,7 @@ function Header() {
             nativeButton={false}
             variant="ghost"
             className="text-si-muted hover:text-si-fg max-lg:hidden"
-            render={<a href={MCP_DOCS_HREF} {...ext(MCP_DOCS_HREF)} />}
+            render={<a href={mcpDocsHref} {...ext(mcpDocsHref)} />}
           >
             Connect an agent
           </Button>
@@ -319,7 +330,7 @@ type Feature = {
   link?: NavLink;
 };
 
-const FEATURES: Feature[] = [
+const features = (links: LandingLinks): Feature[] => [
   {
     id: 'logging',
     eyebrow: 'Live logging',
@@ -331,7 +342,7 @@ const FEATURES: Feature[] = [
       'Bitfocus Companion turns a Stream Deck into a logging surface',
     ],
     mock: <LoggingMock />,
-    link: { label: 'Companion setup', href: NAV_GROUPS[0].links[2].href, hint: '' },
+    link: { label: 'Companion setup', href: links.companionDocsHref, hint: '' },
   },
   {
     id: 'transcripts',
@@ -403,7 +414,7 @@ const FEATURES: Feature[] = [
       'Ready-made skills for topics, moments, dashboards, wiki, briefs and questions',
     ],
     mock: <AgentsMock />,
-    link: { label: 'Connect an agent', href: MCP_DOCS_HREF, hint: '' },
+    link: { label: 'Connect an agent', href: links.mcpDocsHref, hint: '' },
   },
 ];
 
@@ -496,29 +507,30 @@ function MediaSection() {
 }
 
 function Developers() {
+  const { navGroups } = useLinks();
   const cards = [
     {
       title: 'MCP server',
       body: 'Every capability is one op in a registry, and every op an agent may use becomes an MCP tool. OAuth or personal access tokens.',
-      link: NAV_GROUPS[2].links[0],
+      link: navGroups[2].links[0],
       cta: 'Read the MCP guide',
     },
     {
       title: 'Plugin marketplace',
       body: 'Install the autologger plugin for Claude Code: skills to chapter, log moments, build dashboards, keep the wiki and write briefs — and autologger-ask to answer questions with cited clips and compilations.',
-      link: NAV_GROUPS[1].links[0],
+      link: navGroups[1].links[0],
       cta: 'Browse the plugins',
     },
     {
       title: 'Companion module',
       body: 'Roll, stop and log from a Stream Deck, with timecode, take and the last event shown on the keys.',
-      link: NAV_GROUPS[1].links[1],
+      link: navGroups[1].links[1],
       cta: 'Get the module',
     },
     {
       title: 'Open source',
       body: 'TypeScript end to end: Hono, Postgres, React. The contributor plugins walk you from first checkout to pull request.',
-      link: NAV_GROUPS[2].links[2],
+      link: navGroups[2].links[2],
       cta: 'View on GitHub',
     },
   ];
@@ -556,6 +568,7 @@ function Developers() {
 }
 
 function CtaBand() {
+  const { mcpDocsHref } = useLinks();
   return (
     <section aria-labelledby="cta-title" className="border-t border-si-line">
       <div className={cn(WRAP, 'py-16 sm:py-20')}>
@@ -574,7 +587,7 @@ function CtaBand() {
               variant="outline"
               size="lg"
               className="h-11 px-5"
-              render={<a href={MCP_DOCS_HREF} {...ext(MCP_DOCS_HREF)} />}
+              render={<a href={mcpDocsHref} {...ext(mcpDocsHref)} />}
             >
               Read the docs
             </Button>
@@ -586,6 +599,7 @@ function CtaBand() {
 }
 
 function Footer() {
+  const menuGroups = useMenuGroups();
   return (
     <footer className="border-t border-si-line bg-[color-mix(in_oklab,var(--si-accent)_10%,#0c0d10)]">
       <div
@@ -600,7 +614,7 @@ function Footer() {
             Session logging for production teams, with AI that works through MCP.
           </p>
         </div>
-        {MENU_GROUPS.map((g) => (
+        {menuGroups.map((g) => (
           <nav key={g.id} aria-labelledby={`f-nav-${g.id}`}>
             <h2
               id={`f-nav-${g.id}`}
@@ -646,33 +660,37 @@ function Footer() {
 }
 
 export function LandingPage() {
+  const docsUrl = useCapabilities().data?.docsUrl;
+  const links = useMemo(() => landingLinks(docsUrl), [docsUrl]);
   return (
-    <div
-      id="top"
-      className="h-dvh w-full overflow-x-hidden overflow-y-auto scroll-smooth bg-si-bg text-si-fg motion-reduce:scroll-auto"
-    >
-      <a
-        href="#main"
-        className="sr-only z-50 rounded-ctl bg-si-panel-2 px-3 py-2 text-si-fg focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
+    <LinksContext value={links}>
+      <div
+        id="top"
+        className="h-dvh w-full overflow-x-hidden overflow-y-auto scroll-smooth bg-si-bg text-si-fg motion-reduce:scroll-auto"
       >
-        Skip to content
-      </a>
-      <Header />
-      <main id="main" tabIndex={-1} className="outline-none">
-        <Hero />
-        <HowItWorks />
-        <div id="features">
-          {FEATURES.map((f, i) => (
-            <div key={f.id} className={cn(i > 0 && 'border-t border-si-line')}>
-              <FeatureRow f={f} flip={i % 2 === 1} />
-            </div>
-          ))}
-        </div>
-        <MediaSection />
-        <Developers />
-        <CtaBand />
-      </main>
-      <Footer />
-    </div>
+        <a
+          href="#main"
+          className="sr-only z-50 rounded-ctl bg-si-panel-2 px-3 py-2 text-si-fg focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
+        >
+          Skip to content
+        </a>
+        <Header />
+        <main id="main" tabIndex={-1} className="outline-none">
+          <Hero />
+          <HowItWorks />
+          <div id="features">
+            {features(links).map((f, i) => (
+              <div key={f.id} className={cn(i > 0 && 'border-t border-si-line')}>
+                <FeatureRow f={f} flip={i % 2 === 1} />
+              </div>
+            ))}
+          </div>
+          <MediaSection />
+          <Developers />
+          <CtaBand />
+        </main>
+        <Footer />
+      </div>
+    </LinksContext>
   );
 }

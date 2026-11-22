@@ -20,4 +20,14 @@ describe('GET /api/capabilities', () => {
   it('reports it off with LANDING_PAGE=0', async () => {
     expect((await capabilities({ LANDING_PAGE: '0' })).landingPage).toBe(false);
   });
+
+  it('reports no docs URL by default', async () => {
+    expect((await capabilities({ DOCS_URL: '' })).docsUrl).toBeNull();
+  });
+
+  it('reports DOCS_URL without its trailing slash, and ignores non-http values', async () => {
+    const url = 'https://docs.example.com/autologger/';
+    expect((await capabilities({ DOCS_URL: url })).docsUrl).toBe(url.slice(0, -1));
+    expect((await capabilities({ DOCS_URL: 'javascript:alert(1)' })).docsUrl).toBeNull();
+  });
 });

@@ -64,6 +64,7 @@ export function createApp(): Hono<Env> {
         youtube: env.youtubeEnabled && storageConfigured,
         publicUrl: env.publicUrl,
         landingPage: env.landingPage,
+        docsUrl: env.docsUrl,
       } satisfies Capabilities,
     }),
   );
