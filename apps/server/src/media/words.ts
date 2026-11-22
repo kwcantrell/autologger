@@ -58,7 +58,7 @@ export function alignWordTimings(
     const added = next.slice(runJ, j);
     if (added.length > 0) {
       if (removed.length === added.length) {
-        out.push(...added.map((w, k) => ({ w, s: removed[k]!.s, e: removed[k]!.e })));
+        out.push(...added.map((w, k) => ({ ...removed[k]!, w })));
       } else if (removed.length > 0) {
         out.push(...spread(added, removed[0]!.s, removed.at(-1)!.e));
       } else {
@@ -72,7 +72,7 @@ export function alignWordTimings(
   while (i < n || j < m) {
     if (i < n && j < m && oldWords[i]!.w === next[j]) {
       flush();
-      out.push({ w: next[j]!, s: oldWords[i]!.s, e: oldWords[i]!.e });
+      out.push({ ...oldWords[i]!, w: next[j]! }); // keeps s, e and the diarized speaker
       i++;
       j++;
       runI = i;

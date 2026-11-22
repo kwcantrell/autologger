@@ -5,7 +5,7 @@ import type { Capabilities, Category, Session, SessionEvent } from '@autologger/
 import { KeyboardIcon, RotateCcw } from 'lucide-react';
 import { useMemo } from 'react';
 import { shortcutsOpen, TRANSPORT_LABEL, type TransportTint } from '@/lib/store';
-import { eventSec, fmtSec, type TransportClock } from '@/lib/timecode';
+import { eventSec, fmtSec, isMediaOnly, type TransportClock } from '@/lib/timecode';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { cn } from '@/shared/lib/utils';
@@ -304,6 +304,13 @@ export function TransportStrip({
   ];
 
   const elapsed = session.elapsedFrames > 0 || rolling;
+  // Imported sessions never roll the clock: show the audio length, or the play-head while
+  // playing. A clock that was rolled and reset keeps showing timecode.
+  const mediaOnly = isMediaOnly(session);
+  const mediaLabel = player.isPlaying ? 'Play-head' : 'Audio length';
+  const display = mediaOnly
+    ? fmtSec(player.isPlaying ? playheadSec : session.audioSeconds)
+    : clock.timecode;
   const recDur = recorder.startedAt ? fmtSec((Date.now() - recorder.startedAt) / 1000) : '00:00:00';
 
   return (
@@ -411,11 +418,23 @@ export function TransportStrip({
               <span
                 id="session-tc-display"
                 role="timer"
-                aria-label={`Timecode ${clock.timecode}${rolling ? ', rolling' : ''}${session.take > 1 ? `, take ${session.take}` : ''}`}
+                aria-label={
+                  mediaOnly
+                    ? `${mediaLabel} ${display}`
+                    : `Timecode ${clock.timecode}${rolling ? ', rolling' : ''}${session.take > 1 ? `, take ${session.take}` : ''}`
+                }
                 className="font-tc text-[1.625rem] font-semibold leading-none tracking-[-0.01em] tabular-nums max-md:text-[1.5rem]"
               >
-                {clock.timecode}
+                {display}
               </span>
+              {mediaOnly && (
+                <span
+                  className="font-label text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-si-dim"
+                  aria-hidden="true"
+                >
+                  {mediaLabel}
+                </span>
+              )}
               {session.take > 1 && (
                 <span className="font-label text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-si-dim">
                   Take {session.take}

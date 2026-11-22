@@ -162,6 +162,8 @@ export interface TranscriptWord {
   w: string;
   s: number;
   e: number;
+  /** Diarized speaker index from transcription (0-based: "Speaker 1" is 0), when known. */
+  sp?: number;
 }
 
 export interface TranscriptSegment {
@@ -216,6 +218,13 @@ export interface TranscriptFindLine extends TranscriptLine {
   matches?: string[];
   patternIndexes?: number[];
   context?: true;
+}
+
+/** A transcript.find line with `idsOnly: true`: enough to target an edit, no text. */
+export interface TranscriptFindId {
+  id: string;
+  startSec: number;
+  speaker: string;
 }
 
 export interface Topic {

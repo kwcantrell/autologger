@@ -20,7 +20,11 @@ export type JobSpec =
     }
   | { kind: 'youtube_import'; sessionId: string; actorId: string | null; payload: { url: string } };
 
-export async function enqueueJob(tx: DbOrTx, spec: JobSpec): Promise<JobRow> {
+/**
+ * `at` sets created_at and run_after explicitly. Jobs inserted in one transaction otherwise share
+ * now(); give a batch distinct, increasing times so the worker claims them in order.
+ */
+export async function enqueueJob(tx: DbOrTx, spec: JobSpec, at?: Date): Promise<JobRow> {
   const [row] = await tx
     .insert(schema.jobs)
     .values({
@@ -30,6 +34,7 @@ export async function enqueueJob(tx: DbOrTx, spec: JobSpec): Promise<JobRow> {
       payload: spec.payload,
       actorId: spec.actorId,
       progress: 'Queued',
+      ...(at ? { createdAt: at, runAfter: at } : {}),
     })
     .returning();
   // Delivered on commit; harmless when the worker isn't listening.
