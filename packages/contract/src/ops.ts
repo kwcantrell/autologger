@@ -506,7 +506,7 @@ export const opInputs = {
     showId: id.optional(),
     sessionId: id.optional(),
     kinds: z.array(z.enum(['event', 'transcript', 'topic', 'wiki', 'session'])).optional(),
-    limit: z.number().int().min(1).max(100).default(30),
+    limit: z.number().int().min(1).max(500).default(30),
   }),
 
   // ── change log ────────────────────────────────────────────
