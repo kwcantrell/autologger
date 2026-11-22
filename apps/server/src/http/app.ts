@@ -63,6 +63,7 @@ export function createApp(): Hono<Env> {
         transcription: transcriptionConfigured,
         youtube: env.youtubeEnabled && storageConfigured,
         publicUrl: env.publicUrl,
+        landingPage: env.landingPage,
       } satisfies Capabilities,
     }),
   );

@@ -10,7 +10,7 @@ import { requireSession, requireShow } from '../core/authz.ts';
 import { type BusMessage, changeMessage, subscribeAll, type Topic } from '../core/bus.ts';
 import { badRequest, conflict, notFound, unavailable } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
-import { type Ctx, defineOp, type OpWatch } from '../core/op.ts';
+import { type Actor, type Ctx, defineOp, type OpWatch } from '../core/op.ts';
 import { db, schema } from '../db/client.ts';
 import { env, storageConfigured, transcriptionConfigured } from '../env.ts';
 import { enqueueJob, type JobRow, jobTopic, toJob, withJobEstimates } from '../media/jobs.ts';
@@ -29,6 +29,7 @@ import {
   isYoutubeUrl,
   listPlaylist,
   type Playlist,
+  videoDuration,
   watchUrl,
   youtubePlaylistId,
   youtubeVideoId,
@@ -260,10 +261,11 @@ defineOp({
 defineOp({
   name: 'media.importYoutube',
   description:
-    'Import the audio of one YouTube video into an existing session. Runs in the background: the worker downloads the audio, stores it and transcribes it. If the session\'s episodeDate is still its default (the day it was created), it is set to the video\'s upload date. Playlist URLs are rejected: use media.importPlaylist to import a whole playlist into a show. Returns the job; wait for it with jobs.list (waitSec; kinds ["youtube_import","transcribe"] leaves out the cosmetic waveform job queued after the download).',
+    'Import the audio of one YouTube video into an existing session. Runs in the background: the worker downloads the audio, stores it and transcribes it. If the session\'s episodeDate is still its default (the day it was created), it is set to the video\'s upload date. Playlist URLs are rejected: use media.importPlaylist to import a whole playlist into a show. Returns the job; wait for it with jobs.list (waitSec; kinds ["youtube_import","transcribe"] leaves out the cosmetic waveform job queued after the download). Before queuing it reads the video length from YouTube (a few seconds, no download) so sessions.get transcriptJob.etaSec can include the transcription time; if that read is slow or fails the import is still queued, with a download-only estimate.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, url }) {
+  // Validate and authorize, then read the video length, before the op's transaction opens.
+  async prepare(actor, { sessionId, url }): Promise<number | null> {
     requireYoutube();
     if (!isYoutubeUrl(url))
       throw badRequest('That is not a YouTube URL (youtube.com or youtu.be).');
@@ -271,17 +273,53 @@ defineOp({
       throw badRequest(
         'That is a playlist URL. Use media.importPlaylist with the showId to create one session per video.',
       );
+    await db.transaction((tx) =>
+      requireSession(prepareCtx(actor, tx, 'media.importYoutube'), sessionId, 'write'),
+    );
+    // Only for the estimate: never fail or hold up the import over it for long.
+    if (videoProbes >= MAX_VIDEO_PROBES) return null;
+    videoProbes++;
+    try {
+      return await videoDuration(env.ytDlpPath, url, VIDEO_PROBE_TIMEOUT_MS);
+    } catch (e) {
+      console.warn(`video length of ${url}: ${(e as Error).message}`);
+      return null;
+    } finally {
+      videoProbes--;
+    }
+  },
+  async run(ctx, { sessionId, url }, durationSec) {
     await requireSession(ctx, sessionId, 'write');
     const job = await enqueueJob(ctx.db, {
       kind: 'youtube_import',
       sessionId,
       actorId: ctx.actor.user.id,
-      payload: { url },
+      // durationSec lets sessions.get estimate the transcription that follows the download.
+      payload: { url, ...(durationSec ? { durationSec } : {}) },
     });
     publishJob(ctx, job);
     return toJob(job);
   },
 });
+
+/** Concurrent yt-dlp video-length reads allowed per server process; beyond it, length unknown. */
+const MAX_VIDEO_PROBES = 4;
+const VIDEO_PROBE_TIMEOUT_MS = 15_000;
+let videoProbes = 0;
+
+/** A Ctx for authorizing in `prepare`: reads only, outside the op's transaction. */
+function prepareCtx(actor: Actor, tx: Ctx['db'], op: Ctx['op']): Ctx {
+  return {
+    actor,
+    db: tx,
+    op,
+    groupId: '',
+    record: () => Promise.reject(new Error('read-only')),
+    recordMany: () => Promise.reject(new Error('read-only')),
+    publish: () => {},
+    afterCommit: () => {},
+  };
+}
 
 /** Concurrent yt-dlp playlist resolutions allowed per server process. */
 const MAX_PLAYLIST_RESOLUTIONS = 2;
@@ -303,20 +341,7 @@ defineOp({
   // Authorize, then run yt-dlp, before the op's transaction opens.
   async prepare(actor, { showId, url }): Promise<Playlist> {
     await db.transaction((tx) =>
-      requireShow(
-        {
-          actor,
-          db: tx,
-          op: 'media.importPlaylist',
-          groupId: '',
-          record: () => Promise.reject(new Error('read-only')),
-          recordMany: () => Promise.reject(new Error('read-only')),
-          publish: () => {},
-          afterCommit: () => {},
-        },
-        showId,
-        'write',
-      ),
+      requireShow(prepareCtx(actor, tx, 'media.importPlaylist'), showId, 'write'),
     );
     requireYoutube();
     const listId = youtubePlaylistId(url);
