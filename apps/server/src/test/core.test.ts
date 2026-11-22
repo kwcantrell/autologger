@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../core/ids.ts';
 import { db, schema } from '../db/client.ts';
+import { csvCell } from '../http/exports.ts';
 import { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
 
 beforeAll(setupDb);
@@ -128,6 +129,25 @@ describe('timecode and events', () => {
     const [e] = await call(owner, 'events.list', { sessionId: session.id });
     expect(e?.message).toBe('Opening, wide');
     expect(e?.source).toBe('import');
+  });
+
+  it('guards formula-like CSV cells on export and restores them on import', async () => {
+    expect(csvCell('=HYPERLINK("x")')).toBe(`"'=HYPERLINK(""x"")"`);
+    expect(csvCell('+1')).toBe("'+1");
+    expect(csvCell('@sum')).toBe("'@sum");
+    expect(csvCell('-cmd')).toBe("'-cmd");
+    expect(csvCell(-1.5)).toBe('-1.5');
+    expect(csvCell('plain')).toBe('plain');
+    const { owner, session } = await studio();
+    await call(owner, 'events.importCsv', {
+      sessionId: session.id,
+      csv: `timecode,category,message\n01:00:01:00,'=Cat,${csvCell('=1+1')}\n01:00:02:00,Scene,'it is\n`,
+    });
+    const events = await call(owner, 'events.list', { sessionId: session.id });
+    expect(events.map((e) => [e.category, e.message])).toEqual([
+      ['=Cat', '=1+1'],
+      ['Scene', "'it is"],
+    ]);
   });
 });
 

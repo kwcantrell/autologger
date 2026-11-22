@@ -347,6 +347,9 @@ export function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((c) => c.trim()));
 }
 
+/** Undo the export's formula guard: `'=x` → `=x` (only before a formula-start character). */
+export const unguardCsvCell = (s: string) => (/^'[=+\-@\t\r]/.test(s) ? s.slice(1) : s);
+
 defineOp({
   name: 'events.importCsv',
   description:
@@ -374,7 +377,7 @@ defineOp({
     for (let i = start; i < rows.length; i++) {
       const r = rows[i]!;
       const tc = r[cols.timecode]?.trim() ?? '';
-      const category = r[cols.category]?.trim() ?? '';
+      const category = unguardCsvCell(r[cols.category]?.trim() ?? '');
       if (parseTimecode(tc, session.frameRate) === null) {
         skipped.push({ line: i + 1, reason: `bad timecode “${tc}”` });
         continue;
@@ -390,8 +393,8 @@ defineOp({
           {
             timecode: tc,
             category,
-            message: r[cols.message] ?? '',
-            value: r[cols.value]?.trim() || null,
+            message: unguardCsvCell(r[cols.message] ?? ''),
+            value: unguardCsvCell(r[cols.value]?.trim() ?? '') || null,
           },
           'import',
         ),
