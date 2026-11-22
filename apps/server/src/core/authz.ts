@@ -85,8 +85,14 @@ export async function requireSession(
   ctx: Ctx,
   sessionId: string,
   need: ShowAccess,
+  /**
+   * Row-lock the session for the rest of the transaction: 'share' for writes that read its clock
+   * (event times), 'update' for writes that change it, so the two serialise.
+   */
+  lock?: 'share' | 'update',
 ): Promise<{ session: SessionRow; show: ShowRow; access: ShowAccess }> {
-  const [session] = await ctx.db.select().from(sessions).where(eq(sessions.id, sessionId));
+  const query = ctx.db.select().from(sessions).where(eq(sessions.id, sessionId));
+  const [session] = lock ? await query.for(lock) : await query;
   if (!session) throw notFound('Session');
   try {
     const { show, access } = await requireShow(ctx, session.showId, need);
@@ -105,6 +111,17 @@ export async function canReadSession(actor: Actor, sessionId: string): Promise<b
   return db.transaction(async (tx) => {
     const ctx = { actor, db: tx } as Pick<Ctx, 'actor' | 'db'> as Ctx;
     return requireSession(ctx, sessionId, 'read').then(
+      () => true,
+      () => false,
+    );
+  });
+}
+
+/** Like canReadSession, for a show (the show WebSocket). */
+export async function canReadShow(actor: Actor, showId: string): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const ctx = { actor, db: tx } as Pick<Ctx, 'actor' | 'db'> as Ctx;
+    return requireShow(ctx, showId, 'read').then(
       () => true,
       () => false,
     );

@@ -1,5 +1,5 @@
 {
-  "id": "f48d86d0-02dc-4af5-b824-726ef6522fc4",
+  "id": "316850c3-8388-4138-8da9-4f06392accb5",
   "prevId": "992ec3d5-2140-4a8d-819a-0e8b8f94e288",
   "version": "7",
   "dialect": "postgresql",
@@ -221,12 +221,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "peaks_key": {
-          "name": "peaks_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "size_bytes": {
           "name": "size_bytes",
@@ -1287,6 +1281,12 @@
         },
         "started_at": {
           "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dismissed_at": {
+          "name": "dismissed_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false

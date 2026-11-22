@@ -1,9 +1,9 @@
 // Show-wide background jobs (YouTube imports, transcriptions): the rail indicator, the per-card
-// status mark and the dialog listing every unfinished or recently failed job with a retry for
-// failed YouTube imports.
+// status mark and the dialog listing every unfinished job and every failure nobody has dismissed,
+// with a retry for failed YouTube imports and a dismiss for each failure.
 
 import type { Job, Session } from '@autologger/contract';
-import { Loader2Icon, RefreshCwIcon, TriangleAlertIcon } from 'lucide-react';
+import { CheckIcon, Loader2Icon, RefreshCwIcon, TriangleAlertIcon } from 'lucide-react';
 import { useState } from 'react';
 import { qk, useOpMutation } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
@@ -93,6 +93,10 @@ export function ShowJobsDialog({
     onSuccess: () => showToast('Import queued again.'),
   });
   const [retried, setRetried] = useState<Set<string>>(() => new Set());
+  const dismiss = useOpMutation('jobs.dismiss', {
+    invalidate: () => [qk.showJobsAll],
+    onSuccess: () => showToast('Failure dismissed.'),
+  });
   const running = (data?.active ?? []).filter((j) => j.status === 'running');
   const queued = (data?.active ?? [])
     .filter((j) => j.status === 'queued')
@@ -149,7 +153,7 @@ export function ShowJobsDialog({
       open
       onOpenChange={(o) => !o && onClose()}
       title="Background jobs"
-      description={`YouTube imports and transcriptions in ${showName}. Failures from the last 24 hours stay listed until they are retried.`}
+      description={`YouTube imports and transcriptions in ${showName}. Failures stay listed until they are retried or dismissed.`}
       className="md:max-w-xl"
     >
       <div className="flex max-h-[60svh] flex-col gap-4 overflow-y-auto pr-1">
@@ -171,11 +175,9 @@ export function ShowJobsDialog({
           const s = j.sessionId ? byId.get(j.sessionId) : undefined;
           const canRetry = j.kind === 'youtube_import' && !!s?.sourceUrl && s.access !== 'read';
           const pending = retry.isPending && retry.variables?.sessionId === j.sessionId;
-          return row(
-            j,
-            <span className="block text-si-danger [overflow-wrap:anywhere]">
-              {j.error ?? 'Failed without a reason.'}
-            </span>,
+          const readOnly = s?.access === 'read';
+          const dismissing = dismiss.isPending && dismiss.variables?.jobId === j.id;
+          const retryAction =
             j.kind === 'youtube_import' && s?.sourceUrl ? (
               <Button
                 size="sm"
@@ -199,12 +201,40 @@ export function ShowJobsDialog({
                 <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
                 {pending ? 'Retrying…' : 'Retry'}
               </Button>
-            ) : j.kind === 'youtube_import' ? (
-              <span className="basis-full text-xs text-muted-foreground">
-                The link isn't stored on this session: open it and import the video again from its
-                Audio menu.
-              </span>
-            ) : undefined,
+            ) : null;
+          return row(
+            j,
+            <span className="block text-si-danger [overflow-wrap:anywhere]">
+              {j.error ?? 'Failed without a reason.'}
+            </span>,
+            <>
+              {retryAction}
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={readOnly || dismissing}
+                title={
+                  readOnly
+                    ? 'Read-only access to this show.'
+                    : 'Acknowledge this failure and stop listing it'
+                }
+                onClick={() =>
+                  dismiss.mutate(
+                    { jobId: j.id },
+                    { onError: (e) => showToast(errorMessage(e), true) },
+                  )
+                }
+              >
+                <CheckIcon aria-hidden="true" data-icon="inline-start" />
+                {dismissing ? 'Dismissing…' : 'Dismiss'}
+              </Button>
+              {j.kind === 'youtube_import' && !s?.sourceUrl && (
+                <span className="basis-full text-xs text-muted-foreground">
+                  The link isn't stored on this session: open it and import the video again from its
+                  Audio menu.
+                </span>
+              )}
+            </>,
           );
         })}
         {section('Running', running, (j) => {

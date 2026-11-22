@@ -19,7 +19,7 @@ the **worker** (`apps/server/src/worker/main.ts`), a second entrypoint of the se
 | `WORKER_CONCURRENCY`                                    | worker, api | Jobs run in parallel per worker process (default 2). The API uses it for etaSec only while no worker heartbeat row is live.                       |
 | `WORKER_CONCURRENCY_TRANSCRIBE`                         | worker      | Of those slots, how many `transcribe` jobs may hold at once (1 to `WORKER_CONCURRENCY`, which is the default).                                    |
 | `WORKER_CONCURRENCY_YOUTUBE_IMPORT`                     | worker      | Same for `youtube_import` jobs. Set it below `WORKER_CONCURRENCY` so slow downloads always leave a slot for transcriptions.                       |
-| `WORKER_CONCURRENCY_WAVEFORM`                           | worker      | Same for `waveform` jobs (default 1).                                                                                                                       |
+| `WORKER_CONCURRENCY_WAVEFORM`                           | worker      | Same for `waveform` jobs (default 1).                                                                                                             |
 | `FFMPEG_PATH`                                           | worker      | ffmpeg binary for waveform peaks (default `ffmpeg` on `PATH`; in the worker image). Without it, the worker doesn't claim waveform jobs.           |
 
 The bucket is created on first use (worker start, or the first upload) if the credentials allow it.

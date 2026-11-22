@@ -4,14 +4,12 @@
 import type { Job, OpInput } from '@autologger/contract';
 import { rpc } from './rpc';
 
-/** Failed jobs older than this (last update) drop out of the show-wide job list. */
-export const RECENT_FAILURE_MS = 24 * 60 * 60_000;
 export const UNFINISHED = ['queued', 'running'] as const;
 
 export interface ShowJobs {
   /** Queued and running jobs of every session of the show, newest first. */
   active: Job[];
-  /** Recent failures not superseded by a newer job of the same kind in that session. */
+  /** Undismissed failures not superseded by a newer job of the same kind in that session. */
   failed: Job[];
 }
 
@@ -20,27 +18,19 @@ const listJobs: ListJobs = (input) => rpc('jobs.list', input);
 
 /**
  * Builds the show's job state from three lists: unfinished jobs, the newest finished ones (to
- * see which failures were retried successfully) and the newest failures, queried on their own
- * so a large import's many `done` jobs can't push them out of a shared window.
+ * see which failures were retried successfully) and the undismissed failures, queried on their
+ * own so a large import's many `done` jobs can't push them out of a shared window. A failure stays
+ * listed until it is retried or dismissed (jobs.dismiss).
  */
-export function mergeShowJobs(
-  active: Job[],
-  done: Job[],
-  failures: Job[],
-  now = Date.now(),
-): ShowJobs {
+export function mergeShowJobs(active: Job[], done: Job[], failures: Job[]): ShowJobs {
   const newest = new Map<string, string>();
   const key = (j: Job) => `${j.sessionId}:${j.kind}`;
   for (const j of [...active, ...done, ...failures]) {
     const cur = newest.get(key(j));
     if (!cur || cur < j.createdAt) newest.set(key(j), j.createdAt);
   }
-  const since = now - RECENT_FAILURE_MS;
   const failed = failures.filter(
-    (j) =>
-      j.status === 'failed' &&
-      newest.get(key(j)) === j.createdAt &&
-      Date.parse(j.updatedAt) >= since,
+    (j) => j.status === 'failed' && !j.dismissedAt && newest.get(key(j)) === j.createdAt,
   );
   return { active, failed };
 }
@@ -49,7 +39,7 @@ export async function fetchShowJobs(showId: string, list = listJobs): Promise<Sh
   const [active, done, failures] = await Promise.all([
     list({ showId, status: [...UNFINISHED], limit: 500 }),
     list({ showId, status: ['done'], limit: 500 }),
-    list({ showId, status: ['failed'], limit: 200 }),
+    list({ showId, status: ['failed'], hideDismissed: true, limit: 200 }),
   ]);
   return mergeShowJobs(active, done, failures);
 }
@@ -61,7 +51,22 @@ export function sameJobs(a: Job[], b: Job[]): boolean {
   return sig(a) === sig(b);
 }
 
-/** The job a session card shows: a recent failure, else running over queued. */
+/**
+ * A pushed job change (show socket) applied to the cached show jobs, when it only changes the
+ * progress text of a listed unfinished job; null when the list has to be refetched (new job,
+ * status change, estimates).
+ */
+export function patchShowJobs(data: ShowJobs | undefined, job: Job): ShowJobs | null {
+  const cur = data?.active.find((j) => j.id === job.id);
+  if (!data || !cur || cur.status !== job.status) return null;
+  if (cur.progress === job.progress) return data;
+  return {
+    ...data,
+    active: data.active.map((j) => (j.id === job.id ? { ...j, progress: job.progress } : j)),
+  };
+}
+
+/** The job a session card shows: running over queued, else an undismissed failure. */
 export function jobsBySession(data: ShowJobs | undefined): Map<string, Job> {
   const out = new Map<string, Job>();
   if (!data) return out;

@@ -12,6 +12,8 @@ import {
   eq,
   getTableColumns,
   gt,
+  inArray,
+  isNotNull,
   isNull,
   ne,
   not,
@@ -25,6 +27,8 @@ import { conflict, notFound } from '../core/errors.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
 import { iso, userRefs } from './map.ts';
+import { type Clock, clockOf, publishSession, rescaleElapsed } from './sessions.ts';
+import { indexWikiLinks } from './wiki.ts';
 
 const { changes } = schema;
 
@@ -33,14 +37,28 @@ const { changes } = schema;
 type AnyTable = PgTable & { id: any };
 const TABLES: Record<
   ChangeEntity,
-  { table: AnyTable; live: LiveEntity | null; softDelete?: boolean }
+  {
+    table: AnyTable;
+    live: LiveEntity | null;
+    softDelete?: boolean;
+    /** Keep derived rows (an index) in step with a row an undo wrote back. */
+    reindex?: (db: Ctx['db'], row: Record<string, unknown>) => Promise<void>;
+  }
 > = {
   event: { table: schema.events, live: 'event' },
   topic: { table: schema.topics, live: 'topic' },
   transcript_segment: { table: schema.transcriptSegments, live: 'transcript_segment' },
   dashboard: { table: schema.dashboards, live: 'dashboard' },
-  wiki_page: { table: schema.wikiPages, live: null, softDelete: true },
+  wiki_page: {
+    table: schema.wikiPages,
+    live: null,
+    softDelete: true,
+    reindex: (db, row) => indexWikiLinks(db, row.id as string, row.bodyMd as string),
+  },
   category: { table: schema.categories, live: null },
+  // Here only for typing and `live`: clock changes snapshot just the clock fields and are undone
+  // by undoClockChange, never through the generic path below.
+  session: { table: schema.sessions, live: 'session' },
 };
 
 const isUniqueViolation = (e: unknown) =>
@@ -205,6 +223,27 @@ defineOp({
       .limit(1);
     if (latest?.id !== c.id)
       throw conflict('This item changed again since; undo the newer change first.');
+    if ((c.entity === 'session' || c.entity === 'event') && c.groupId) {
+      // A clock change and the events it retimed only make sense undone together.
+      const [partner] = await ctx.db
+        .select({ id: changes.id })
+        .from(changes)
+        .where(
+          and(
+            eq(changes.groupId, c.groupId),
+            ne(changes.id, c.id),
+            isNull(changes.revertedAt),
+            c.entity === 'event' ? eq(changes.entity, 'session') : undefined,
+          ),
+        )
+        .limit(1);
+      if (partner)
+        throw conflict(
+          c.entity === 'session'
+            ? 'This clock change also retimed the session’s events; undo the whole call with changes_revertGroup.'
+            : 'This event was retimed by a session clock change; undo the whole call with changes_revertGroup.',
+        );
+    }
 
     const revertId = await undoChange(ctx, c);
     const [out] = await toChanges(
@@ -264,8 +303,14 @@ defineOp({
         `An item in this group changed again since (“${newer.summary}”); undo the newer change first.`,
       );
 
+    // A clock change with its retimed events: restore the clock, then the events in bulk.
+    const clock = pending.find((c) => c.entity === 'session');
+    const retimed = clock ? pending.filter((c) => c.entity === 'event' && c.kind === 'update') : [];
+    if (clock) await undoClockChange(ctx, clock);
+    if (retimed.length) await undoRetimedEvents(ctx, retimed);
+    const done = new Set([clock, ...retimed]);
     // Newest first, so an item changed twice in the call ends up at its first `before`.
-    for (const c of pending) await undoChange(ctx, c);
+    for (const c of pending) if (!done.has(c)) await undoChange(ctx, c);
     return { groupId: ctx.groupId, reverted: pending.length };
   },
 });
@@ -277,7 +322,8 @@ async function requireRevertAccess(ctx: Ctx, c: ChangeRow): Promise<void> {
 
 /** Restore the item to `c.before`, mark `c` undone and record the undo; returns its change id. */
 async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
-  const { table, live, softDelete } = TABLES[c.entity];
+  if (c.entity === 'session') return undoClockChange(ctx, c);
+  const { table, live, softDelete, reindex } = TABLES[c.entity];
   const idCol = table.id;
   const [current] = (await ctx.db.select().from(table).where(eq(idCol, c.entityId))) as
     | Record<string, unknown>[]
@@ -325,6 +371,7 @@ async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
     }
     throw e;
   }
+  if (restored && reindex) await reindex(ctx.db, restored);
   await ctx.db.update(changes).set({ revertedAt: new Date() }).where(eq(changes.id, c.id));
   const revertId = await ctx.record({
     entity: c.entity,
@@ -349,4 +396,123 @@ async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
       entity: 'category',
     });
   return revertId;
+}
+
+/**
+ * Undo a session clock change (sessions.update frameRate / start timecode): restore the clock
+ * fields only. Elapsed frames come back exactly unless the transport ran since (then they are
+ * rescaled to keep their seconds). Retimed events are their own changes in the same group.
+ * Events logged or retimed after the change by another call would move, so that is a conflict.
+ */
+async function undoClockChange(ctx: Ctx, c: ChangeRow): Promise<string> {
+  const { sessions, events } = schema;
+  // FOR UPDATE: event writes hold the session FOR SHARE, so none is in flight on this clock.
+  const [current] = await ctx.db
+    .select()
+    .from(sessions)
+    .where(eq(sessions.id, c.entityId))
+    .for('update');
+  if (!current) throw conflict('That session no longer exists.');
+  if (current.isRolling) throw conflict('Stop the transport before undoing a clock change.');
+  // Any later change to a timed event of this session from another call (create, edit, undo).
+  const later = alias(changes, 'later');
+  const [moved] = await ctx.db
+    .select({ id: later.id })
+    .from(later)
+    .innerJoin(events, eq(events.id, later.entityId))
+    .where(
+      and(
+        eq(later.entity, 'event'),
+        eq(later.sessionId, current.id),
+        isNotNull(events.timecodeFrames),
+        gt(later.at, sql`(select at from changes where id = ${c.id})`),
+        or(
+          isNull(later.groupId),
+          and(ne(later.groupId, c.groupId ?? ''), ne(later.groupId, ctx.groupId)),
+        ),
+      ),
+    )
+    .limit(1);
+  if (moved)
+    throw conflict(
+      'Events were logged or moved after this clock change and would shift; set the frame rate and start timecode back with sessions_update instead.',
+    );
+  const before = c.before as Clock;
+  const after = c.after as Clock;
+  const target = clockOf({
+    ...before,
+    elapsedFrames:
+      current.elapsedFrames === after.elapsedFrames
+        ? before.elapsedFrames
+        : rescaleElapsed(current.elapsedFrames, current.frameRate, before.frameRate),
+  });
+  await ctx.db
+    .update(sessions)
+    .set({ ...target, updatedAt: new Date() })
+    .where(eq(sessions.id, current.id));
+  await ctx.db.update(changes).set({ revertedAt: new Date() }).where(eq(changes.id, c.id));
+  const revertId = await ctx.record({
+    entity: 'session',
+    entityId: current.id,
+    kind: 'update',
+    summary: `Undid: ${c.summary}`,
+    showId: c.showId,
+    sessionId: current.id,
+    before: clockOf(current),
+    after: target,
+    revertOf: c.id,
+  });
+  // Event atSec values depend on the clock.
+  ctx.publish(`session:${current.id}`, { type: 'invalidate', entity: 'event' });
+  await publishSession(ctx, current.id);
+  return revertId;
+}
+
+/**
+ * Undo the event retimes of a clock change in one statement: only timecodeFrames and updatedAt
+ * differ between their before and after snapshots, and revertGroup already checked that none
+ * changed since. Each undo is recorded like undoChange does.
+ */
+async function undoRetimedEvents(ctx: Ctx, list: ChangeRow[]): Promise<void> {
+  const { events } = schema;
+  const ids = list.map((c) => c.id);
+  const current = await ctx.db
+    .select()
+    .from(events)
+    .where(
+      inArray(
+        events.id,
+        list.map((c) => c.entityId),
+      ),
+    )
+    .for('update');
+  if (current.length !== new Set(list.map((c) => c.entityId)).size)
+    throw conflict('That item no longer exists.');
+  const restored = await ctx.db
+    .update(events)
+    .set({
+      timecodeFrames: sql`(${changes.before}->>'timecodeFrames')::bigint`,
+      updatedAt: sql`(${changes.before}->>'updatedAt')::timestamptz`,
+    })
+    .from(changes)
+    .where(and(inArray(changes.id, ids), eq(changes.entityId, events.id)))
+    .returning(getTableColumns(events));
+  await ctx.db.update(changes).set({ revertedAt: new Date() }).where(inArray(changes.id, ids));
+  const now = new Map(current.map((r) => [r.id, r]));
+  const back = new Map(restored.map((r) => [r.id, r]));
+  await ctx.recordMany(
+    list.map((c) => ({
+      entity: 'event' as const,
+      entityId: c.entityId,
+      kind: 'update' as const,
+      summary: `Undid: ${c.summary}`,
+      showId: c.showId,
+      sessionId: c.sessionId,
+      before: snapshot(now.get(c.entityId)),
+      after: snapshot(back.get(c.entityId)),
+      revertOf: c.id,
+    })),
+  );
+  for (const sessionId of new Set(list.map((c) => c.sessionId)))
+    if (sessionId) ctx.publish(`session:${sessionId}`, { type: 'invalidate', entity: 'event' });
 }

@@ -346,7 +346,9 @@ export type ChangeEntity =
   | 'transcript_segment'
   | 'dashboard'
   | 'wiki_page'
-  | 'category';
+  | 'category'
+  /** A session clock change (frameRate, startOffsetFrames) from sessions.update. */
+  | 'session';
 
 export interface Change {
   id: string;
@@ -415,6 +417,8 @@ export interface Job {
   progress: string | null;
   /** When the current (or last) attempt started; null while queued. */
   startedAt: string | null;
+  /** Failed jobs: when the failure was acknowledged with jobs.dismiss; null otherwise. */
+  dismissedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

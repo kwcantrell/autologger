@@ -2,7 +2,14 @@
 
 import type { Job, OpInput } from '@autologger/contract';
 import { describe, expect, it } from 'vitest';
-import { fetchShowJobs, jobsBySession, jobsSummary, mergeShowJobs, sameJobs } from './showJobs';
+import {
+  fetchShowJobs,
+  jobsBySession,
+  jobsSummary,
+  mergeShowJobs,
+  patchShowJobs,
+  sameJobs,
+} from './showJobs';
 
 const NOW = Date.parse('2026-11-22T12:00:00Z');
 const at = (min: number) => new Date(NOW - min * 60_000).toISOString();
@@ -14,6 +21,7 @@ const job = (p: Partial<Job> & Pick<Job, 'status'>): Job => ({
   error: null,
   progress: null,
   startedAt: null,
+  dismissedAt: null,
   createdAt: at(60),
   updatedAt: at(60),
   ...p,
@@ -23,20 +31,22 @@ describe('mergeShowJobs', () => {
   it('keeps a failure until a newer job of the same kind in that session exists', () => {
     const failed = job({ status: 'failed', createdAt: at(30), updatedAt: at(29) });
     const otherKind = job({ status: 'done', kind: 'transcribe', createdAt: at(10) });
-    expect(mergeShowJobs([], [otherKind], [failed], NOW).failed).toEqual([failed]);
+    expect(mergeShowJobs([], [otherKind], [failed]).failed).toEqual([failed]);
 
     const retried = job({ status: 'queued', createdAt: at(5) });
-    expect(mergeShowJobs([retried], [], [failed], NOW).failed).toEqual([]);
+    expect(mergeShowJobs([retried], [], [failed]).failed).toEqual([]);
     const redone = job({ status: 'done', createdAt: at(5) });
-    expect(mergeShowJobs([], [redone], [failed], NOW).failed).toEqual([]);
+    expect(mergeShowJobs([], [redone], [failed]).failed).toEqual([]);
     // A later failure of the same kind replaces the earlier one.
     const again = job({ status: 'failed', createdAt: at(4), updatedAt: at(3) });
-    expect(mergeShowJobs([], [], [failed, again], NOW).failed).toEqual([again]);
+    expect(mergeShowJobs([], [], [failed, again]).failed).toEqual([again]);
   });
 
-  it('drops failures last updated more than a day ago', () => {
+  it('keeps old failures until they are dismissed', () => {
     const old = job({ status: 'failed', createdAt: at(26 * 60), updatedAt: at(25 * 60) });
-    expect(mergeShowJobs([], [], [old], NOW).failed).toEqual([]);
+    expect(mergeShowJobs([], [], [old]).failed).toEqual([old]);
+    const seen = job({ status: 'failed', createdAt: at(30), dismissedAt: at(1) });
+    expect(mergeShowJobs([], [], [seen]).failed).toEqual([]);
   });
 });
 
@@ -59,6 +69,7 @@ describe('fetchShowJobs', () => {
     const r = await fetchShowJobs('show_x', list);
     expect(r.failed.map((j) => j.id)).toEqual([failed.id]);
     expect(calls.map((c) => c.status)).toEqual([['queued', 'running'], ['done'], ['failed']]);
+    expect(calls[2]?.hideDismissed).toBe(true);
     expect(calls.every((c) => c.showId === 'show_x')).toBe(true);
   });
 });
@@ -82,5 +93,22 @@ describe('jobsSummary / jobsBySession', () => {
     expect(sameJobs([a], [{ ...a }])).toBe(true);
     expect(sameJobs([a], [{ ...a, progress: 'Downloading' }])).toBe(false);
     expect(sameJobs([a], [])).toBe(false);
+  });
+});
+
+describe('patchShowJobs', () => {
+  it('patches progress of a listed job in place and asks for a refetch otherwise', () => {
+    const running = job({ status: 'running', progress: 'Starting', etaSec: 90 });
+    const data = { active: [running], failed: [] };
+    const patched = patchShowJobs(data, {
+      ...running,
+      progress: 'Storing audio',
+      etaSec: undefined,
+    });
+    expect(patched?.active[0]).toMatchObject({ progress: 'Storing audio', etaSec: 90 });
+    expect(patchShowJobs(data, { ...running })).toBe(data);
+    expect(patchShowJobs(data, { ...running, status: 'done' })).toBeNull();
+    expect(patchShowJobs(data, job({ status: 'queued' }))).toBeNull();
+    expect(patchShowJobs(undefined, running)).toBeNull();
   });
 });

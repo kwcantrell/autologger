@@ -163,7 +163,7 @@ defineOp({
   kind: 'write',
   surfaces: ['web', 'mcp', 'companion'],
   async run(ctx, { sessionId, ...input }) {
-    const { session } = await requireSession(ctx, sessionId, 'write');
+    const { session } = await requireSession(ctx, sessionId, 'write', 'share');
     const row = await insertEvent(ctx, session, input);
     const [out] = await publishEvents(ctx, session, [row]);
     return out!;
@@ -177,7 +177,7 @@ defineOp({
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, events: list, compact }) {
-    const { session } = await requireSession(ctx, sessionId, 'write');
+    const { session } = await requireSession(ctx, sessionId, 'write', 'share');
     const rows: EventRow[] = [];
     for (const e of list) rows.push(await insertEvent(ctx, session, e));
     const out = await publishEvents(ctx, session, rows);
@@ -186,9 +186,13 @@ defineOp({
 });
 
 async function loadEvent(ctx: Ctx, eventId: string, need: 'read' | 'write') {
+  const [found] = await ctx.db.select().from(events).where(eq(events.id, eventId));
+  if (!found) throw notFound('Event');
+  if (need === 'read') return { row: found, ...(await requireSession(ctx, found.sessionId, need)) };
+  // Writes hold the session clock, then re-read the row: a clock change may have retimed it.
+  const { session } = await requireSession(ctx, found.sessionId, need, 'share');
   const [row] = await ctx.db.select().from(events).where(eq(events.id, eventId));
   if (!row) throw notFound('Event');
-  const { session } = await requireSession(ctx, row.sessionId, need);
   return { row, session };
 }
 
@@ -256,7 +260,7 @@ defineOp({
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, events: list, compact }) {
-    const { session } = await requireSession(ctx, sessionId, 'write');
+    const { session } = await requireSession(ctx, sessionId, 'write', 'share');
     const ids = list.map((e) => e.id);
     if (new Set(ids).size !== ids.length) throw badRequest('Each event id may appear only once.');
     const rows = await ctx.db
@@ -340,7 +344,7 @@ defineOp({
   kind: 'write',
   surfaces: ['web'],
   async run(ctx, { sessionId, csv }) {
-    const { session } = await requireSession(ctx, sessionId, 'write');
+    const { session } = await requireSession(ctx, sessionId, 'write', 'share');
     const rows = parseCsv(csv);
     let start = 0;
     let cols = { timecode: 0, category: 1, message: 2, value: 3 };
