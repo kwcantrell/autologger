@@ -5,6 +5,7 @@ import { flushSync } from 'react-dom';
 import { useLocation } from 'wouter';
 import { qk, useOpMutation, useSessions, useShowJobs } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
+import { jobsBySession, jobsSummary } from '@/api/showJobs';
 import { LoadingVideo } from '@/components/RouteState';
 import { newSessionOpen, settingsOpen } from '@/lib/store';
 import { fmtSec, formatFrames, isMediaOnly, useTransportClock } from '@/lib/timecode';
@@ -42,7 +43,7 @@ import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { Dialog } from '@/shared/ui/Dialog';
 import { Tooltip as SimpleTooltip } from '@/shared/ui/Tooltip';
 import { fmtDateOnly } from '@/shared/utils/fmtDateOnly';
-import { JobMark, JobsIcon, jobsBySession, jobsSummary, ShowJobsDialog } from './ShowJobs';
+import { JobMark, JobsIcon, ShowJobsDialog } from './ShowJobs';
 import { useActive } from './useActive';
 
 export const APP_VERSION = '3.0.0';
@@ -66,7 +67,8 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
   const active = useActive();
   const sessions = useSessions(active.show?.id);
   const showJobs = useShowJobs(active.show?.id);
-  const [jobsOpen, setJobsOpen] = useState(false);
+  // The show the jobs dialog was opened for: it closes when the active show changes.
+  const [jobsOpenFor, setJobsOpenFor] = useState<string | null>(null);
   const { state, isMobile, setOpen, setOpenMobile } = useSidebar();
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
@@ -141,24 +143,24 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
               size="sm"
               className="w-full min-w-0 justify-start text-si-muted hover:text-si-fg group-data-[collapsible=icon]:justify-center"
               aria-label={`Background jobs: ${jobsLabel}`}
-              onClick={() => setJobsOpen(true)}
+              onClick={() => setJobsOpenFor(active.show?.id ?? null)}
             >
               <JobsIcon data={showJobs.data} />
               <span className={cn('truncate', ICON_ONLY_LABEL)}>{jobsLabel}</span>
             </Button>
           </StripTooltip>
         )}
-        {jobsOpen && active.show && (
+        {active.show && jobsOpenFor === active.show.id && (
           <ShowJobsDialog
             showName={active.show.name}
             data={showJobs.data}
             error={showJobs.error}
             sessions={all}
             onOpenSession={(id) => {
-              setJobsOpen(false);
+              setJobsOpenFor(null);
               openSession(id);
             }}
-            onClose={() => setJobsOpen(false)}
+            onClose={() => setJobsOpenFor(null)}
           />
         )}
 

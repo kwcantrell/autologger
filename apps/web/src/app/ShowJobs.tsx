@@ -5,8 +5,9 @@
 import type { Job, Session } from '@autologger/contract';
 import { Loader2Icon, RefreshCwIcon, TriangleAlertIcon } from 'lucide-react';
 import { useState } from 'react';
-import { qk, type ShowJobs, useOpMutation } from '@/api/queries';
+import { qk, useOpMutation } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
+import type { ShowJobs } from '@/api/showJobs';
 import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
@@ -31,19 +32,6 @@ function fmtEta(sec: number | undefined): string | null {
   return `about ${Math.floor(min / 60)} h ${min % 60} min left`;
 }
 
-/** The job a session card shows: a recent failure, else running over queued. */
-export function jobsBySession(data: ShowJobs | undefined): Map<string, Job> {
-  const out = new Map<string, Job>();
-  if (!data) return out;
-  for (const j of data.active) {
-    if (!j.sessionId) continue;
-    const cur = out.get(j.sessionId);
-    if (!cur || (cur.status === 'queued' && j.status === 'running')) out.set(j.sessionId, j);
-  }
-  for (const j of data.failed) if (j.sessionId && !out.has(j.sessionId)) out.set(j.sessionId, j);
-  return out;
-}
-
 function markLabel(j: Job): string {
   if (j.status === 'failed') return 'Failed';
   if (j.status === 'queued') return 'Queued';
@@ -66,22 +54,12 @@ export function JobMark({ job }: { job: Job }) {
         job.status === 'running' && 'text-foreground',
       )}
       title={detail}
+      // Short on purpose: it joins the session card's accessible name (details are in the title).
+      aria-label={`${markLabel(job)}: ${kindLabel(job.kind)}`}
     >
       {markLabel(job)}
     </Badge>
   );
-}
-
-/** Rail summary: "3 jobs running · 1 failed". Hidden while the show has no jobs to report. */
-export function jobsSummary(data: ShowJobs | undefined): string | null {
-  if (!data) return null;
-  const parts: string[] = [];
-  const running = data.active.filter((j) => j.status === 'running').length;
-  const queued = data.active.length - running;
-  if (running) parts.push(`${running} running`);
-  if (queued) parts.push(`${queued} queued`);
-  if (data.failed.length) parts.push(`${data.failed.length} failed`);
-  return parts.length ? parts.join(' · ') : null;
 }
 
 export function JobsIcon({ data }: { data: ShowJobs | undefined }) {
