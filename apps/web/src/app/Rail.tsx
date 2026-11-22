@@ -1,15 +1,15 @@
 import type { Job, Session } from '@autologger/contract';
 import { AudioLines, MoreVertical, Plus, Search, Settings, Upload, X } from 'lucide-react';
-import { type ReactElement, useRef, useState } from 'react';
+import { lazy, type ReactElement, Suspense, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useLocation } from 'wouter';
 import { qk, useOpMutation, useSessions, useShowJobs } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { jobsBySession, jobsSummary } from '@/api/showJobs';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { LoadingVideo } from '@/components/RouteState';
 import { newSessionOpen, settingsOpen } from '@/lib/store';
 import { fmtSec, formatFrames, isMediaOnly, useTransportClock } from '@/lib/timecode';
-import { SessionDetailsDialog } from '@/session/SessionDetailsDialog';
 import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
@@ -43,6 +43,11 @@ import { Tooltip as SimpleTooltip } from '@/shared/ui/Tooltip';
 import { fmtDateOnly } from '@/shared/utils/fmtDateOnly';
 import { JobMark, JobsIcon, ShowJobsDialog } from './ShowJobs';
 import { useActive } from './useActive';
+
+// Opened from a card's menu; loaded on demand to keep it (and the key-terms form) out of the main chunk.
+const SessionDetailsDialog = lazy(() =>
+  import('@/session/SessionDetailsDialog').then((m) => ({ default: m.SessionDetailsDialog })),
+);
 
 export const APP_VERSION = '3.0.0';
 const ICON_ONLY_LABEL = 'group-data-[collapsible=icon]:sr-only';
@@ -488,7 +493,13 @@ function SessionCard({
           <DropdownMenuItem disabled>Read-only: you can view this show</DropdownMenuItem>
         )}
       </CardMenu>
-      {detailsOpen && <SessionDetailsDialog session={s} onClose={() => setDetailsOpen(false)} />}
+      {detailsOpen && (
+        <ErrorBoundary>
+          <Suspense fallback={null}>
+            <SessionDetailsDialog session={s} onClose={() => setDetailsOpen(false)} />
+          </Suspense>
+        </ErrorBoundary>
+      )}
       {actions.confirmElement}
     </SidebarMenuItem>
   );

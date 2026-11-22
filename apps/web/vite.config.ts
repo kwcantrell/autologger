@@ -23,5 +23,17 @@ export default defineConfig({
       '/ws': { target: API, ws: true },
     },
   },
-  build: { outDir: 'dist', sourcemap: true },
+  build: {
+    outDir: 'dist',
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        // React changes far less often than the app: its own chunk stays cached across deploys.
+        // Only packages every screen loads belong here, or lazy routes' code would load up front.
+        manualChunks(id) {
+          if (/\/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'react';
+        },
+      },
+    },
+  },
 });
