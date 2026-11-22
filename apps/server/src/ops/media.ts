@@ -396,7 +396,7 @@ defineOp({
             actorId: ctx.actor.user.id,
             payload: { url: videoUrl },
           },
-          new Date(base + i),
+          { at: new Date(base + i) },
         );
         item.sessionId = sessionId;
         item.jobId = job.id;
