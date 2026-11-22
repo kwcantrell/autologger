@@ -43,12 +43,15 @@ export function KeyTermsDialog({
   caps,
   canWrite,
   segments,
+  jobsRunning,
   onClose,
 }: {
   session: Session;
   caps: Capabilities | undefined;
   canWrite: boolean;
   segments: AudioSegment[] | undefined;
+  /** Queued or running jobs of this session: a re-transcribe would reuse them (old terms). */
+  jobsRunning: number;
   onClose: () => void;
 }) {
   const show = useShow(session.showId).data;
@@ -71,6 +74,24 @@ export function KeyTermsDialog({
   // Re-transcribing needs transcription on the server and audio that has finished uploading.
   const audio = (segments ?? []).filter((s) => s.status !== 'uploading');
   const canRetranscribe = canWrite && !!caps?.transcription && audio.length > 0;
+  const retranscribeBlocked =
+    jobsRunning > 0 ? 'A transcription is already running; re-transcribe when it finishes.' : null;
+
+  /** Close, asking first when edits (or a typed term) would be lost. */
+  const requestClose = async () => {
+    if (busy) return;
+    if (
+      (changed || entry.trim()) &&
+      !(await confirm({
+        title: 'Discard changes',
+        message: 'Discard your unsaved key term changes?',
+        confirmLabel: 'Discard',
+        danger: true,
+      }))
+    )
+      return;
+    onClose();
+  };
 
   /** Add `text` (one term per line) to the list: the new list, or null when it breaks a limit. */
   const addTerms = (text: string): string[] | null => {
@@ -96,6 +117,7 @@ export function KeyTermsDialog({
     const list = entry.trim() ? addTerms(entry) : terms;
     if (!list || limitError(list)) return;
     const listChanged = list.join('\n') !== session.keyTerms.join('\n');
+    if (andRetranscribe && retranscribeBlocked) return;
     if (andRetranscribe) {
       const ok = await confirm({
         title: 'Re-transcribe session',
@@ -127,7 +149,7 @@ export function KeyTermsDialog({
   return (
     <Dialog
       open
-      onOpenChange={(o) => !o && onClose()}
+      onOpenChange={(o) => !o && void requestClose()}
       title="Key terms"
       description={session.title}
       className="md:max-w-lg"
@@ -227,6 +249,10 @@ export function KeyTermsDialog({
           Keep show key terms to names said in every session.
         </p>
 
+        {canRetranscribe && retranscribeBlocked && (
+          <p className="m-0 text-sm text-si-muted">{retranscribeBlocked}</p>
+        )}
+
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{errorMessage(error)}</AlertDescription>
@@ -234,15 +260,18 @@ export function KeyTermsDialog({
         )}
 
         <DialogActions>
-          <Button type="button" variant="outline" onClick={onClose}>
+          <Button type="button" variant="outline" onClick={() => void requestClose()}>
             {canWrite ? 'Cancel' : 'Close'}
           </Button>
           {canRetranscribe && (
             <Button
               type="button"
               variant="outline"
-              disabled={busy || !!listError}
-              title="Save, then transcribe this session's audio again with these key terms"
+              disabled={busy || !!listError || !!retranscribeBlocked}
+              title={
+                retranscribeBlocked ??
+                "Save, then transcribe this session's audio again with these key terms"
+              }
               onClick={() => void save(true)}
             >
               {retranscribe.isPending ? 'Starting…' : 'Save & re-transcribe'}

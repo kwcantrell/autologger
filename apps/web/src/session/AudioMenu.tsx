@@ -167,6 +167,7 @@ export function AudioMenu({
           caps={caps}
           canWrite={canWrite}
           segments={segments}
+          jobsRunning={activeJobs.length}
           onClose={() => setTermsOpen(false)}
         />
       )}
