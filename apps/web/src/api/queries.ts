@@ -2,6 +2,7 @@
 // and mutations write to the same cache entries the screens read.
 
 import type {
+  ChangeEntity,
   DashboardQuery,
   FullOpInput,
   Job,
@@ -53,6 +54,9 @@ export const qk = {
   showJobs: (showId: string) => ['show-jobs', showId] as const,
   changesAll: (sessionId: string) => ['changes', sessionId] as const,
   changes: (sessionId: string, via: Via | 'all') => ['changes', sessionId, via] as const,
+  showChangesAll: (showId: string) => ['show-changes', showId] as const,
+  showChanges: (showId: string, filter: ShowChangesFilter) =>
+    ['show-changes', showId, filter] as const,
   wikiList: (showId: string) => ['wiki', showId] as const,
   wikiPage: (pageId: string) => ['wiki-page', pageId] as const,
   wikiRevisions: (pageId: string) => ['wiki-revisions', pageId] as const,
@@ -258,6 +262,19 @@ export const useChanges = (sessionId: string, via: Via | 'all') =>
     grouped: true,
     limit: 300,
   });
+/** The show change log's filters: `sessionId` null lists only show-level changes. */
+export interface ShowChangesFilter {
+  sessionId?: string | null;
+  entity?: ChangeEntity;
+  via?: Via;
+}
+export const useShowChanges = (showId: string, filter: ShowChangesFilter) =>
+  useOpQuery(
+    qk.showChanges(showId, filter),
+    'changes.list',
+    { showId, ...filter, grouped: true, limit: 300 },
+    { placeholderData: keepPreviousData },
+  );
 /** Every page of a show's wiki (wiki.list is paged; the screens need all of it for links). */
 export async function listAllWikiPages(
   showId: string,

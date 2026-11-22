@@ -198,9 +198,13 @@ async function runInTransaction<N extends OpName>(
         // Chunked to stay under the Postgres bind-parameter limit.
         for (let i = 0; i < rows.length; i += 1000)
           await tx.insert(schema.changes).values(rows.slice(i, i + 1000));
+        // Show-level changes (wiki pages, event buttons) reach the show socket's change log.
         for (const c of list)
-          if (c.sessionId)
-            outbox.push([`session:${c.sessionId}`, { type: 'invalidate', entity: 'change' }]);
+          outbox.push(
+            c.sessionId
+              ? [`session:${c.sessionId}`, { type: 'invalidate', entity: 'change' }]
+              : [`show:${c.showId}`, { type: 'invalidate', entity: 'change' }],
+          );
         return rows.map((r) => r.id);
       },
     };

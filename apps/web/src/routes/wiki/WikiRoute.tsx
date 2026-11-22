@@ -2,7 +2,7 @@
 // and the filter matches titles and aliases (case- and accent-insensitive).
 
 import type { WikiKind, WikiPageSummary } from '@autologger/contract';
-import { PlusIcon, SearchIcon } from 'lucide-react';
+import { HistoryIcon, PlusIcon, SearchIcon } from 'lucide-react';
 import { type ReactNode, useMemo, useState } from 'react';
 import { Link } from 'wouter';
 import { useWikiList } from '@/api/queries';
@@ -135,6 +135,17 @@ export function WikiRoute() {
             <h1 className="m-0 text-[1.35rem] font-semibold text-si-fg">Wiki</h1>
             {show && <p className="m-0 truncate text-sm text-si-muted">{show.name}</p>}
           </div>
+          {show && (
+            <Button
+              variant="outline"
+              nativeButton={false}
+              title="Wiki edits and deletes, with undo"
+              render={<Link href="/changes?where=show&kind=wiki_page" />}
+            >
+              <HistoryIcon data-icon="inline-start" />
+              Changes
+            </Button>
+          )}
           {show && (
             <Tooltip content="You can read this show but not edit it." disabled={canWriteShow}>
               <span className="inline-flex">
