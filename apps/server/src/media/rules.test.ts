@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeRuleCounts, realignSegments, ruleSql } from './rules.ts';
+import { describeRuleCounts, matchCase, preservesCase, realignSegments, ruleSql } from './rules.ts';
 
 describe('transcript rules (pure parts)', () => {
   it('turns rules into PostgreSQL patterns, escaping literal text and replacements', () => {
@@ -14,6 +14,30 @@ describe('transcript rules (pure parts)', () => {
     expect(ruleSql({ find: 'sin', replace: 'sine', wholeWord: true }).pattern).toBe(
       '(?<![[:alnum:]_])(?:sin)(?![[:alnum:]_])',
     );
+  });
+
+  it('cases a replacement like the match it replaces', () => {
+    expect(matchCase('The x', 'the y')).toBe('The y');
+    expect(matchCase('the x', 'the y')).toBe('the y');
+    expect(matchCase('THE X', 'the y')).toBe('The y'); // ALL CAPS, but two words
+    expect(matchCase('DOCTOR', 'dr')).toBe('DR');
+    expect(matchCase('Fubu', 'FUBU')).toBe('FUBU');
+    expect(matchCase('fubu', 'FUBU')).toBe('FUBU');
+    expect(matchCase('I', 'me')).toBe('Me'); // one capital letter is not ALL CAPS
+    expect(matchCase('5,711', 'five')).toBe('five');
+    expect(matchCase('USA', 'united states')).toBe('United states'); // several words: no ALL CAPS
+    expect(matchCase('USA', 'United States')).toBe('United States');
+    expect(matchCase('Iphone', 'iphone')).toBe('Iphone');
+    expect(matchCase('Iphone', 'iPhone')).toBe('iPhone'); // internal capital: as written
+    expect(matchCase('IPHONE', 'iPhone')).toBe('iPhone');
+    expect(matchCase('"the', '"a')).toBe('"a'); // non-letter first character
+    expect(matchCase('The', '5 the')).toBe('5 the');
+    expect(matchCase('École', 'école')).toBe('École');
+    expect(matchCase('ÉCOLE', 'école')).toBe('ÉCOLE');
+    expect(preservesCase({ find: 'a', replace: 'b' })).toBe(true);
+    expect(preservesCase({ find: 'a', replace: 'b', preserveCase: false })).toBe(false);
+    expect(preservesCase({ find: 'a', replace: 'b', regex: true })).toBe(false);
+    expect(preservesCase({ find: 'a', replace: 'b', caseSensitive: true })).toBe(false);
   });
 
   it('realigns rewritten segments, keeping unchanged word timings and dropping emptied ones', () => {

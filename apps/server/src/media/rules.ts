@@ -37,6 +37,38 @@ function pgCode(e: unknown): { code?: string; message?: string } {
 const INVALID_REGEX = '2201B';
 const QUERY_CANCELED = '57014';
 
+/** Whether a rule adapts its replacement to each match's case (see TranscriptRule.preserveCase). */
+export const preservesCase = (rule: TranscriptRule) =>
+  !rule.regex && !rule.caseSensitive && rule.preserveCase !== false;
+
+const isUpper = (c: string) => c !== c.toLowerCase() && c === c.toUpperCase();
+const isLower = (c: string) => c !== c.toUpperCase() && c === c.toLowerCase();
+
+/**
+ * `replace` cased like `match`. A replacement with a capital after its first character
+ * ("iPhone", "FUBU") goes in as written. Otherwise an ALL CAPS match (two or more letters, none
+ * lower case) upper-cases a one-word replacement, and a match starting with a capital (or an ALL
+ * CAPS match of a several-word replacement) capitalises its first letter.
+ */
+export function matchCase(match: string, replace: string): string {
+  const [rFirst = '', ...rRest] = replace;
+  if (rRest.some(isUpper)) return replace;
+  const letters = [...match].filter((c) => isUpper(c) || isLower(c));
+  if (letters.length > 1 && letters.every(isUpper) && /^\S+$/.test(replace))
+    return replace.toUpperCase();
+  const [first = ''] = match;
+  if (isUpper(first) && isLower(rFirst)) return rFirst.toUpperCase() + replace.slice(rFirst.length);
+  return replace;
+}
+
+// Case-preserving rules: PostgreSQL wraps each match in these markers (noncharacters, never in a
+// transcript; a text that has them anyway gets the plain replacement) and JS then swaps each
+// marked match for the replacement cased like it. Matching itself stays in PostgreSQL.
+const OPEN = '\uFDD0';
+const CLOSE = '\uFDD1';
+const MARKED = /\uFDD0([^\uFDD1]*)\uFDD1/g;
+const hasMarker = (t: string) => t.includes(OPEN) || t.includes(CLOSE);
+
 const ruleName = (rule: TranscriptRule, i: number) => `Rule ${i + 1} (“${rule.find.slice(0, 40)}”)`;
 
 /**
@@ -106,12 +138,17 @@ export async function runRules(
     }
     const timeout = String(Math.max(1, Math.min(RULE_TIMEOUT_MS, left)));
     const { pattern, replacement, flags } = ruleSql(rule);
+    const preserve = preservesCase(rule);
+    // Wrap each match in markers (`\&` is the whole match); texts holding a marker get the plain one.
+    const marked = preserve ? `${OPEN}\\&${CLOSE}` : replacement;
     const run = async (q: DbOrTx) => {
       await q.execute(sql`select set_config('statement_timeout', ${timeout}, true)`);
       return q.execute<{ out: string; n: number }>(sql`
         select
           case when length(t) > ${MAX_RULE_TEXT_CHARS} then t
-               else regexp_replace(t, ${pattern}, ${replacement}, ${`g${flags}`}) end as out,
+               when strpos(t, ${OPEN}) > 0 or strpos(t, ${CLOSE}) > 0
+                 then regexp_replace(t, ${pattern}, ${replacement}, ${`g${flags}`})
+               else regexp_replace(t, ${pattern}, ${marked}, ${`g${flags}`}) end as out,
           case when length(t) > ${MAX_RULE_TEXT_CHARS} then 0
                else regexp_count(t, ${pattern}, 1, ${flags}) end::int as n
         from jsonb_array_elements_text(${JSON.stringify(current)}::jsonb) with ordinality as u(t, ord)
@@ -119,7 +156,11 @@ export async function runRules(
     };
     try {
       const rows = opts.onError === 'skip' ? await tx.transaction(run) : await run(tx);
-      current = rows.map((r) => r.out);
+      current = rows.map((r, j) =>
+        preserve && !hasMarker(current[j]!)
+          ? r.out.replace(MARKED, (_, m: string) => matchCase(m, rule.replace))
+          : r.out,
+      );
       counts[i] = rows.reduce((n, r) => n + Number(r.n), 0);
     } catch (e) {
       const { code, message } = pgCode(e);
