@@ -9,7 +9,6 @@ import {
   type OpInput,
   type Show,
   type TranscriptRule,
-  transcriptRuleError,
 } from '@autologger/contract';
 import { ArrowRightIcon, PlusIcon, TvIcon, XIcon } from 'lucide-react';
 import { useState } from 'react';
@@ -83,14 +82,11 @@ function ruleOf(d: RuleDraft): TranscriptRule | null {
 const normalizeRules = (rules: TranscriptRule[]) =>
   rules.map((r, i) => ruleOf(ruleDraftOf(r, i))).filter((r) => r !== null);
 
-/** The first problem with the rules as edited, or null. */
+/** The first problem with the rules as edited, or null. Regexes are checked by the server. */
 function rulesError(drafts: RuleDraft[]): string | null {
   for (const [i, d] of drafts.entries()) {
     const rule = ruleOf(d);
-    if (!rule) continue;
-    if (!rule.find) return `Rule ${i + 1} needs text to find.`;
-    const error = transcriptRuleError(rule);
-    if (error) return `Rule ${i + 1}: ${error}`;
+    if (rule && !rule.find) return `Rule ${i + 1} needs text to find.`;
   }
   return null;
 }
@@ -367,7 +363,7 @@ function ShowDetails({
             <SettingRow
               label="Replacement rules"
               labelId="settings-show-rules-label"
-              description="Fix words the transcriber keeps getting wrong, such as “doctor” for “dr”. Rules run in order on every new transcription, ignoring case unless Aa is on. To fix sessions already transcribed, an agent can apply them with transcript_replace."
+              description="Fix words the transcriber keeps getting wrong, such as “doctor” for “dr”. Rules run in order when a session is transcribed, and again whenever it is re-transcribed; they ignore case unless Aa is on. With .* on, Find is a PostgreSQL regular expression (as in transcript search) and \1 in Replace inserts the first group. To fix sessions already transcribed without re-transcribing, an agent can apply them with transcript_replace."
               disabled={!canEdit}
             />
             <TranscriptRulesEditor

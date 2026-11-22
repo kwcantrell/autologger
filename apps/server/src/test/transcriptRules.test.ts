@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId } from '../core/ids.ts';
 import { db, schema } from '../db/client.ts';
+import { runRules } from '../media/rules.ts';
 import { handlers } from '../worker/handlers.ts';
 import { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
 
@@ -73,6 +74,14 @@ describe('show transcript rules', () => {
       }),
       'bad_request',
     );
+    // Matches empty text: would insert the replacement everywhere.
+    await failsWith(
+      call(owner, 'shows.update', {
+        showId: show.id,
+        transcriptRules: [{ find: 'x*', replace: '-', regex: true }],
+      }),
+      'bad_request',
+    );
 
     const audId = newId('aud');
     await db.insert(schema.audioSegments).values({
@@ -119,6 +128,49 @@ describe('show transcript rules', () => {
   });
 });
 
+// A backreference pattern PostgreSQL cannot finish on this text within the timeout.
+const SLOW = { find: '(a*)(a*)(a*)\\1\\2\\3\\1b\\1', replace: 'x', regex: true };
+const slowText = `${'a'.repeat(3000)}b`;
+
+describe('rule matching in PostgreSQL', () => {
+  it('applies rules in order with PostgreSQL regex semantics', async () => {
+    const run = await db.transaction((tx) =>
+      runRules(
+        tx,
+        ['Doctor x over dsdt, doctor.', 'sin x, sinh, résin, Sin(x)', 'a.b a+b c2x2'],
+        [
+          { find: 'doctor', replace: 'dr', wholeWord: true },
+          { find: 'd(\\w)d(\\w)', replace: 'd\\1 d\\2', regex: true },
+          { find: 'dr x', replace: 'dr(x)' }, // sees the output of the first rule
+          { find: 'sin', replace: 'sine', wholeWord: true, caseSensitive: true },
+          { find: 'a.b', replace: '\\1&' }, // literal: no regex, no backreference
+          { find: '\\mc(\\d)x(\\d)\\M', replace: 'c\\1 x^\\2', regex: true },
+        ],
+        { budgetMs: 5000, onError: 'throw' },
+      ),
+    );
+    expect(run.texts).toEqual([
+      'dr(x) over ds dt, dr.',
+      'sine x, sinh, résin, Sin(x)',
+      '\\1& a+b c2 x^2',
+    ]);
+    expect(run.counts).toEqual([2, 1, 1, 1, 1, 1]);
+  });
+
+  it('skips a rule that times out (worker mode) and keeps applying the rest', async () => {
+    const started = Date.now();
+    const run = await db.transaction((tx) =>
+      runRules(tx, [slowText, 'the doctor'], [SLOW, doctorRule], {
+        budgetMs: 30_000,
+        onError: 'skip',
+      }),
+    );
+    expect(run.skipped).toEqual([{ index: 0, reason: 'timeout' }]);
+    expect(run.texts).toEqual([slowText, 'the dr']);
+    expect(Date.now() - started).toBeLessThan(4000);
+  });
+});
+
 describe('transcript.replace', () => {
   it('previews with dryRun, applies undoably, and can use the show’s saved rules', async () => {
     const { owner, show, session } = await studio();
@@ -159,6 +211,14 @@ describe('transcript.replace', () => {
       truncated: false,
     });
     expect(await call(owner, 'changes.list', { sessionId: session.id })).toHaveLength(0);
+    // A rule that would empty a segment leaves it alone.
+    expect(
+      await call(agent, 'transcript.replace', {
+        sessionId: session.id,
+        rules: [{ find: 'nothing here', replace: '' }],
+        dryRun: true,
+      }),
+    ).toMatchObject({ changed: 0, rules: [{ count: 1 }] });
     expect((await call(owner, 'transcript.get', { sessionId: session.id }))[0]!.text).toBe(
       'Ask Doctor Smith',
     );
@@ -219,5 +279,13 @@ describe('transcript.replace', () => {
       }),
       'bad_request',
     );
+    // A pathological regex is cut off by the statement timeout: bad_request in about 2 s.
+    await seedTranscript(session.id, [slowText]);
+    const started = Date.now();
+    await failsWith(
+      call(owner, 'transcript.replace', { sessionId: session.id, rules: [SLOW] }),
+      'bad_request',
+    );
+    expect(Date.now() - started).toBeLessThan(4000);
   });
 });
