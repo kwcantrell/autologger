@@ -448,9 +448,12 @@ export const opInputs = {
     sessionId: id.optional(),
     showId: id.optional(),
     via: z.enum(['web', 'mcp', 'companion', 'worker', 'system']).optional(),
+    groupId: id.optional(),
+    grouped: z.boolean().default(false),
     limit: z.number().int().min(1).max(500).default(100),
   }),
   'changes.revert': z.object({ changeId: id }),
+  'changes.revertGroup': z.object({ groupId: id }),
 
   // ── tokens (agents) ───────────────────────────────────────
   'tokens.list': z.object({}),
@@ -628,6 +631,7 @@ export interface OpOutputs {
   search: SearchHit[];
   'changes.list': Change[];
   'changes.revert': Change;
+  'changes.revertGroup': { groupId: string; reverted: number };
   'tokens.list': ApiToken[];
   'tokens.createPat': { token: string; apiToken: ApiToken };
   'tokens.revoke': { revoked: true };

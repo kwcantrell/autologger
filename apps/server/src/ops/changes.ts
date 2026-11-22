@@ -1,11 +1,12 @@
 // Change log listing and undo. Every content write records before/after snapshots; reverting
 // restores `before` (or removes the row when it was a create) and is itself recorded.
+// All changes one op call records share a group id, so a bulk call can be undone in one step.
 // Soft-deleted entities (wiki pages) are hidden and revealed via `deletedAt` instead, so their
 // history (wiki revisions) survives a delete/undo round trip.
 
 import type { Change, ChangeEntity, LiveEntity } from '@autologger/contract';
-import { and, desc, eq, getTableColumns, isNull } from 'drizzle-orm';
-import type { PgTable } from 'drizzle-orm/pg-core';
+import { and, desc, eq, getTableColumns, gt, isNull, ne, or, sql } from 'drizzle-orm';
+import { alias, type PgTable } from 'drizzle-orm/pg-core';
 import { readableShowCondition, requireSession, requireShow } from '../core/authz.ts';
 import { conflict, notFound } from '../core/errors.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
@@ -44,7 +45,12 @@ function revive(table: PgTable, snap: Record<string, unknown>): Record<string, u
   return out;
 }
 
-async function toChanges(ctx: Ctx, rows: (typeof changes.$inferSelect)[]): Promise<Change[]> {
+type ChangeRow = typeof changes.$inferSelect;
+
+async function toChanges(
+  ctx: Ctx,
+  rows: (ChangeRow & { groupSize?: number; groupUndone?: number })[],
+): Promise<Change[]> {
   const users = await userRefs(
     ctx.db,
     rows.map((r) => r.actorId),
@@ -64,46 +70,83 @@ async function toChanges(ctx: Ctx, rows: (typeof changes.$inferSelect)[]): Promi
     showId: r.showId,
     revertedAt: iso(r.revertedAt),
     revertOf: r.revertOf,
+    groupId: r.groupId,
+    ...(r.groupSize && r.groupSize > 1
+      ? { groupSize: r.groupSize, groupUndone: r.groupUndone }
+      : {}),
   }));
 }
 
 defineOp({
   name: 'changes.list',
   description:
-    'The change log: who changed what, from where (web, mcp agent, companion), newest first. Filter by session, show or surface.',
+    'The change log: who changed what, from where (web, mcp agent, companion), newest first. Filter by session, show, surface or groupId. Every change one op call wrote shares a groupId (a bulk call such as transcript_renameSpeaker writes one change per segment). grouped: true folds each group into one row — its newest change, with groupSize (how many changes, when more than one) and groupUndone (how many are already undone); revertedAt is then set only when the whole group is undone, and limit counts rows. Undo one change with changes_revert(changeId) or a whole op call with changes_revertGroup(groupId).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, showId, via, limit }) {
+  async run(ctx, { sessionId, showId, via, groupId, grouped, limit }) {
     if (sessionId) await requireSession(ctx, sessionId, 'read');
     if (showId) await requireShow(ctx, showId, 'read');
+    const where = and(
+      readableShowCondition(ctx, changes.showId as never),
+      sessionId ? eq(changes.sessionId, sessionId) : undefined,
+      showId ? eq(changes.showId, showId) : undefined,
+      via ? eq(changes.via, via) : undefined,
+      groupId ? eq(changes.groupId, groupId) : undefined,
+    );
+    if (!grouped) {
+      const rows = await ctx.db
+        .select()
+        .from(changes)
+        .where(where)
+        .orderBy(desc(changes.at))
+        .limit(limit);
+      return toChanges(ctx, rows);
+    }
+    // One row per group (changes without a group stand alone): the newest change, plus counts.
+    const key = sql`coalesce(${changes.groupId}, ${changes.id})`;
+    const folded = ctx.db
+      .select({
+        ...getTableColumns(changes),
+        groupSize: sql<number>`count(*) over (partition by ${key})`.as('group_size'),
+        groupUndone: sql<number>`count(${changes.revertedAt}) over (partition by ${key})`.as(
+          'group_undone',
+        ),
+        rank: sql<number>`row_number() over (partition by ${key} order by ${changes.at} desc)`.as(
+          'rank',
+        ),
+      })
+      .from(changes)
+      .where(where)
+      .as('folded');
     const rows = await ctx.db
       .select()
-      .from(changes)
-      .where(
-        and(
-          readableShowCondition(ctx, changes.showId as never),
-          sessionId ? eq(changes.sessionId, sessionId) : undefined,
-          showId ? eq(changes.showId, showId) : undefined,
-          via ? eq(changes.via, via) : undefined,
-        ),
-      )
-      .orderBy(desc(changes.at))
+      .from(folded)
+      .where(eq(folded.rank, 1))
+      .orderBy(desc(folded.at))
       .limit(limit);
-    return toChanges(ctx, rows);
+    return toChanges(
+      ctx,
+      rows.map(({ rank: _, ...r }) => {
+        const groupSize = Number(r.groupSize);
+        const groupUndone = Number(r.groupUndone);
+        // A folded row reads as undone only once every change in it is.
+        const revertedAt = groupUndone < groupSize ? null : r.revertedAt;
+        return { ...r, groupSize, groupUndone, revertedAt };
+      }),
+    );
   },
 });
 
 defineOp({
   name: 'changes.revert',
   description:
-    'Undo one change. Only the most recent change to an item can be undone; undo newer ones first.',
+    'Undo one change. Only the most recent change to an item can be undone; undo newer ones first. Bulk calls (transcript_renameSpeaker, transcript_replace, transcript_updateSegments, events_createMany …) write one change per item: undo the whole call with changes_revertGroup(groupId) instead.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { changeId }) {
     const [c] = await ctx.db.select().from(changes).where(eq(changes.id, changeId));
     if (!c) throw notFound('Change');
-    if (c.sessionId) await requireSession(ctx, c.sessionId, 'write');
-    else await requireShow(ctx, c.showId, c.entity === 'category' ? 'manage' : 'write');
+    await requireRevertAccess(ctx, c);
     if (c.revertedAt) throw conflict('This change was already undone.');
     const [latest] = await ctx.db
       .select({ id: changes.id })
@@ -120,77 +163,7 @@ defineOp({
     if (latest?.id !== c.id)
       throw conflict('This item changed again since; undo the newer change first.');
 
-    const { table, live, softDelete } = TABLES[c.entity];
-    const idCol = table.id;
-    const [current] = (await ctx.db.select().from(table).where(eq(idCol, c.entityId))) as
-      | Record<string, unknown>[]
-      | [];
-    // A soft-deleted row still exists in the table but not for users.
-    const visible = Boolean(current) && !(softDelete && current?.deletedAt);
-    let restored: Record<string, unknown> | undefined;
-    try {
-      if (c.kind === 'create') {
-        if (visible && softDelete) {
-          [restored] = (await ctx.db
-            .update(table)
-            .set({ deletedAt: new Date() })
-            .where(eq(idCol, c.entityId))
-            .returning()) as Record<string, unknown>[];
-        } else if (visible) {
-          await ctx.db.delete(table).where(eq(idCol, c.entityId));
-        }
-      } else if (c.kind === 'update') {
-        if (!visible) throw conflict('That item no longer exists.');
-        [restored] = (await ctx.db
-          .update(table)
-          .set(revive(table, c.before as Record<string, unknown>))
-          .where(eq(idCol, c.entityId))
-          .returning()) as Record<string, unknown>[];
-      } else if (softDelete && current) {
-        if (visible) throw conflict('That item already exists again.');
-        [restored] = (await ctx.db
-          .update(table)
-          .set({ ...revive(table, c.before as Record<string, unknown>), deletedAt: null })
-          .where(eq(idCol, c.entityId))
-          .returning()) as Record<string, unknown>[];
-      } else {
-        if (current) throw conflict('That item already exists again.');
-        [restored] = (await ctx.db
-          .insert(table)
-          .values(revive(table, c.before as Record<string, unknown>))
-          .returning()) as Record<string, unknown>[];
-      }
-    } catch (e) {
-      if (isUniqueViolation(e)) {
-        throw conflict(
-          'Something with the same name exists now; rename or remove it, then undo again.',
-        );
-      }
-      throw e;
-    }
-    await ctx.db.update(changes).set({ revertedAt: new Date() }).where(eq(changes.id, c.id));
-    const revertId = await ctx.record({
-      entity: c.entity,
-      entityId: c.entityId,
-      kind: c.kind === 'create' ? 'delete' : c.kind === 'delete' ? 'create' : 'update',
-      summary: `Undid: ${c.summary}`,
-      showId: c.showId,
-      sessionId: c.sessionId,
-      before: snapshot(current as Record<string, unknown> | undefined),
-      after: snapshot(restored),
-      revertOf: c.id,
-    });
-    // The undo is now the latest change for the item, so undoing it again acts as redo.
-    if (c.sessionId && live)
-      ctx.publish(`session:${c.sessionId}`, { type: 'invalidate', entity: live });
-    if (c.sessionId && c.entity === 'event')
-      ctx.publish(`session:${c.sessionId}`, { type: 'invalidate', entity: 'session' });
-    if (c.entity === 'category')
-      ctx.publish(`show:${c.showId}`, {
-        type: 'show_changed',
-        showId: c.showId,
-        entity: 'category',
-      });
+    const revertId = await undoChange(ctx, c);
     const [out] = await toChanges(
       ctx,
       await ctx.db.select().from(changes).where(eq(changes.id, revertId)),
@@ -198,3 +171,135 @@ defineOp({
     return out!;
   },
 });
+
+defineOp({
+  name: 'changes.revertGroup',
+  description:
+    'Undo every change one op call made, in one step — e.g. a transcript_renameSpeaker, transcript_replace or transcript_updateSegments call that touched hundreds of segments. groupId comes from changes_list (every change has one; grouped: true lists one row per call). All or nothing: if any item in the group was changed again later by another call, nothing is undone and it fails with conflict (undo the newer change first). Changes in the group that were already undone one by one are skipped. The undo is recorded as a new group (the returned groupId); reverting that group redoes the call. Returns how many changes were undone.',
+  kind: 'write',
+  surfaces: ['web', 'mcp'],
+  async run(ctx, { groupId }) {
+    const entries = await ctx.db
+      .select()
+      .from(changes)
+      .where(eq(changes.groupId, groupId))
+      .orderBy(desc(changes.at));
+    if (entries.length === 0) throw notFound('Change group');
+    // A group comes from one op call, so this is usually a single session or show.
+    const scopes = new Map<string, ChangeRow>();
+    for (const c of entries) scopes.set(c.sessionId ?? `${c.showId}:${c.entity === 'category'}`, c);
+    for (const c of scopes.values()) await requireRevertAccess(ctx, c);
+    const pending = entries.filter((c) => !c.revertedAt);
+    if (pending.length === 0) throw conflict('This group was already undone.');
+
+    // No item may have changed since: no live change outside the group is newer than the
+    // group's own change to the same item.
+    const own = alias(changes, 'own');
+    const [newer] = await ctx.db
+      .select({ summary: changes.summary })
+      .from(changes)
+      .innerJoin(
+        own,
+        and(
+          eq(own.groupId, groupId),
+          isNull(own.revertedAt),
+          eq(own.entity, changes.entity),
+          eq(own.entityId, changes.entityId),
+          gt(changes.at, own.at),
+        ),
+      )
+      .where(
+        and(isNull(changes.revertedAt), or(isNull(changes.groupId), ne(changes.groupId, groupId))),
+      )
+      .limit(1);
+    if (newer)
+      throw conflict(
+        `An item in this group changed again since (“${newer.summary}”); undo the newer change first.`,
+      );
+
+    // Newest first, so an item changed twice in the call ends up at its first `before`.
+    for (const c of pending) await undoChange(ctx, c);
+    return { groupId: ctx.groupId, reverted: pending.length };
+  },
+});
+
+async function requireRevertAccess(ctx: Ctx, c: ChangeRow): Promise<void> {
+  if (c.sessionId) await requireSession(ctx, c.sessionId, 'write');
+  else await requireShow(ctx, c.showId, c.entity === 'category' ? 'manage' : 'write');
+}
+
+/** Restore the item to `c.before`, mark `c` undone and record the undo; returns its change id. */
+async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
+  const { table, live, softDelete } = TABLES[c.entity];
+  const idCol = table.id;
+  const [current] = (await ctx.db.select().from(table).where(eq(idCol, c.entityId))) as
+    | Record<string, unknown>[]
+    | [];
+  // A soft-deleted row still exists in the table but not for users.
+  const visible = Boolean(current) && !(softDelete && current?.deletedAt);
+  let restored: Record<string, unknown> | undefined;
+  try {
+    if (c.kind === 'create') {
+      if (visible && softDelete) {
+        [restored] = (await ctx.db
+          .update(table)
+          .set({ deletedAt: new Date() })
+          .where(eq(idCol, c.entityId))
+          .returning()) as Record<string, unknown>[];
+      } else if (visible) {
+        await ctx.db.delete(table).where(eq(idCol, c.entityId));
+      }
+    } else if (c.kind === 'update') {
+      if (!visible) throw conflict('That item no longer exists.');
+      [restored] = (await ctx.db
+        .update(table)
+        .set(revive(table, c.before as Record<string, unknown>))
+        .where(eq(idCol, c.entityId))
+        .returning()) as Record<string, unknown>[];
+    } else if (softDelete && current) {
+      if (visible) throw conflict('That item already exists again.');
+      [restored] = (await ctx.db
+        .update(table)
+        .set({ ...revive(table, c.before as Record<string, unknown>), deletedAt: null })
+        .where(eq(idCol, c.entityId))
+        .returning()) as Record<string, unknown>[];
+    } else {
+      if (current) throw conflict('That item already exists again.');
+      [restored] = (await ctx.db
+        .insert(table)
+        .values(revive(table, c.before as Record<string, unknown>))
+        .returning()) as Record<string, unknown>[];
+    }
+  } catch (e) {
+    if (isUniqueViolation(e)) {
+      throw conflict(
+        'Something with the same name exists now; rename or remove it, then undo again.',
+      );
+    }
+    throw e;
+  }
+  await ctx.db.update(changes).set({ revertedAt: new Date() }).where(eq(changes.id, c.id));
+  const revertId = await ctx.record({
+    entity: c.entity,
+    entityId: c.entityId,
+    kind: c.kind === 'create' ? 'delete' : c.kind === 'delete' ? 'create' : 'update',
+    summary: `Undid: ${c.summary}`,
+    showId: c.showId,
+    sessionId: c.sessionId,
+    before: snapshot(current as Record<string, unknown> | undefined),
+    after: snapshot(restored),
+    revertOf: c.id,
+  });
+  // The undo is now the latest change for the item, so undoing it again acts as redo.
+  if (c.sessionId && live)
+    ctx.publish(`session:${c.sessionId}`, { type: 'invalidate', entity: live });
+  if (c.sessionId && c.entity === 'event')
+    ctx.publish(`session:${c.sessionId}`, { type: 'invalidate', entity: 'session' });
+  if (c.entity === 'category')
+    ctx.publish(`show:${c.showId}`, {
+      type: 'show_changed',
+      showId: c.showId,
+      entity: 'category',
+    });
+  return revertId;
+}

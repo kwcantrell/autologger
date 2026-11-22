@@ -269,6 +269,7 @@ defineOp({
           actor,
           db: tx,
           op: 'media.importPlaylist',
+          groupId: '',
           record: () => Promise.reject(new Error('read-only')),
           publish: () => {},
         },

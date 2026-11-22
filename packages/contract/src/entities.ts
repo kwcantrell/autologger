@@ -340,6 +340,12 @@ export interface Change {
   showId: string;
   revertedAt: string | null;
   revertOf: string | null;
+  /** Shared by every change one op call wrote; null on changes logged before groups existed. */
+  groupId: string | null;
+  /** changes.list with grouped: true — how many changes this row stands for (only when > 1). */
+  groupSize?: number;
+  /** With groupSize: how many of them are already undone. */
+  groupUndone?: number;
 }
 
 export interface ApiToken {

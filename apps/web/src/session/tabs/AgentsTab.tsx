@@ -208,6 +208,16 @@ function ChangeFeed({ session }: { session: Session }) {
       return keys;
     },
   });
+  // A folded row stands for one op call; its changes may touch several kinds of content.
+  const revertGroup = useOpMutation('changes.revertGroup', {
+    invalidate: () => [
+      qk.changesAll(session.id),
+      qk.dashboards(session.id),
+      qk.events(session.id),
+      qk.topics(session.id),
+      qk.transcript(session.id),
+    ],
+  });
 
   const rows = useMemo(() => {
     const all = changes.data ?? [];
@@ -227,29 +237,41 @@ function ChangeFeed({ session }: { session: Session }) {
   }, [events.data, topics.data, session]);
 
   const undo = async (c: Change) => {
+    const group = c.groupSize && c.groupId ? c.groupId : null;
+    const left = (c.groupSize ?? 1) - (c.groupUndone ?? 0);
     const ok = await confirm({
-      title: 'Undo this change?',
-      message: (
+      title: group ? `Undo all ${left} changes?` : 'Undo this change?',
+      message: group ? (
+        <>
+          Everything this {c.op} call by {c.actor?.name ?? 'the system'} changed will be reverted in
+          one step ({left} change{left === 1 ? '' : 's'}, e.g. “{c.summary}”). If any of it changed
+          again since, nothing is undone. The undo is recorded too and can itself be undone.
+        </>
+      ) : (
         <>
           “{c.summary}” by {c.actor?.name ?? 'the system'} will be reverted. The undo is recorded
           too and can itself be undone.
         </>
       ),
-      confirmLabel: 'Undo',
+      confirmLabel: group ? 'Undo all' : 'Undo',
     });
     if (!ok) return;
     setRowErrors(({ [c.id]: _, ...rest }) => rest);
-    revert.mutate(
-      { changeId: c.id },
-      {
-        onSuccess: () => showToast('Change undone.'),
-        onError: (e) => {
-          const msg = errorMessage(e);
-          setRowErrors((m) => ({ ...m, [c.id]: msg }));
-          showToast(`Undo failed: ${msg}`, true);
+    const onError = (e: unknown) => {
+      const msg = errorMessage(e);
+      setRowErrors((m) => ({ ...m, [c.id]: msg }));
+      showToast(`Undo failed: ${msg}`, true);
+    };
+    if (group)
+      revertGroup.mutate(
+        { groupId: group },
+        {
+          onSuccess: (r) => showToast(`${r.reverted} change${r.reverted === 1 ? '' : 's'} undone.`),
+          onError,
         },
-      },
-    );
+      );
+    else
+      revert.mutate({ changeId: c.id }, { onSuccess: () => showToast('Change undone.'), onError });
   };
 
   const capped = (changes.data?.length ?? 0) >= LIMIT;
@@ -301,7 +323,12 @@ function ChangeFeed({ session }: { session: Session }) {
               sec={secOf.get(`${c.entity}:${c.entityId}`) ?? null}
               onJump={(s) => seek(s, true)}
               canWrite={canWrite}
-              busy={revert.isPending && revert.variables?.changeId === c.id}
+              busy={
+                (revert.isPending && revert.variables?.changeId === c.id) ||
+                (revertGroup.isPending &&
+                  !!c.groupSize &&
+                  revertGroup.variables?.groupId === c.groupId)
+              }
               error={rowErrors[c.id]}
               onUndo={() => void undo(c)}
             />
@@ -380,7 +407,17 @@ function ChangeRow({
       <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'py-1')}>
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           {c.revertOf && <SmallBadge title="This change undid an earlier one">undo</SmallBadge>}
-          <span className="[overflow-wrap:anywhere]">{c.summary}</span>
+          {c.groupSize && (
+            <SmallBadge
+              title={`One ${c.op} call: ${c.groupSize} changes, newest shown${c.groupUndone ? `; ${c.groupUndone} already undone` : ''}`}
+            >
+              {c.groupSize} changes{c.groupUndone ? ` · ${c.groupUndone} undone` : ''}
+            </SmallBadge>
+          )}
+          <span className="[overflow-wrap:anywhere]">
+            {c.summary}
+            {c.groupSize && <span className="text-si-muted"> and {c.groupSize - 1} more</span>}
+          </span>
         </div>
         {error && (
           <p role="alert" className="m-0 mt-0.5 text-[0.75rem] text-(--si-danger)">
@@ -404,10 +441,16 @@ function ChangeRow({
               size="xs"
               onClick={onUndo}
               disabled={!canWrite || busy}
-              title={canWrite ? 'Undo this change' : undefined}
+              title={
+                !canWrite
+                  ? undefined
+                  : c.groupSize
+                    ? 'Undo every change of this call'
+                    : 'Undo this change'
+              }
             >
               <Undo2 aria-hidden="true" />
-              {busy ? 'Undoing…' : 'Undo'}
+              {busy ? 'Undoing…' : c.groupSize ? 'Undo all' : 'Undo'}
             </Button>
           </span>
         )}
