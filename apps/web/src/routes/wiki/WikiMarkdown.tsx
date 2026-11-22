@@ -5,19 +5,25 @@
 // link as its text. Images render as their alt text. [[…]] links resolve against the show's page
 // titles and aliases; an unknown title renders dim with a "No page named …" tooltip. Inside a table
 // cell an aliased link escapes its pipe, as GFM requires: [[Title\|label]].
+// Citations — [label](/sessions/<id>?t=<sec>&to=<sec>) — render as chips with the session title
+// and the range, the label as their tooltip. Titles come from `sessionTitle` (useSessionTitles:
+// one sessions.list of the page's show, not one request per link).
 
-import { WIKI_LINK } from '@autologger/contract';
+import { citationRange, WIKI_LINK } from '@autologger/contract';
+import { PlayIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import Markdown, { type Components, type UrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Link } from 'wouter';
+import { fmtSec } from '@/lib/timecode';
 import { cn } from '@/shared/lib/utils';
 import { markdownTableComponents } from '@/shared/ui/markdownTable';
 import { Tooltip } from '@/shared/ui/Tooltip';
-import { type WikiResolver, wikiHref } from './wikiShared';
+import { type SessionTitle, type WikiResolver, wikiHref } from './wikiShared';
 
 const WIKI_SCHEME = 'wikititle:';
 const IN_APP = /^\/(wiki|sessions)\//;
+const SESSION_HREF = /^\/sessions\/([A-Za-z0-9_-]+)\/?\?(.*)$/;
 
 const urlTransform: UrlTransform = (url) =>
   url.startsWith(WIKI_SCHEME) || /^https?:\/\//i.test(url) || IN_APP.test(url) ? url : '';
@@ -78,10 +84,23 @@ function remarkWikiLinks() {
 const LINK_CLASS =
   'text-si-fg underline decoration-(--si-line-strong) underline-offset-2 hover-always:text-si-accent';
 
-function components(resolve: WikiResolver): Components {
+function components(resolve: WikiResolver, sessionTitle: SessionTitle): Components {
   return {
     a({ href, children }) {
       if (!href) return <span>{children}</span>;
+      const cite = SESSION_HREF.exec(href);
+      const range = cite && citationRange(cite[2] ?? '');
+      if (cite && range)
+        return (
+          <CitationChip
+            href={href}
+            title={sessionTitle(cite[1]!)}
+            startSec={range.startSec}
+            endSec={range.endSec}
+          >
+            {children}
+          </CitationChip>
+        );
       if (href.startsWith(WIKI_SCHEME)) {
         const title = decodeURIComponent(href.slice(WIKI_SCHEME.length));
         const page = resolve(title);
@@ -127,6 +146,43 @@ function UnresolvedLink({ title, children }: { title: string; children: ReactNod
   );
 }
 
+function CitationChip({
+  href,
+  title,
+  startSec,
+  endSec,
+  children,
+}: {
+  href: string;
+  title: string | null | undefined;
+  startSec: number;
+  endSec?: number;
+  children: ReactNode;
+}) {
+  const range =
+    endSec != null && endSec > startSec
+      ? `${fmtSec(startSec)}–${fmtSec(endSec)}`
+      : fmtSec(startSec);
+  const name = title === undefined ? 'Session' : (title ?? 'Unknown session');
+  return (
+    <Tooltip content={children}>
+      <Link
+        href={href}
+        data-slot="wiki-citation"
+        className="mx-0.5 inline-flex max-w-full items-baseline gap-1.5 rounded-ctl border border-si-line bg-si-panel-2 px-1.5 py-px align-baseline text-[0.8rem] text-si-fg no-underline transition-colors hover-always:border-(--si-line-strong) hover-always:text-si-accent"
+      >
+        <PlayIcon aria-hidden="true" className="size-3 shrink-0 self-center text-si-dim" />
+        <span className={cn('min-w-0 truncate', title === null && 'text-si-dim')}>{name}</span>
+        <span className="shrink-0 font-mono text-[0.75rem] text-si-muted tabular-nums">
+          {range}
+        </span>
+      </Link>
+    </Tooltip>
+  );
+}
+
+const noTitle: SessionTitle = () => undefined;
+
 const PROSE_CLASS = [
   'text-[0.9rem] leading-relaxed text-si-fg break-words',
   '[&_p]:my-2 [&_h1]:mt-4 [&_h1]:mb-2 [&_h1]:text-xl [&_h1]:font-semibold',
@@ -142,10 +198,13 @@ const PROSE_CLASS = [
 export function WikiMarkdown({
   body,
   resolve,
+  sessionTitle = noTitle,
   className,
 }: {
   body: string;
   resolve: WikiResolver;
+  /** Names cited sessions (useSessionTitles); without it citations show "Session". */
+  sessionTitle?: SessionTitle;
   className?: string;
 }) {
   return (
@@ -155,7 +214,7 @@ export function WikiMarkdown({
         urlTransform={urlTransform}
         // biome-ignore lint/suspicious/noExplicitAny: a minimal local mdast shape instead of a types dep
         remarkPlugins={[remarkGfm, remarkWikiLinks as any]}
-        components={components(resolve)}
+        components={components(resolve, sessionTitle)}
       >
         {body}
       </Markdown>

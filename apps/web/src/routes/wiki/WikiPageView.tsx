@@ -22,6 +22,7 @@ import { WikiHistorySheet } from './WikiHistorySheet';
 import { WikiMarkdown } from './WikiMarkdown';
 import {
   fmtWhen,
+  useSessionTitles,
   useWikiDelete,
   useWikiResolver,
   useWikiUpsert,
@@ -94,6 +95,7 @@ function PageBody({ page }: { page: WikiPage }) {
   const otherShow = !!activeShow && activeShow.id !== page.showId;
   const isSession = page.kind === 'session';
   const { resolve } = useWikiResolver(page.showId);
+  const sessionTitle = useSessionTitles(page.showId, page.bodyMd);
   const upsert = useWikiUpsert();
   const del = useWikiDelete(page.showId);
   const { confirm, confirmElement } = useConfirm();
@@ -242,6 +244,7 @@ function PageBody({ page }: { page: WikiPage }) {
             onChange={(draft) => setEdit({ draft, error: null })}
             showAliases={!isSession}
             resolve={resolve}
+            showId={page.showId}
           />
           {edit.error && (
             <p role="alert" className="m-0 text-sm text-si-danger">
@@ -259,7 +262,7 @@ function PageBody({ page }: { page: WikiPage }) {
           </div>
         </section>
       ) : page.bodyMd.trim() ? (
-        <WikiMarkdown body={page.bodyMd} resolve={resolve} />
+        <WikiMarkdown body={page.bodyMd} resolve={resolve} sessionTitle={sessionTitle} />
       ) : (
         <p className="m-0 text-sm text-si-muted">This page is empty.</p>
       )}

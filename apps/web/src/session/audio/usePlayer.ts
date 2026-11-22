@@ -32,6 +32,8 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
   const [positionSec, setPositionSec] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const rafRef = useRef(0);
+  /** Session second to pause at (a cited range's end), cleared by the next seek or that pause. */
+  const stopAtRef = useRef<number | null>(null);
 
   if (typeof window !== 'undefined' && !audioRef.current) {
     audioRef.current = new Audio();
@@ -49,7 +51,14 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
   const tick = useCallback(() => {
     const a = audioRef.current;
     const cur = currentRef.current;
-    if (a && cur) setPositionSec(cur.start + a.currentTime);
+    if (a && cur) {
+      const pos = cur.start + a.currentTime;
+      setPositionSec(pos);
+      if (stopAtRef.current != null && pos >= stopAtRef.current && !a.paused) {
+        stopAtRef.current = null;
+        a.pause();
+      }
+    }
     rafRef.current = requestAnimationFrame(tick);
   }, []);
 
@@ -86,8 +95,10 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
     [],
   );
 
+  /** Move the playhead to `sec` (and play); with `stopAt`, playback pauses there once. */
   const seek = useCallback(
-    async (sec: number, play = false) => {
+    async (sec: number, play = false, stopAt: number | null = null) => {
+      stopAtRef.current = stopAt != null && stopAt > sec ? stopAt : null;
       setPositionSec(sec);
       const ps = locate(sec);
       if (!ps) {
@@ -117,7 +128,7 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
       return;
     }
     if (!currentRef.current) {
-      await seek(positionSec ?? listRef.current[0]?.start ?? 0, true);
+      await seek(positionSec ?? listRef.current[0]?.start ?? 0, true, stopAtRef.current);
       return;
     }
     try {
@@ -144,7 +155,7 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
       const cur = currentRef.current;
       const next =
         cur && listRef.current.find((p) => p.start >= cur.end - 0.5 && p.seg.id !== cur.seg.id);
-      if (next) void seek(next.start, true);
+      if (next) void seek(next.start, true, stopAtRef.current);
       else onPause();
     };
     a.addEventListener('play', onPlay);

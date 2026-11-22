@@ -3,6 +3,7 @@
 
 import type { DashboardSpec } from './dashboard.ts';
 import type { TranscriptRule, TranscriptRuleCount } from './transcriptRules.ts';
+import type { WikiCitation } from './wikiLinks.ts';
 
 export type TeamRole = 'owner' | 'admin' | 'member';
 export type UserStatus = 'pending' | 'active' | 'disabled';
@@ -287,7 +288,7 @@ export interface Dashboard {
   updatedAt: string;
 }
 
-export type WikiKind = 'person' | 'topic' | 'bit' | 'session';
+export type WikiKind = 'person' | 'topic' | 'bit' | 'session' | 'question';
 
 export interface WikiPageSummary {
   id: string;
@@ -320,8 +321,28 @@ export interface WikiLint {
   unresolved: { pageId: string; title: string; kind: WikiKind; targets: string[] }[];
   /** Person, topic and bit pages no other page links to (session recaps are left out). */
   orphans: { pageId: string; title: string; kind: WikiKind }[];
-  counts: { pages: number; links: number; unresolvedLinks: number; orphans: number };
+  /** Pages with citations ([label](/sessions/<id>?t=&to=)) that point at no usable range. */
+  badCitations: {
+    pageId: string;
+    title: string;
+    kind: WikiKind;
+    citations: (WikiCitation & { problem: WikiCitationProblem })[];
+  }[];
+  counts: {
+    pages: number;
+    links: number;
+    unresolvedLinks: number;
+    orphans: number;
+    citations: number;
+    badCitations: number;
+  };
 }
+
+/**
+ * Why wiki.lint flags a citation: `unknown_session` (no session with that id in this show),
+ * `bad_range` (`to` is not after `t`), `past_end` (the range ends after the session's audio).
+ */
+export type WikiCitationProblem = 'unknown_session' | 'bad_range' | 'past_end';
 
 export interface WikiPage extends WikiPageSummary {
   bodyMd: string;

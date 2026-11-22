@@ -27,3 +27,45 @@ export function wikiLinkTargets(bodyMd: string): string[] {
   }
   return [...seen.values()];
 }
+
+/** A citation: a Markdown link to a range of a session, `[label](/sessions/<id>?t=<sec>&to=<sec>)`. */
+export interface WikiCitation {
+  sessionId: string;
+  /** Seconds from the session start (transcript_text's @seconds). */
+  startSec: number;
+  /** End of the range in seconds when the link has `to`, as written (wiki.lint flags to <= t). */
+  endSec?: number;
+  label: string;
+}
+
+/** `[label](/sessions/<id>?<query>)`, optionally with a quoted link title after the URL. */
+const CITATION_LINK =
+  /\[((?:\\.|[^\\[\]\n])*)\]\(\s*\/sessions\/([A-Za-z0-9_-]+)\/?\?([^\s)]*)(?:\s+"[^"\n]*")?\s*\)/g;
+
+const SECONDS = /^\d+(?:\.\d+)?$/;
+
+/** The query parameters of a citation link (`t`, `to`), or null when it is not one. */
+export function citationRange(query: string): { startSec: number; endSec?: number } | null {
+  const params = new URLSearchParams(query);
+  const t = params.get('t') ?? '';
+  if (!SECONDS.test(t)) return null;
+  const to = params.get('to') ?? '';
+  return { startSec: Number(t), ...(SECONDS.test(to) ? { endSec: Number(to) } : {}) };
+}
+
+/**
+ * The session citations of a page body, in order (repeats kept): in-app Markdown links to
+ * `/sessions/<id>` with a numeric `t` (seconds from the session start, required) and an optional
+ * `to`. Links inside code are ignored, as for [[links]]. A session link without `t` is not a
+ * citation.
+ */
+export function wikiCitations(bodyMd: string): WikiCitation[] {
+  const out: WikiCitation[] = [];
+  for (const m of linkableText(bodyMd).matchAll(CITATION_LINK)) {
+    const range = citationRange(m[3] ?? '');
+    if (!range) continue;
+    const label = (m[1] ?? '').replace(/\\(.)/g, '$1').trim();
+    out.push({ sessionId: m[2]!, ...range, label });
+  }
+  return out;
+}

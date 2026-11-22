@@ -23,6 +23,7 @@ const TABS: { id: WikiKind; label: string; empty: string }[] = [
   { id: 'topic', label: 'Topics', empty: 'No topics yet.' },
   { id: 'bit', label: 'Running bits', empty: 'No running bits yet.' },
   { id: 'session', label: 'Sessions', empty: 'No session pages yet.' },
+  { id: 'question', label: 'Questions', empty: 'No questions yet.' },
 ];
 
 const ROW =
