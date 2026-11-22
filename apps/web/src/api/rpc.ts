@@ -4,7 +4,7 @@ import type {
   Capabilities,
   OpInput,
   OpName,
-  OpOutputs,
+  OpResult,
   RpcError as RpcErrorBody,
 } from '@autologger/contract';
 
@@ -80,8 +80,12 @@ async function post<T>(url: string, input: unknown): Promise<T> {
   return parse<T>(res);
 }
 
-export function rpc<N extends OpName>(name: N, input: OpInput<N>): Promise<OpOutputs[N]> {
-  return post<OpOutputs[N]>(`/api/rpc/${name}`, input);
+/** Calls op `name`; the result type follows the input (compact or full, see OpResult). */
+export function rpc<N extends OpName, I extends OpInput<N> = OpInput<N>>(
+  name: N,
+  input: I,
+): Promise<OpResult<N, I>> {
+  return post<OpResult<N, I>>(`/api/rpc/${name}`, input);
 }
 
 export async function getCapabilities(): Promise<Capabilities> {

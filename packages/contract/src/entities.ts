@@ -210,6 +210,19 @@ export interface TranscriptReplaceResult {
   truncated: boolean;
 }
 
+/** transcript.replace with `compact: true`: counts instead of every before/after text. */
+export interface TranscriptReplaceCompactResult {
+  dryRun: boolean;
+  /** Segments changed (or that would change). */
+  changed: number;
+  /** Matches over all rules. */
+  replacements: number;
+  /** The rules that matched, in rule order. */
+  rules: { find: string; count: number }[];
+  /** dryRun only: the first few changes, each cut to the changed words plus a little context. */
+  samples?: { id: string; startSec: number; before: string; after: string }[];
+}
+
 /**
  * A transcript.find result line. Matched lines carry the matched substrings and the indexes of the
  * patterns that hit; neighbouring lines requested with `context` carry `context: true` instead.

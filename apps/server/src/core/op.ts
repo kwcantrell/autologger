@@ -4,8 +4,8 @@
 import {
   type ChangeEntity,
   type OpName,
-  type OpOutputs,
   type OpParsed,
+  type OpResult,
   opInputs,
   type Via,
 } from '@autologger/contract';
@@ -70,7 +70,7 @@ export interface OpDef<N extends OpName, P = undefined> {
    * The result is passed to `run` as its third argument.
    */
   prepare?(actor: Actor, input: OpParsed<N>): Promise<P>;
-  run(ctx: Ctx, input: OpParsed<N>, prepared: P): Promise<OpOutputs[N]>;
+  run(ctx: Ctx, input: OpParsed<N>, prepared: P): Promise<OpResult<N, OpParsed<N>>>;
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: heterogeneous registry
@@ -97,12 +97,13 @@ export function snapshot<T extends Record<string, unknown>>(row: T | null | unde
   return rest;
 }
 
-export async function executeOp<N extends OpName>(
+/** Runs op `name`; the result type follows the input (see OpResult; unknown input: either). */
+export async function executeOp<N extends OpName, I = unknown>(
   name: N,
-  rawInput: unknown,
+  rawInput: I,
   actor: Actor,
   surface: Surface,
-): Promise<OpOutputs[N]> {
+): Promise<OpResult<N, I>> {
   const op = registry.get(name) as OpDef<N, unknown> | undefined;
   if (!op?.surfaces.includes(surface)) throw new AppError('not_found', `Unknown op ${name}.`);
   if (actor.user.status === 'disabled') throw forbidden('This account is disabled.');
@@ -153,7 +154,8 @@ export async function executeOp<N extends OpName>(
     sent.add(key);
     publish(topic, message);
   }
-  return result;
+  // The op returned the shape its parsed input asked for, which is the one `I` names.
+  return result as OpResult<N, I>;
 }
 
 /** Ops register themselves on import. */

@@ -133,10 +133,10 @@ async function publishEvents(
 defineOp({
   name: 'events.list',
   description:
-    'All events logged in a session, in timecode order. Each event has `atSec` (seconds from the session start, rounded to ms; lines up with transcript_text @seconds and is the same value events.create/update accept as atSec) and `timecodeFrames` (frame count on the session clock, including startOffsetFrames — see sessions.get for frameRate). atSec is null only when the event has no timecode.',
+    'All events logged in a session, in timecode order. Each event has `atSec` (seconds from the session start, rounded to ms; lines up with transcript_text @seconds and is the same value events.create/update accept as atSec) and `timecodeFrames` (frame count on the session clock, including startOffsetFrames — see sessions.get for frameRate). atSec is null only when the event has no timecode. Pass `compact: true` (recommended for agents, e.g. to check an events_createMany batch) to get only `[{ id, atSec, category, message }]` per event.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, categoryIds, source }) {
+  async run(ctx, { sessionId, categoryIds, source, compact }) {
     const { session } = await requireSession(ctx, sessionId, 'read');
     const rows = await ctx.db
       .select()
@@ -149,7 +149,10 @@ defineOp({
         ),
       )
       .orderBy(asc(events.timecodeFrames), asc(events.createdAt));
-    return eventEntities(ctx, session, rows);
+    const out = await eventEntities(ctx, session, rows);
+    return compact
+      ? out.map(({ id, atSec, category, message }) => ({ id, atSec, category, message }))
+      : out;
   },
 });
 
