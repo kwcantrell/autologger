@@ -5,7 +5,7 @@ import { changeMessage, publish } from '../core/bus.ts';
 import { db, schema } from '../db/client.ts';
 import { type JobRow, toJob } from '../media/jobs.ts';
 
-const { jobs } = schema;
+const { jobs, workers } = schema;
 
 export const MAX_ATTEMPTS = 3;
 export const STUCK_AFTER_MIN = 15;
@@ -135,4 +135,26 @@ export async function recoverStuckJobs(): Promise<JobRow[]> {
     }
   }
   return rows;
+}
+
+/**
+ * Announce (or keep announcing) a running worker and its slots; withJobEstimates sums the live
+ * rows. An upsert, so a row removed by hand comes back on the next beat.
+ */
+export async function beatWorker(
+  id: string,
+  concurrency: number,
+  kindConcurrency: Record<string, number>,
+): Promise<void> {
+  await db
+    .insert(workers)
+    .values({ id, concurrency, kindConcurrency })
+    .onConflictDoUpdate({ target: workers.id, set: { lastSeenAt: sql`now()` } });
+  // Rows of crashed workers stop counting after WORKER_STALE_SEC; drop them after a day.
+  await db.delete(workers).where(sql`${workers.lastSeenAt} < now() - interval '1 day'`);
+}
+
+/** Clean shutdown: stop counting this worker's slots right away. */
+export async function removeWorker(id: string): Promise<void> {
+  await db.delete(workers).where(eq(workers.id, id));
 }
