@@ -497,6 +497,11 @@ describe('question pages and citations', () => {
     expect(page.kind).toBe('question');
 
     const lint = await call(owner, 'wiki.lint', { showId: show.id });
+    // The save reports the same bad citations wiki.lint finds, for that page only.
+    expect(page).toMatchObject({
+      citationCount: 6,
+      badCitations: lint.badCitations[0]!.citations,
+    });
     expect(lint.badCitations).toEqual([
       {
         pageId: page.id,
@@ -531,6 +536,46 @@ describe('question pages and citations', () => {
     const [created] = await call(owner, 'changes.list', { showId: show.id, via: 'mcp' });
     await call(owner, 'changes.revert', { changeId: created!.id });
     expect((await call(owner, 'wiki.lint', { showId: show.id })).counts.citations).toBe(0);
+  });
+
+  it('reports citation count and timecode labels that do not match the range on save', async () => {
+    const { owner, show, session } = await studio();
+    const cite = (label: string, q: string) => `[${label}](/sessions/${session.id}?${q})`;
+    const page = await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'session',
+      sessionId: session.id,
+      title: 'Ep 13 recap',
+      bodyMd: [
+        cite('01:01:01', 't=3661.5&to=3700'),
+        cite('1:01:01–1:01:40 the dog', 't=3661&to=3700.9'),
+        cite('61:01', 't=3661'),
+        cite('Tom on pricing at 00:01:01', 't=3661'),
+        cite('00:01:01', 't=3661.5&to=3700'),
+        cite('\\[01:01:01–01:02:00\\]', 't=3661&to=3700'),
+      ].join('\n'),
+    });
+    const wrong = [
+      { sessionId: session.id, startSec: 3661.5, endSec: 3700, label: '00:01:01' },
+      { sessionId: session.id, startSec: 3661, endSec: 3700, label: '[01:01:01–01:02:00]' },
+    ].map((c) => ({ ...c, problem: 'label_mismatch' }));
+    expect(page).toMatchObject({ citationCount: 6, badCitations: wrong, backlinkCount: 0 });
+    expect((await call(owner, 'wiki.lint', { showId: show.id })).badCitations).toEqual([
+      expect.objectContaining({ pageId: page.id, citations: wrong }),
+    ]);
+
+    const fixed = await call(asAgent(owner), 'wiki.patch', {
+      pageId: page.id,
+      edits: [
+        { find: '[00:01:01]', replace: '[01:01:01]' },
+        { find: '01:02:00\\]', replace: '01:01:40\\]' },
+      ],
+    });
+    expect(fixed).toMatchObject({ revision: 2, citationCount: 6, badCitations: [] });
+    await failsWith(
+      call(await makeUser('stranger@example.com'), 'wiki.patch', { pageId: page.id, append: 'x' }),
+      'not_found',
+    );
   });
 
   it('lists the pages citing a session, kept in step with every write, undo and the backfill', async () => {

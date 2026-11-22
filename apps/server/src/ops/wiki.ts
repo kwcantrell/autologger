@@ -1,11 +1,13 @@
 import {
   normTitle,
   type WikiCitation,
+  type WikiCitationProblem,
   type WikiLint,
   type WikiList,
   type WikiListItem,
   type WikiPage,
   type WikiPageSummary,
+  type WikiSavedCitations,
   wikiCitations,
   wikiLinkTargets,
 } from '@autologger/contract';
@@ -384,10 +386,89 @@ defineOp({
 const AUDIO_END_SLACK_SEC = 1;
 
 /**
- * Check every citation of a show's live pages against its sessions: the session must be in this
- * show (another show's session counts as unknown, revealing nothing about it), `to` must be after
- * `t`, and the range must end within the session's audio (sessions without measured audio are not
- * range-checked). Reads the citation index; no bodies are parsed.
+ * Audio end (seconds from the session start) of the given sessions of a show: null for a session
+ * without measured audio; ids that are not sessions of this show are absent.
+ */
+async function sessionAudioEnds(
+  ctx: Ctx,
+  showId: string,
+  ids: string[],
+): Promise<Map<string, number | null>> {
+  const audioEnd = new Map<string, number | null>();
+  if (ids.length)
+    for (const s of await ctx.db
+      .select({
+        id: sessions.id,
+        // Raw SQL: drizzle leaves columns unqualified in a single-table select, so ${sessions.id}
+        // would bind to the subquery's own id.
+        end: sql<
+          number | null
+        >`(select max(a.start_sec + a.duration_sec)::float from audio_segments a where a.session_id = sessions.id and a.status <> 'failed')`,
+      })
+      .from(sessions)
+      .where(and(eq(sessions.showId, showId), inArray(sessions.id, ids))))
+      audioEnd.set(s.id, s.end);
+  return audioEnd;
+}
+
+/** `H:MM:SS` or `M:SS`, fraction allowed (the web shows a citation's range as HH:MM:SS). */
+const TIMECODE = String.raw`(?:\d{1,2}:[0-5]\d|\d{1,3}):[0-5]\d(?:\.\d+)?`;
+/** A label that starts with a timecode or timecode range: "01:01:01", "[1:01:01–1:02:00] …". */
+const TIMECODE_LABEL = new RegExp(
+  String.raw`^\[?(${TIMECODE})(?:\s*[–—-]\s*(${TIMECODE}))?(?![\d:.])`,
+);
+const timecodeSec = (tc: string) => tc.split(':').reduce((sec, part) => sec * 60 + Number(part), 0);
+
+/**
+ * True when a citation's label starts with a timecode that is not its range (more than a second
+ * off `t`, or off `to` for a range label), e.g. [00:01:01](…?t=3661.5): the chip plays the right
+ * range, but the Markdown misleads anyone reading the source or an export.
+ */
+function labelMismatch(c: WikiCitation): boolean {
+  const m = TIMECODE_LABEL.exec(c.label);
+  if (!m) return false;
+  if (Math.abs(timecodeSec(m[1]!) - c.startSec) > 1) return true;
+  return m[2] != null && c.endSec != null && Math.abs(timecodeSec(m[2]) - c.endSec) > 1;
+}
+
+/**
+ * What is wrong with one citation, given its session's audio end from sessionAudioEnds (undefined:
+ * not a session of this show). The session must be in this show (another show's session counts as
+ * unknown, revealing nothing about it), `to` must be after `t`, the range must end within the
+ * session's audio (sessions without measured audio are not range-checked), and a label that
+ * starts with a timecode must match the range.
+ */
+function citationProblem(
+  c: WikiCitation,
+  end: number | null | undefined,
+): WikiCitationProblem | null {
+  if (end === undefined) return 'unknown_session';
+  if (c.endSec != null && c.endSec <= c.startSec) return 'bad_range';
+  if (end != null && (c.endSec ?? c.startSec) > end + AUDIO_END_SLACK_SEC) return 'past_end';
+  if (labelMismatch(c)) return 'label_mismatch';
+  return null;
+}
+
+/** Citation count and bad citations of a page body just saved by wiki.upsert / wiki.patch. */
+async function savedCitations(
+  ctx: Ctx,
+  showId: string,
+  bodyMd: string,
+): Promise<WikiSavedCitations> {
+  const cites = wikiCitations(bodyMd);
+  const ids = [...new Set(cites.map((c) => c.sessionId))];
+  const audioEnd = await sessionAudioEnds(ctx, showId, ids);
+  const badCitations: WikiSavedCitations['badCitations'] = [];
+  for (const c of cites) {
+    const problem = citationProblem(c, audioEnd.get(c.sessionId));
+    if (problem) badCitations.push({ ...c, problem });
+  }
+  return { citationCount: cites.length, badCitations };
+}
+
+/**
+ * Check every citation of a show's live pages against its sessions (citationProblem). Reads the
+ * citation index; no bodies are parsed.
  */
 async function lintCitations(
   ctx: Ctx,
@@ -417,32 +498,15 @@ async function lintCitations(
     page.cites.push({ ...rest, ...(endSec != null ? { endSec } : {}) });
   }
   const ids = [...new Set(cited.flatMap((r) => r.cites.map((c) => c.sessionId)))];
-  const audioEnd = new Map<string, number | null>();
-  if (ids.length)
-    for (const s of await ctx.db
-      .select({
-        id: sessions.id,
-        // Raw SQL: drizzle leaves columns unqualified in a single-table select, so ${sessions.id}
-        // would bind to the subquery's own id.
-        end: sql<
-          number | null
-        >`(select max(a.start_sec + a.duration_sec)::float from audio_segments a where a.session_id = sessions.id and a.status <> 'failed')`,
-      })
-      .from(sessions)
-      .where(and(eq(sessions.showId, showId), inArray(sessions.id, ids))))
-      audioEnd.set(s.id, s.end);
+  const audioEnd = await sessionAudioEnds(ctx, showId, ids);
   let count = 0;
   const bad: WikiLint['badCitations'] = [];
   for (const r of cited) {
     const problems: WikiLint['badCitations'][number]['citations'] = [];
     for (const c of r.cites) {
       count++;
-      const end = audioEnd.get(c.sessionId);
-      if (end === undefined) problems.push({ ...c, problem: 'unknown_session' });
-      else if (c.endSec != null && c.endSec <= c.startSec)
-        problems.push({ ...c, problem: 'bad_range' });
-      else if (end != null && (c.endSec ?? c.startSec) > end + AUDIO_END_SLACK_SEC)
-        problems.push({ ...c, problem: 'past_end' });
+      const problem = citationProblem(c, audioEnd.get(c.sessionId));
+      if (problem) problems.push({ ...c, problem });
     }
     if (problems.length)
       bad.push({ pageId: r.id, title: r.title, kind: r.kind, citations: problems });
@@ -453,7 +517,7 @@ async function lintCitations(
 defineOp({
   name: 'wiki.lint',
   description:
-    'Check the links of a whole show wiki in one call, the way the wiki renders them. unresolved: pages with [[Target]] / [[Target|label]] links (also [[Target\\|label]] in table cells; links inside code are ignored) that match no page title or alias (case-insensitive, spaces collapsed), with the missing targets as written — create those pages with wiki_upsert or fix the links. orphans: person, topic and bit pages no other page links to (session recaps and question pages are left out). badCitations: pages whose citations ([label](/sessions/<sessionId>?t=<startSec>&to=<endSec>)) are wrong, each with problem "unknown_session" (no session with that id in this show), "bad_range" (to is not greater than t) or "past_end" (the range ends after the session\'s audio; sessions without audio are not range-checked) — fix them with wiki_patch. counts: pages, distinct links, unresolved links, orphans, citations, bad citations. Read-only.',
+    'Check the links of a whole show wiki in one call, the way the wiki renders them. unresolved: pages with [[Target]] / [[Target|label]] links (also [[Target\\|label]] in table cells; links inside code are ignored) that match no page title or alias (case-insensitive, spaces collapsed), with the missing targets as written — create those pages with wiki_upsert or fix the links. orphans: person, topic and bit pages no other page links to (session recaps and question pages are left out). badCitations: pages whose citations ([label](/sessions/<sessionId>?t=<startSec>&to=<endSec>)) are wrong, each with problem "unknown_session" (no session with that id in this show), "bad_range" (to is not greater than t) or "past_end" (the range ends after the session\'s audio; sessions without audio are not range-checked) or "label_mismatch" (the label starts with a timecode such as 01:01:01 or 1:01:01–1:02:00 that is more than a second off t / to — label timecodes are HH:MM:SS from the session start, like the chip) — fix them with wiki_patch; wiki_upsert and wiki_patch also report a page\'s bad citations when it is saved. counts: pages, distinct links, unresolved links, orphans, citations, bad citations. Read-only.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId }): Promise<WikiLint> {
@@ -534,7 +598,7 @@ defineOp({
   description:
     'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated (keeping its title), otherwise a new one is created; pass pageId to rename. bodyMd is raw Markdown text, stored exactly as sent: write real newlines and quotes, not JSON escapes like \\n or \\" inside the text. Link other pages with [[Title]] or [[Title|label]]; wiki_lint finds links to missing pages. Kind "session" pages are recaps tied to sessionId. Kind "question" pages store an answered question: title = the question as asked (e.g. "When did Dana talk about her dog?"), bodyMd = the answer, with a citation for every claim. ' +
     'A citation is a Markdown link to a range of a session: [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), seconds from the session start (the @seconds of transcript_text; `to` optional and greater than t), e.g. [Dana on the dog](/sessions/ses_abc?t=754.2&to=811). The web shows it as a chip with the session title and range (HH:MM:SS–HH:MM:SS) that plays that range, the label as its tooltip. Prefer citations over bare timecodes on every page kind; wiki_lint checks them. Every save keeps a revision. To fix a few sentences of an existing page, use wiki_patch instead of resending the whole body. ' +
-    'Returns the saved page with its body and backlinks; pass `compact: true` (recommended for agents) to get only `{ id, title, kind, revision, unresolvedLinks }`, where unresolvedLinks lists the [[link]] targets in the body that match no page title or alias in the show yet (create those pages, or fix the link; wiki_lint checks the whole wiki).',
+    'Returns the saved page with its body and backlinks; pass `compact: true` (recommended for agents) to get only `{ id, title, kind, revision, unresolvedLinks, citationCount, badCitations }`, where unresolvedLinks lists the [[link]] targets in the body that match no page title or alias in the show yet (create those pages, or fix the link; wiki_lint checks the whole wiki). Both shapes include citationCount (citations in the saved body, repeats counted) and badCitations: the saved page\'s citations that wiki_lint would flag, in body order, as [{ sessionId, startSec, endSec?, label, problem }] with problem "unknown_session", "bad_range", "past_end" or "label_mismatch" (see wiki_lint) — the page is saved anyway; fix them with wiki_patch.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
@@ -605,6 +669,7 @@ defineOp({
     }
     await addRevision(ctx, row);
     await indexWikiLinks(ctx.db, row.id, row.bodyMd);
+    const cited = await savedCitations(ctx, row.showId, row.bodyMd);
     if (input.compact)
       return {
         id: row.id,
@@ -612,8 +677,9 @@ defineOp({
         kind: row.kind,
         revision: row.revision,
         unresolvedLinks: await unresolvedTargets(ctx.db, row.showId, row.bodyMd),
+        ...cited,
       };
-    return fullPage(ctx, row);
+    return { ...(await fullPage(ctx, row)), ...cited };
   },
 });
 
@@ -627,7 +693,7 @@ function occurrences(text: string, find: string): number {
 defineOp({
   name: 'wiki.patch',
   description:
-    'Fix part of a wiki page without resending its body. edits: [{ find, replace }] are exact, case-sensitive text replacements applied in order; each `find` must occur exactly once in the page at that point (otherwise bad_request saying how often it matched; include more surrounding text to make it unique), and nothing is saved unless every edit applies. append (optional) adds Markdown on a new line at the end. Saved as one new revision, undoable from the change log. pageId comes from wiki_list / wiki_get. Returns the page summary (id, title, revision) without the body; read it with wiki_get if needed.',
+    'Fix part of a wiki page without resending its body. edits: [{ find, replace }] are exact, case-sensitive text replacements applied in order; each `find` must occur exactly once in the page at that point (otherwise bad_request saying how often it matched; include more surrounding text to make it unique), and nothing is saved unless every edit applies. append (optional) adds Markdown on a new line at the end. Saved as one new revision, undoable from the change log. pageId comes from wiki_list / wiki_get. Returns the page summary (id, title, revision) without the body, plus citationCount and badCitations for the saved body (as in wiki_upsert); read the body with wiki_get if needed.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { pageId, edits, append }) {
@@ -670,7 +736,7 @@ defineOp({
     await addRevision(ctx, after);
     await indexWikiLinks(ctx.db, after.id, after.bodyMd);
     const [summary] = await summaries(ctx, [after]);
-    return summary!;
+    return { ...summary!, ...(await savedCitations(ctx, after.showId, after.bodyMd)) };
   },
 });
 
