@@ -227,4 +227,51 @@ describe('wiki lint and bulk read', () => {
     const stranger = await makeUser('stranger@example.com');
     await failsWith(call(stranger, 'wiki.list', { showId: show.id, include: 'body' }), 'not_found');
   });
+
+  it('pages through every backlink with wiki.list linksTo', async () => {
+    const { owner, team, show, page: dana } = await pageWithHistory();
+    // 55 topics link to Dana (as written differently), 5 only mention her; plus the Cold open bit.
+    for (let i = 0; i < 60; i++)
+      await call(owner, 'wiki.upsert', {
+        showId: show.id,
+        kind: 'topic',
+        title: `Topic ${String(i).padStart(2, '0')}`,
+        bodyMd: i % 12 === 11 ? 'Dana, no link.' : 'With [[ dana ]].',
+      });
+
+    const got = await call(owner, 'wiki.get', { pageId: dana.id });
+    expect(got).toMatchObject({ backlinkCount: 56 });
+    expect(got.backlinks).toHaveLength(50);
+    const first = await call(owner, 'wiki.list', { showId: show.id, linksTo: dana.id, limit: 50 });
+    expect(first).toMatchObject({ total: 56, nextOffset: 50 });
+    expect(first.pages[0]).toMatchObject({ title: 'Cold open', kind: 'bit' });
+    const rest = await call(owner, 'wiki.list', {
+      showId: show.id,
+      linksTo: dana.id,
+      limit: 50,
+      offset: 50,
+    });
+    expect(rest).toMatchObject({ total: 56, nextOffset: null });
+    expect(rest.pages.map((p) => p.title)).toEqual([
+      'Topic 53',
+      'Topic 54',
+      'Topic 55',
+      'Topic 56',
+      'Topic 57',
+      'Topic 58',
+    ]);
+    const bits = await call(owner, 'wiki.list', { showId: show.id, linksTo: dana.id, kind: 'bit' });
+    expect(bits.total).toBe(1);
+
+    const other = await call(owner, 'shows.create', { teamId: team.id, name: 'Other' });
+    await failsWith(
+      call(owner, 'wiki.list', { showId: other.id, linksTo: dana.id }),
+      'bad_request',
+    );
+    const stranger = await makeUser('stranger@example.com');
+    await failsWith(
+      call(stranger, 'wiki.list', { showId: show.id, linksTo: dana.id }),
+      'not_found',
+    );
+  });
 });
