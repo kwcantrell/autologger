@@ -252,8 +252,20 @@ export interface TranscriptReplaceCompactResult {
 export interface TranscriptFindLine extends TranscriptLine {
   matches?: string[];
   patternIndexes?: number[];
+  /** With `suspect: true`: why this turn may hold two speakers (see SUSPECT_TURN_REASONS). */
+  reasons?: SuspectTurnReason[];
   context?: true;
 }
+
+/**
+ * transcript.find `suspect: true` heuristics, in `counts` order: `question` — a question followed
+ * by at least SUSPECT_QUESTION_WORDS more words in the same turn (a question and its answer);
+ * `long` — a turn longer than SUSPECT_LONG_SEC seconds.
+ */
+export const SUSPECT_TURN_REASONS = ['question', 'long'] as const;
+export type SuspectTurnReason = (typeof SUSPECT_TURN_REASONS)[number];
+export const SUSPECT_QUESTION_WORDS = 20;
+export const SUSPECT_LONG_SEC = 60;
 
 /** A transcript.find line with `idsOnly: true`: enough to target an edit, no text. */
 export interface TranscriptFindId {

@@ -189,7 +189,9 @@ describe('deepgramUrl', () => {
     expect(q.get('model')).toBe('nova-3');
     expect(q.get('smart_format')).toBe('true');
     expect(q.get('punctuate')).toBe('true');
-    expect(q.get('diarize')).toBe('true');
+    expect(q.get('diarize_model')).toBe('latest');
+    // Deepgram rejects requests that set both; the boolean one only reaches the v1 diarizer.
+    expect(q.has('diarize')).toBe(false);
     expect(q.get('utterances')).toBe('true');
     expect(q.has('keyterm')).toBe(false);
   });

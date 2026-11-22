@@ -75,6 +75,13 @@ In production: `node src/worker/main.ts` with the same environment as the app (c
 - **transcribe**: streams the object from S3 to Deepgram, maps utterances to `transcript_segments`
   (speaker `Speaker N`, times offset by the segment's `startSec`) and replaces that segment's previous
   transcript in one transaction. Machine writes are not recorded in the change log.
+  Diarization is requested with `diarize_model=latest` (Deepgram's v2 batch diarizer); the
+  deprecated `diarize=true` always ran v1, in use when speakers came back merged or swapped in two-person
+  interviews (#169). Deepgram takes no speaker-count hint. An utterance whose words change speaker
+  becomes one row per speaker run (`speakerRuns`, ≤ 2-word blips under 0.3 s absorbed). Each
+  word keeps its speaker in `words[].sp`; transcripts made before that have none, so they can only
+  be re-segmented by re-transcribing (`media.retranscribe`). Agents spot likely merged turns with
+  `transcript.find` `suspect: true` and split them with `transcript.splitSegment`.
 - **youtube_import**: yt-dlp downloads the audio to a temp dir, the worker uploads it, creates an
   `origin = 'youtube'` segment at `startSec` 0, sets `sessions.source_kind/source_url` and enqueues
   `transcribe` and `waveform`.
