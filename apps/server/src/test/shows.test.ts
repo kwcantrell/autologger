@@ -33,8 +33,24 @@ describe('show setup over MCP', () => {
 
     const log = await call(agent, 'changes.list', { showId: show.id });
     expect(log.every((c) => c.via === 'mcp' && c.entity === 'category')).toBe(true);
-    // 3 default creates + 2 removals + 1 edit + 2 adds
-    expect(log).toHaveLength(8);
+    const summaries = (kind: string) =>
+      log
+        .filter((c) => c.kind === kind)
+        .map((c) => c.summary)
+        .sort();
+    expect(summaries('create')).toEqual(
+      [
+        'Added default button “Scene”',
+        'Added default button “Audio issue”',
+        'Added default button “Note”',
+        'Added button “Proof”',
+        'Added button “On screen”',
+      ].sort(),
+    );
+    expect(summaries('update')).toEqual(['Edited button “Chapter”']);
+    expect(summaries('delete')).toEqual(
+      ['Removed button “Audio issue”', 'Removed button “Note”'].sort(),
+    );
 
     const rename = log.find((c) => c.kind === 'update')!;
     await call(agent, 'changes.revert', { changeId: rename.id });
