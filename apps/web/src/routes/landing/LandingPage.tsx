@@ -21,9 +21,17 @@ import {
   SheetTrigger,
 } from '@/shared/components/ui/sheet';
 import { cn } from '@/shared/lib/utils';
-import { MCP_DOCS_HREF, NAV_GROUPS, type NavLink, PRODUCT_LINKS, SIGN_IN_HREF } from './links';
+import {
+  ASK_PLUGIN_HREF,
+  MCP_DOCS_HREF,
+  NAV_GROUPS,
+  type NavLink,
+  PRODUCT_LINKS,
+  SIGN_IN_HREF,
+} from './links';
 import {
   AgentsMock,
+  CompileMock,
   DashboardMock,
   ExportMock,
   ImportMock,
@@ -363,12 +371,26 @@ const FEATURES: Feature[] = [
     id: 'wiki',
     eyebrow: 'Show wiki',
     title: "Your show's memory, linked together.",
-    body: 'Every show keeps a Markdown wiki of people, recurring bits and session recaps. Pages link with [[double brackets]], and each page lists the pages that link to it.',
+    body: 'Every show keeps a Markdown wiki of people, recurring bits, session recaps and answered questions. Pages link with [[double brackets]] and cite the exact range of a session they come from, so the wiki doubles as a knowledge base you can check.',
     points: [
-      'Revision history for every page',
-      'Lint for links to missing pages and for orphaned pages',
+      'Citations open the session and play just that range',
+      'Each session lists the wiki pages that cite it',
+      'Revision history for every page, and lint for broken links and citations',
     ],
     mock: <WikiMock />,
+  },
+  {
+    id: 'compilations',
+    eyebrow: 'Ask & compile',
+    title: 'Ask the archive. Watch the answer.',
+    body: 'Ask a question about a show and an agent answers with the ranges in each episode where it comes up, saved to the wiki as a cited question page. When the episodes came from YouTube, AutoLogger cuts those ranges into one video you can play or download.',
+    points: [
+      'Answers are kept as question pages, so the knowledge base grows with every question',
+      'Built on the server: only the cited sections are downloaded, joined into a 720p MP4',
+      'The Compilations page plays, downloads and deletes them',
+    ],
+    mock: <CompileMock />,
+    link: { label: 'The autologger-ask plugin', href: ASK_PLUGIN_HREF, hint: '' },
   },
   {
     id: 'agents',
@@ -378,7 +400,7 @@ const FEATURES: Feature[] = [
     points: [
       'The Agents tab lists every change by client and tool',
       'Undo a single change, or every change from one call at once',
-      'Ready-made skills for topics, moments, dashboards, wiki and briefs',
+      'Ready-made skills for topics, moments, dashboards, wiki, briefs and questions',
     ],
     mock: <AgentsMock />,
     link: { label: 'Connect an agent', href: MCP_DOCS_HREF, hint: '' },
@@ -483,7 +505,7 @@ function Developers() {
     },
     {
       title: 'Plugin marketplace',
-      body: 'Install the autologger plugin for Claude Code: skills to chapter, log moments, build dashboards, keep the wiki and write briefs.',
+      body: 'Install the autologger plugin for Claude Code: skills to chapter, log moments, build dashboards, keep the wiki and write briefs — and autologger-ask to answer questions with cited clips and compilations.',
       link: NAV_GROUPS[1].links[0],
       cta: 'Browse the plugins',
     },
