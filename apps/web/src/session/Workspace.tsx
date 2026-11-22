@@ -24,6 +24,7 @@ import { AudioMenu, UploadBanner } from './AudioMenu';
 import { usePlayer } from './audio/usePlayer';
 import { useRecorder } from './audio/useRecorder';
 import { WorkspaceContext, type Workspace as WorkspaceCtx, type WorkspaceTab } from './context';
+import { SessionDetailsButton } from './SessionDetailsDialog';
 import { TransportStrip } from './TransportStrip';
 import { EventsTab } from './tabs/EventsTab';
 import { ExportTab } from './tabs/ExportTab';
@@ -263,6 +264,7 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
                   segments={media.data}
                   mediaError={media.error}
                 />
+                <SessionDetailsButton session={session} />
                 <SessionWikiButton session={session} />
               </div>
             </div>

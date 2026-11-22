@@ -1,6 +1,6 @@
 import type { Session } from '@autologger/contract';
 import { AudioLines, MoreVertical, Plus, Search, Settings, Upload, X } from 'lucide-react';
-import { type ReactElement, useEffect, useRef, useState } from 'react';
+import { type ReactElement, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useLocation } from 'wouter';
 import { qk, useOpMutation, useSessions } from '@/api/queries';
@@ -8,6 +8,7 @@ import { errorMessage } from '@/api/rpc';
 import { LoadingVideo } from '@/components/RouteState';
 import { newSessionOpen, settingsOpen } from '@/lib/store';
 import { fmtSec, formatFrames, isMediaOnly, useTransportClock } from '@/lib/timecode';
+import { SessionDetailsDialog } from '@/session/SessionDetailsDialog';
 import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
@@ -18,8 +19,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/shared/components/ui/dropdown-menu';
-import { Field, FieldLabel } from '@/shared/components/ui/field';
-import { Input } from '@/shared/components/ui/input';
 import {
   Sidebar,
   SidebarContent,
@@ -39,7 +38,6 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/components/ui/tooltip';
 import { cn } from '@/shared/lib/utils';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
-import { Dialog } from '@/shared/ui/Dialog';
 import { Tooltip as SimpleTooltip } from '@/shared/ui/Tooltip';
 import { fmtDateOnly } from '@/shared/utils/fmtDateOnly';
 import { useActive } from './useActive';
@@ -316,11 +314,9 @@ function useSessionActions(s: Session) {
   const invalidate = () => [qk.sessionsAll, qk.session(s.id)];
   const archive = useOpMutation('sessions.archive', { invalidate });
   const del = useOpMutation('sessions.delete', { invalidate: () => [qk.sessionsAll] });
-  const update = useOpMutation('sessions.update', { invalidate });
 
   return {
     confirmElement,
-    update,
     async archive(archived: boolean) {
       const ok = await confirm(
         archived
@@ -409,7 +405,7 @@ function SessionCard({
   onClose: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [renaming, setRenaming] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const actions = useSessionActions(s);
   const canWrite = s.access !== 'read';
   return (
@@ -436,7 +432,7 @@ function SessionCard({
       </SidebarMenuButton>
       <CardMenu open={menuOpen} onOpenChange={setMenuOpen}>
         {isActive && <DropdownMenuItem onClick={onClose}>Close session</DropdownMenuItem>}
-        {canWrite && <DropdownMenuItem onClick={() => setRenaming(true)}>Rename</DropdownMenuItem>}
+        <DropdownMenuItem onClick={() => setDetailsOpen(true)}>Details…</DropdownMenuItem>
         {canWrite && (
           <DropdownMenuItem onClick={() => void actions.archive(true)}>Archive</DropdownMenuItem>
         )}
@@ -449,25 +445,7 @@ function SessionCard({
           <DropdownMenuItem disabled>Read-only: you can view this show</DropdownMenuItem>
         )}
       </CardMenu>
-      {renaming && (
-        <RenameDialog
-          initial={s.title}
-          pending={actions.update.isPending}
-          onClose={() => setRenaming(false)}
-          onSave={(title) =>
-            actions.update.mutate(
-              { sessionId: s.id, title },
-              {
-                onSuccess: () => {
-                  showToast('Session updated.');
-                  setRenaming(false);
-                },
-                onError: (e) => showToast(errorMessage(e), true),
-              },
-            )
-          }
-        />
-      )}
+      {detailsOpen && <SessionDetailsDialog session={s} onClose={() => setDetailsOpen(false)} />}
       {actions.confirmElement}
     </SidebarMenuItem>
   );
@@ -492,54 +470,5 @@ function ArchivedCard({ session: s }: { session: Session }) {
       )}
       {actions.confirmElement}
     </SidebarMenuItem>
-  );
-}
-
-export function RenameDialog({
-  initial,
-  pending,
-  onSave,
-  onClose,
-}: {
-  initial: string;
-  pending: boolean;
-  onSave: (title: string) => void;
-  onClose: () => void;
-}) {
-  const [title, setTitle] = useState(initial);
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    const t = setTimeout(() => ref.current?.select(), 0);
-    return () => clearTimeout(t);
-  }, []);
-  const save = () => {
-    const t = title.trim();
-    if (t) onSave(t);
-  };
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()} title="Rename session">
-      <Field className="mb-4">
-        <FieldLabel htmlFor="rename-session-title">Session name</FieldLabel>
-        <Input
-          ref={ref}
-          id="rename-session-title"
-          maxLength={200}
-          value={title}
-          autoFocus
-          onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') save();
-          }}
-        />
-      </Field>
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button onClick={save} disabled={pending || !title.trim()}>
-          {pending ? 'Saving…' : 'Save'}
-        </Button>
-      </div>
-    </Dialog>
   );
 }
