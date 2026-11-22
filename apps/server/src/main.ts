@@ -9,6 +9,7 @@ import { createApp } from './http/app.ts';
 import { backfillWikiLinks } from './ops/wiki.ts';
 import { attachWebSockets } from './ws/upgrade.ts';
 import './ws/session.ts';
+import './ws/show.ts';
 import './ws/companion.ts';
 import './mcp/index.ts';
 

@@ -171,20 +171,23 @@ const subscribeVisibility = (onChange: () => void) => {
 const isTabVisible = () => !document.hidden;
 
 /**
- * Background jobs of a whole show (playlist imports, transcriptions). While any job is unfinished
- * and the tab is visible it long-polls jobs.list (waitSec) so status changes show up at once;
- * otherwise it refreshes every minute to notice imports started elsewhere (agents, other tabs).
- * A hidden tab stops polling and catches up once when it is shown again. Session sockets also
- * invalidate it (live.ts).
+ * Background jobs of a whole show (playlist imports, transcriptions). `live`: the show socket
+ * (liveShow.ts) is open and pushes every job change, so it doesn't poll while idle (only a
+ * once-a-minute refresh of queue estimates while jobs are unfinished). Otherwise, while any job is
+ * unfinished and the tab is visible it long-polls jobs.list (waitSec) so status changes show up at
+ * once, and else it refreshes every minute to notice imports started elsewhere (agents, other
+ * tabs); a hidden tab stops polling and catches up once when it is shown again. Session sockets
+ * also invalidate it (live.ts).
  */
-export function useShowJobs(showId: string | undefined) {
+export function useShowJobs(showId: string | undefined, live = false) {
   const qc = useQueryClient();
   const visible = useSyncExternalStore(subscribeVisibility, isTabVisible, () => true);
   const q = useQuery<ShowJobs, RpcError>({
     queryKey: qk.showJobs(showId ?? ''),
     queryFn: () => fetchShowJobs(showId ?? ''),
     enabled: !!showId,
-    refetchInterval: 60_000,
+    // Live: only to refresh queue positions and estimates, which other shows' jobs move.
+    refetchInterval: (query) => (!live || query.state.data?.active.length ? 60_000 : false),
     // The visibility effect below does the one catch-up refetch.
     refetchOnWindowFocus: false,
     retry: false,
@@ -193,13 +196,13 @@ export function useShowJobs(showId: string | undefined) {
 
   const wasVisible = useRef(visible);
   useEffect(() => {
-    if (visible && !wasVisible.current && showId)
+    if (visible && !wasVisible.current && showId && !live)
       void qc.invalidateQueries({ queryKey: qk.showJobs(showId) });
     wasVisible.current = visible;
-  }, [visible, showId, qc]);
+  }, [visible, showId, live, qc]);
 
   useEffect(() => {
-    if (!showId || !pending || !visible) return;
+    if (!showId || !pending || !visible || live) return;
     const abort = new AbortController();
     const sleep = (ms: number) =>
       new Promise<void>((resolve) => {
@@ -237,9 +240,9 @@ export function useShowJobs(showId: string | undefined) {
         if (rest > 0) await sleep(rest);
       }
     })();
-    // Unmount, show change, hidden tab or no more pending jobs: drop the waiting request.
+    // Unmount, show change, hidden tab, socket open or no more pending jobs: drop the request.
     return () => abort.abort();
-  }, [showId, pending, visible, qc]);
+  }, [showId, pending, visible, live, qc]);
   return q;
 }
 export const useChanges = (sessionId: string, via: Via | 'all') =>
