@@ -2,6 +2,7 @@
 
 import type { SearchHit } from '@autologger/contract';
 import { fmtShort } from '@/lib/timecode';
+import { fmtDateOnly } from '@/shared/utils/fmtDateOnly';
 
 /** How long typing must pause before a search runs. */
 export const SEARCH_DEBOUNCE_MS = 200;
@@ -12,6 +13,12 @@ export const isSearchable = (q: string) => q.trim().length >= MIN_QUERY;
 export type MomentHit = SearchHit & { kind: 'transcript' | 'topic' | 'event' };
 export const isMoment = (h: SearchHit): h is MomentHit =>
   h.kind === 'transcript' || h.kind === 'topic' || h.kind === 'event';
+
+/** "Show · Nov 8, 2026" — the date tells apart sessions with the same title. */
+export const showAndDate = (h: SearchHit): string => {
+  const date = fmtDateOnly(h.sessionDate);
+  return date ? `${h.showName} · ${date}` : h.showName;
+};
 
 export const sessionHref = (sessionId: string) => `/sessions/${encodeURIComponent(sessionId)}`;
 export const wikiHref = (pageId: string) => `/wiki/${encodeURIComponent(pageId)}`;

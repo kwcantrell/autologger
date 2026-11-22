@@ -293,6 +293,11 @@ export interface SearchHit {
   sessionId: string | null;
   showId: string;
   sessionTitle: string | null;
+  /**
+   * The session's episode date (`YYYY-MM-DD`), or its creation time (ISO instant) when it has no
+   * episode date — tells apart sessions with the same title. Null for wiki hits.
+   */
+  sessionDate: string | null;
   showName: string;
   title: string;
   snippet: string;

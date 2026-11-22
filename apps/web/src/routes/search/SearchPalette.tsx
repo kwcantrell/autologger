@@ -22,6 +22,7 @@ import { Kbd, KbdGroup } from '@/shared/components/ui/kbd';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { isOverlayOpen } from '@/shared/ui/overlayOpen';
 import { Tooltip } from '@/shared/ui/Tooltip';
+import { fmtDateOnly } from '@/shared/utils/fmtDateOnly';
 import { SearchSnippet } from './SearchSnippet';
 import {
   groupHits,
@@ -30,6 +31,7 @@ import {
   momentLabel,
   SEARCH_DEBOUNCE_MS,
   searchPageHref,
+  showAndDate,
   untitled,
 } from './searchLinks';
 
@@ -176,7 +178,7 @@ function PaletteBody({ onDone }: { onDone: () => void }) {
               >
                 <span className="flex w-full min-w-0 items-baseline gap-2">
                   <span className="truncate font-medium">{untitled(h.title)}</span>
-                  <span className="ml-auto shrink-0 text-xs text-si-dim">{h.showName}</span>
+                  <span className="ml-auto shrink-0 text-xs text-si-dim">{showAndDate(h)}</span>
                 </span>
                 {h.snippet && <SearchSnippet text={h.snippet} className="line-clamp-2 text-xs" />}
               </CommandItem>
@@ -197,6 +199,9 @@ function PaletteBody({ onDone }: { onDone: () => void }) {
                     {momentLabel(h)}
                   </span>
                   <span className="truncate">{untitled(h.sessionTitle)}</span>
+                  {h.sessionDate && (
+                    <span className="ml-auto shrink-0">{fmtDateOnly(h.sessionDate)}</span>
+                  )}
                 </span>
                 <SearchSnippet text={h.snippet} className="line-clamp-2 text-sm" />
               </CommandItem>
