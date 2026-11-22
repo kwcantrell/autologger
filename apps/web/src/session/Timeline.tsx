@@ -131,6 +131,17 @@ export function Timeline({
   useEffect(() => {
     syncView();
   }, [zoom, syncView]);
+  // …and whenever the timeline changes size without scrolling (window resize, sidebar toggle,
+  // layout shifts): otherwise the stored window goes stale and the waveform is drawn for the
+  // wrong stretch, out of line with the markers and ruler.
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    const ro = new ResizeObserver(syncView);
+    ro.observe(vp);
+    if (vp.firstElementChild) ro.observe(vp.firstElementChild);
+    return () => ro.disconnect();
+  }, [syncView]);
 
   // + / − zoom keys.
   useEffect(() => {
@@ -235,9 +246,14 @@ export function Timeline({
     window.addEventListener('pointerup', up);
   };
 
+  // Ruler labels, each placed at its own time (like markers, the playhead and the waveform) —
+  // not spread with justify-between, which drifts from the time it names.
   const ticks = useMemo(() => {
     const count = Math.min(29, Math.max(7, Math.round(5 + zoom * 3)));
-    return Array.from({ length: count }, (_, i) => fmtSec((i * totalSec) / (count - 1)));
+    return Array.from({ length: count }, (_, i) => {
+      const sec = (i * totalSec) / (count - 1);
+      return { sec, label: fmtSec(sec) };
+    });
   }, [zoom, totalSec]);
 
   const chipColor = current?.event.color ?? 'var(--si-dim)';
@@ -365,12 +381,38 @@ export function Timeline({
             <span className={PLAYHEAD} style={{ left: pct(playheadSec) }} aria-hidden="true" />
           </div>
           {/* Ticks */}
-          <div className="h-[0.32rem]" aria-hidden="true" />
-          <div className="pointer-events-none flex w-full justify-between gap-2 px-[0.35rem] pt-0.5 font-tc text-[0.6875rem] font-medium leading-none tabular-nums text-si-dim [text-shadow:0_1px_2px_var(--si-bg)]">
+          <div
+            className="pointer-events-none relative h-[1.15rem] w-full font-tc text-[0.6875rem] font-medium leading-none tabular-nums text-si-dim [text-shadow:0_1px_2px_var(--si-bg)]"
+            aria-hidden="true"
+          >
             {ticks.map((t, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: ticks are fixed positional labels
-              <span key={i} className={i % 2 === 1 ? 'max-md:hidden' : undefined}>
-                {t}
+              <span
+                // biome-ignore lint/suspicious/noArrayIndexKey: ticks are fixed positional labels
+                key={i}
+                className={cn('absolute top-0', i % 2 === 1 && 'max-md:hidden')}
+                style={{ left: pct(t.sec) }}
+              >
+                {/* Tick mark exactly at the time; the label is centred on it, except the first
+                    and last, which stay inside the track. */}
+                <span
+                  className={cn(
+                    'absolute top-0 h-[0.3rem] w-px bg-si-line',
+                    i === ticks.length - 1 && '-translate-x-full',
+                  )}
+                />
+                <span
+                  className="absolute top-[0.45rem] whitespace-nowrap"
+                  style={{
+                    transform:
+                      i === 0
+                        ? 'translateX(0.2rem)'
+                        : i === ticks.length - 1
+                          ? 'translateX(calc(-100% - 0.2rem))'
+                          : 'translateX(-50%)',
+                  }}
+                >
+                  {t.label}
+                </span>
               </span>
             ))}
           </div>
