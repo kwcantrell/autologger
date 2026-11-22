@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
-import { Redirect } from 'wouter';
+import { lazy, Suspense, useEffect } from 'react';
+import { Redirect, useLocation } from 'wouter';
 import { qk, useMe } from '@/api/queries';
 import { auth } from '@/api/rpc';
 import { GATE_PAGE, LoadingVideo, PANEL, RouteState } from '@/components/RouteState';
@@ -9,6 +9,12 @@ import { Card } from '@/shared/components/ui/card';
 import { AppShell } from './AppShell';
 import { Onboarding } from './Onboarding';
 
+// Signed-out visitors to `/` see the public landing page; loaded on demand so it never weighs on
+// the signed-in app's bundle.
+const LandingPage = lazy(() =>
+  import('@/routes/landing/LandingPage').then((m) => ({ default: m.LandingPage })),
+);
+
 export function currentPath() {
   return `${location.pathname}${location.search}`;
 }
@@ -16,14 +22,14 @@ export function currentPath() {
 export function RootGate() {
   const me = useMe();
   const qc = useQueryClient();
+  const [path] = useLocation();
 
-  if (me.isPending) {
-    return (
-      <div className={GATE_PAGE} role="status" aria-busy="true" aria-label="Loading">
-        <LoadingVideo />
-      </div>
-    );
-  }
+  const loading = (
+    <div className={GATE_PAGE} role="status" aria-busy="true" aria-label="Loading">
+      <LoadingVideo />
+    </div>
+  );
+  if (me.isPending) return loading;
   if (me.isError) {
     return (
       <RouteState
@@ -42,6 +48,13 @@ export function RootGate() {
       >
         Couldn't reach the server. Check your connection and try again.
       </RouteState>
+    );
+  }
+  if (!me.data && path === '/') {
+    return (
+      <Suspense fallback={loading}>
+        <LandingPage />
+      </Suspense>
     );
   }
   if (!me.data)
