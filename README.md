@@ -23,6 +23,9 @@ npm run dev:web                            # SPA on :5173, proxies /api and /ws
 npm run dev:worker -w @autologger/server   # transcription + YouTube jobs
 ```
 
+The worker needs `yt-dlp` on the host for YouTube import. To skip installing it, run the worker in
+Docker instead of `npm run dev:worker`: `docker compose -f compose.dev.yaml --profile worker up -d --build`.
+
 Open http://localhost:5173 and sign in. The **first account** becomes the instance admin; later
 accounts wait for approval unless they were invited to a team or listed in `SUPERADMIN_EMAILS`.
 

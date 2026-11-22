@@ -15,13 +15,16 @@ COPY packages/contract packages/contract
 COPY apps/web apps/web
 RUN npm run build -w @autologger/web
 
-FROM node:24-slim AS runtime
-# ffmpeg + yt-dlp are used by the worker for YouTube import.
+# Node plus the worker's system tools: ffmpeg + yt-dlp for YouTube import.
+# Also the base of the dev worker in compose.dev.yaml, which mounts the source instead of copying it.
+FROM node:24-slim AS tools
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl python3 \
   && curl -fsSL -o /usr/local/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
   && chmod +x /usr/local/bin/yt-dlp \
   && apt-get purge -y curl && rm -rf /var/lib/apt/lists/*
+
+FROM tools AS runtime
 WORKDIR /app
 ENV NODE_ENV=production WEB_DIST=/app/apps/web/dist PORT=8080
 COPY --from=deps /app/node_modules node_modules
