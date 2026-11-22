@@ -8,6 +8,7 @@ import { DownloadIcon, Trash2Icon } from 'lucide-react';
 import { Link } from 'wouter';
 import { useCapabilities, useCompilations, useDeleteCompilation } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
+import { fmtEta } from '@/app/ShowJobs';
 import { useActive } from '@/app/useActive';
 import { PageFrame, RouteLoadingState } from '@/components/RouteState';
 import { fmtShort } from '@/lib/timecode';
@@ -32,6 +33,19 @@ const STATUS_LABEL: Record<Compilation['status'], string> = {
   failed: 'Failed',
 };
 
+/** "next in line · about 2 min left" from a compilation's queuePosition and etaSec, or null. */
+function fmtWait(c: Compilation): string | null {
+  const parts = [
+    c.queuePosition === undefined
+      ? null
+      : c.queuePosition === 0
+        ? 'next in line'
+        : `${c.queuePosition} job${c.queuePosition === 1 ? '' : 's'} ahead`,
+    fmtEta(c.etaSec),
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : null;
+}
+
 const clipHref = (sessionId: string, startSec: number) =>
   `/sessions/${encodeURIComponent(sessionId)}?t=${Math.round(startSec * 100) / 100}`;
 
@@ -47,6 +61,7 @@ function CompilationCard({
   deleting: boolean;
 }) {
   const building = c.status === 'queued' || c.status === 'running';
+  const wait = building ? fmtWait(c) : null;
   return (
     <li className="flex min-w-0 flex-col gap-3 rounded-ctl border border-si-line bg-si-panel p-4">
       <div className="flex min-w-0 items-start gap-3">
@@ -72,6 +87,7 @@ function CompilationCard({
       {building && (
         <p role="status" className="m-0 text-sm text-si-muted">
           {c.progress ?? 'Waiting for the worker'}
+          {wait && ` · ${wait}`}
         </p>
       )}
       {c.status === 'failed' && (
