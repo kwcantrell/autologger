@@ -10,14 +10,14 @@ Paths below are relative to `web/src/` unless absolute. "COPY" = safe to copy ve
 
 ## 0. Quick map
 
-| Area          | Entry file                                          | Notes                                                                                                                                                                                                                                                        |
-| ------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Document/head | `app/(index)/layout.page.tsx`                       | Title "AutoLogger", favicon `/static/logo-autologger-transparent.png`, apple icon `/static/logo-autologger-app.png`, `themeColor #101216`, preloads 3 fonts. Body has `data-v4-transport="rolling"` (legacy attribute; harmless). Port to Vite `index.html`. |
-| Client root   | `pages/index/IndexRoot.tsx`                         | `QueryClientProvider` (retry 1, staleTime 0) → `ThemeProvider` → `TooltipProvider delay=400` → `AppLocationRouter` (wouter) → `RootGate`.                                                                                                                    |
-| Auth gate     | `pages/index/RootGate.tsx`                          | profile query: loading → `AppLoadingSkeleton` with looping brand video; error → `RouteState frame="gate"` card "Couldn't reach the server…" + full-width 44px "Try again"; logged-out → `LoginPage`; else `AppShell`.                                        |
-| Shell         | `pages/index/AppShell.tsx`                          | SidebarProvider root carrying `data-transport`, TopBar, V6Rail, `<main>` with route switch + overlays.                                                                                                                                                       |
-| Routes        | `AppShell.tsx` + `shared/utils/loginReturnPath.ts`  | See section 3.                                                                                                                                                                                                                                               |
-| Theme         | `shared/theme/tailwind.css` + `shadcn-tailwind.css` | See section 1.                                                                                                                                                                                                                                               |
+| Area          | Entry file                                          | Notes                                                                                                                                                                                                                                                                                              |
+| ------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Document/head | `app/(index)/layout.page.tsx`                       | Title "AutoLogger", favicon `/static/logo-autologger-transparent.png`, apple icon `/static/logo-autologger-app.png`, `themeColor #101216`, preloads 3 fonts. Body has `data-v4-transport="rolling"` (legacy attribute; harmless). Port to Vite `index.html`.                                       |
+| Client root   | `pages/index/IndexRoot.tsx`                         | `QueryClientProvider` (retry 1, staleTime 0) → `ThemeProvider` → `TooltipProvider delay=400` → `AppLocationRouter` (wouter) → `RootGate`.                                                                                                                                                          |
+| Auth gate     | `pages/index/RootGate.tsx`                          | profile query: loading → `AppLoadingSkeleton` with looping brand video; error → `RouteState frame="gate"` card "Couldn't reach the server…" + full-width 44px "Try again"; logged-out → public landing page at `/` (`/login` with `LANDING_PAGE=0`), `/login?return=…` elsewhere; else `AppShell`. |
+| Shell         | `pages/index/AppShell.tsx`                          | SidebarProvider root carrying `data-transport`, TopBar, V6Rail, `<main>` with route switch + overlays.                                                                                                                                                                                             |
+| Routes        | `AppShell.tsx` + `shared/utils/loginReturnPath.ts`  | See section 3.                                                                                                                                                                                                                                                                                     |
+| Theme         | `shared/theme/tailwind.css` + `shadcn-tailwind.css` | See section 1.                                                                                                                                                                                                                                                                                     |
 
 ---
 
@@ -232,6 +232,9 @@ Navigation goes through `pages/index/navigation.ts` `navigate(path,{replace})`, 
   - Default content: card `max-w-[25rem] rounded-v5-lg (12px) border-v5-border-strong bg-si-panel-2 px-7 py-9 text-center` with the wordmark "AutoLogger" (League Gothic bold 2.25rem, uppercase, tracking 0.02em).
   - RootGate replaces the card with the looping brand video `assets/video/AutoLogger_Small.webm` (`.autologger-loading-video__media`, muted, autoplay, loop).
 - **Error:** `RouteState frame="gate" role="alert" title="AutoLogger"`, copy "Couldn't reach the server. Check your connection and try again.", full-width 44px primary "Try again" ("Retrying…" while fetching).
+- **Signed out** (rebuild: `apps/web/src/app/RootGate.tsx`):
+  - At `/`: the public landing page (`apps/web/src/routes/landing/LandingPage.tsx`, lazy-loaded so it stays out of the signed-in bundle). The server's `LANDING_PAGE` setting (default `1`, reported as `landingPage` in `/api/capabilities`) turns it off: with `LANDING_PAGE=0`, `/` redirects to `/login`. While capabilities load the loading frame shows; if they fail to load, the landing page stays on. Its documentation links (Docs menu, MCP and Companion links) point at the upstream `docs/` files unless the server sets `DOCS_URL` (reported as `docsUrl`), which replaces that base and keeps the file names; links to the upstream repos stay.
+  - Any other path (deep link): redirect to `/login?return=<path and query>`, so sign-in returns there.
 - **RouteState** (generic empty/error panel, built on `ui/empty`):
   - Same card as above; title League Gothic 2.25rem uppercase.
   - Optional badge above the title: 0.6875rem semibold uppercase, tracking 0.14em, muted.
@@ -267,6 +270,7 @@ Navigation goes through `pages/index/navigation.ts` `navigate(path,{replace})`, 
 - **Divider row:** separators around "New to AutoLogger?" (0.625rem, tracking 0.18em, uppercase).
 - **Second button:** outline h-11 "Create an account with Google", label colour `rgba(229,238,252,0.78)`.
 - **Fine print** (0.78rem): "Your account is created automatically the first time you sign in with Google. There is no separate sign-up form."
+- **"What is AutoLogger?"** (rebuild): a small muted link under the card back to the landing page at `/`. It follows the same setting: hidden with `LANDING_PAGE=0`, shown when capabilities fail to load.
 
 ### 4.3 HomeRoute (`components/HomeRoute.tsx`): `/`, no session open
 
