@@ -122,5 +122,9 @@ In production: `node src/worker/main.ts` with the same environment as the app (c
   `MEDIA_SWEEP_ORPHAN_GRACE_HOURS`, so in-flight imports and compiles are left alone. A
   transaction-level advisory lock lets one worker sweep at a time (others skip that round). Every
   removal is logged (`media sweep: removed …`); `MEDIA_SWEEP_DRY_RUN=1` logs `would remove` instead.
+  Each run ends with one summary line, also when nothing was found (`media sweep (dry run): 0 stuck
+  uploads, 1 orphan prefix, 0 compilation objects would be removed; 1 orphan within grace; 12 s`),
+  and a worker that finds the lock held logs `media sweep: skipped, another worker holds the sweep
+  lock`.
 - Realtime: the worker publishes `audio_segment` / `job` changes and `transcript_segment` /
   `session` invalidations through the bus (Postgres NOTIFY), so open session pages update live.
