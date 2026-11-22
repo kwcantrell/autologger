@@ -288,16 +288,46 @@ defineOp({
 defineOp({
   name: 'transcript.renameSpeaker',
   description:
-    'Rename a speaker label across the whole session transcript (e.g. "Speaker 1" → "Dana").',
+    'Rename a speaker label in a session transcript (e.g. "Speaker 1" → "Dana"): every segment labelled `from` gets the label `to`. ' +
+    'Optional fromSec/toSec (seconds from session start, as in transcript_text `@seconds`) limit it to segments that START in [fromSec, toSec), e.g. `{ fromSec: 0, toSec: 47, to: "Promo" }` for an intro. With a range, `from` may be omitted to relabel every segment in it whatever its speaker; without a range `from` is required and the whole session is renamed. ' +
+    'A segment that starts inside the range but runs past it is renamed whole: split it first with transcript.splitSegment (atSec or atText). ' +
+    'Each renamed segment is its own change-log entry, undoable from the Agents tab. Returns `{ updated }`, the number of segments renamed.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, from, to }) {
-    await requireSession(ctx, sessionId, 'write');
+  async run(ctx, { sessionId, from, to, fromSec, toSec }) {
+    const { session } = await requireSession(ctx, sessionId, 'write');
+    const where = and(
+      eq(ts.sessionId, sessionId),
+      from !== undefined ? eq(ts.speaker, from) : undefined,
+      fromSec !== undefined ? gte(ts.startSec, fromSec) : undefined,
+      toSec !== undefined ? lt(ts.startSec, toSec) : undefined,
+      sql`${ts.speaker} <> ${to}`,
+    );
+    const before = await ctx.db.select().from(ts).where(where).orderBy(asc(ts.startSec));
+    if (before.length === 0) return { updated: 0 };
     const rows = await ctx.db
       .update(ts)
       .set({ speaker: to, updatedAt: new Date() })
-      .where(and(eq(ts.sessionId, sessionId), eq(ts.speaker, from)))
-      .returning({ id: ts.id });
+      .where(
+        inArray(
+          ts.id,
+          before.map((r) => r.id),
+        ),
+      )
+      .returning();
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const r of before) {
+      await ctx.record({
+        entity: 'transcript_segment',
+        entityId: r.id,
+        kind: 'update',
+        summary: `Renamed speaker "${r.speaker}" to "${to}" at ${secondsToClock(r.startSec)}`,
+        showId: session.showId,
+        sessionId,
+        before: snapshot(r),
+        after: snapshot(byId.get(r.id)),
+      });
+    }
     ctx.publish(`session:${sessionId}`, { type: 'invalidate', entity: 'transcript_segment' });
     return { updated: rows.length };
   },
@@ -314,6 +344,43 @@ function timedWords(row: SegmentRow): SegmentRow['words'] {
 }
 
 const wordsText = (words: SegmentRow['words']) => words.map((w) => w.w).join(' ');
+
+/** Lower-case a word and drop punctuation, so "Okay." matches "okay". */
+const normWord = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
+/** Word index where `phrase` starts (split before it); it must occur exactly once, not at the start. */
+function splitIndexOfText(words: SegmentRow['words'], phrase: string): number {
+  const want = phrase.split(/\s+/).map(normWord).filter(Boolean);
+  if (want.length === 0) throw badRequest('atText has no words to look for.');
+  const have = words.map((w) => normWord(w.w));
+  const hits: number[] = [];
+  for (let i = 0; i + want.length <= have.length; i++) {
+    if (want.every((t, k) => have[i + k] === t)) hits.push(i);
+  }
+  if (hits.length === 0)
+    throw badRequest(
+      `atText "${phrase}" is not in this segment (matched word by word, ignoring case and punctuation).`,
+    );
+  if (hits.length > 1)
+    throw badRequest(
+      `atText "${phrase}" occurs ${hits.length} times in this segment; give more words or use atSec.`,
+    );
+  if (hits[0] === 0)
+    throw badRequest(
+      `atText "${phrase}" starts the segment; there is nothing to split off before it.`,
+    );
+  return hits[0]!;
+}
+
+/** Index of the first word starting at or after `atSec`; it must leave words on both sides. */
+function splitIndexOfSec(words: SegmentRow['words'], atSec: number): number {
+  const i = words.findIndex((w) => w.s >= atSec);
+  if (i < 1)
+    throw badRequest(
+      `atSec ${atSec} must fall after the first word (${words[0]?.s ?? '?'}s) and at or before the last word's start (${words.at(-1)?.s ?? '?'}s) of this segment.`,
+    );
+  return i;
+}
 
 defineOp({
   name: 'transcript.mergeSegments',
@@ -416,14 +483,20 @@ defineOp({
 defineOp({
   name: 'transcript.splitSegment',
   description:
-    "Split one transcript segment (segmentId from transcript.find or transcript.get) in two at word index `atWord`: a 0-based index into the segment's `words` from transcript.get, at least 1 and less than the word count. The original keeps its id and the words before `atWord`; a new segment gets that word and the rest. The split time is that word's start (seconds from session start). Both texts are rebuilt from their words. The new segment keeps the speaker unless `speaker` is given (use it when the speaker changes mid-segment). Change log: one entry per row (an update for the original and a create for the new segment), not one entry for the split; to undo the split, revert both together (any order) to restore the original exactly. Reverting only one leaves duplicate or missing words. Returns both segments in time order, with word timings.",
+    "Split one transcript segment (segmentId from transcript.find or transcript.get) in two. Say where with exactly one of: `atText`, a phrase from the segment's text to split before (e.g. the first words of the second speaker's reply; matched word by word ignoring case and punctuation; it must occur exactly once and not at the very start, else bad_request: add words or use atSec); `atSec`, seconds from session start (split before the first word starting at or after it, e.g. a time read from transcript_text `@seconds`); or `atWord`, a 0-based index into the segment's `words` from transcript.get, at least 1 and less than the word count. The original keeps its id and the words before `atWord`; a new segment gets that word and the rest. The split time is that word's start (seconds from session start). Both texts are rebuilt from their words. The new segment keeps the speaker unless `speaker` is given (use it when the speaker changes mid-segment). Change log: one entry per row (an update for the original and a create for the new segment), not one entry for the split; to undo the split, revert both together (any order) to restore the original exactly. Reverting only one leaves duplicate or missing words. Returns both segments in time order, with word timings.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { segmentId, atWord, speaker }) {
+  async run(ctx, { segmentId, atWord: givenWord, atText, atSec, speaker }) {
     const [row] = await ctx.db.select().from(ts).where(eq(ts.id, segmentId));
     if (!row) throw notFound('Transcript segment');
     const { session } = await requireSession(ctx, row.sessionId, 'write');
     const words = timedWords(row);
+    const atWord =
+      atText !== undefined
+        ? splitIndexOfText(words, atText)
+        : atSec !== undefined
+          ? splitIndexOfSec(words, atSec)
+          : givenWord!;
     if (atWord >= words.length)
       throw badRequest(
         `atWord must be between 1 and ${words.length - 1} for this segment (it has ${words.length} words).`,

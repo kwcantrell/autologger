@@ -160,6 +160,8 @@ export interface TranscriptWord {
   w: string;
   s: number;
   e: number;
+  /** Diarized speaker index from transcription (0-based: "Speaker 1" is 0), when known. */
+  sp?: number;
 }
 
 export interface TranscriptSegment {
