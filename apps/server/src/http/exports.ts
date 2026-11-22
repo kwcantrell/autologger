@@ -7,8 +7,12 @@ import { type Actor, executeOp } from '../core/op.ts';
 
 type Env = { Variables: { actor: Actor | null } };
 
-const csvCell = (v: unknown) => {
-  const s = v === null || v === undefined ? '' : String(v);
+// Text that a spreadsheet would read as a formula (=, +, -, @, tab, CR at the start) gets a
+// leading apostrophe, so an exported message can't run as a formula when the file is opened in
+// Excel or Sheets. events.importCsv strips it again (`unguardCsvCell`).
+export const csvCell = (v: unknown) => {
+  let s = v === null || v === undefined ? '' : String(v);
+  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
