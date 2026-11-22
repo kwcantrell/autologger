@@ -1,4 +1,11 @@
-import type { OpInput, Show } from '@autologger/contract';
+import {
+  keyTermsChars,
+  MAX_KEY_TERM_LENGTH,
+  MAX_KEY_TERMS,
+  MAX_KEY_TERMS_TOTAL_CHARS,
+  type OpInput,
+  type Show,
+} from '@autologger/contract';
 import { TvIcon } from 'lucide-react';
 import { useState } from 'react';
 import { qk, useOpMutation } from '@/api/queries';
@@ -9,11 +16,14 @@ import { Button } from '@/shared/components/ui/button';
 import { Card, CardContent } from '@/shared/components/ui/card';
 import { FieldGroup, FieldSeparator } from '@/shared/components/ui/field';
 import { Input } from '@/shared/components/ui/input';
+import { Textarea } from '@/shared/components/ui/textarea';
+import { ToggleGroup, ToggleGroupItem } from '@/shared/components/ui/toggle-group';
 import { useInlineDraft, useSectionGuard, useSettingsNav } from '../guard';
 import {
   EmptyState,
   FpsSelect,
   LoadingState,
+  plural,
   RoleLockNotice,
   SectionSaveBar,
   SettingRow,
@@ -29,6 +39,9 @@ interface ShowDetailsDraft {
   titleSuffix: TitleSuffix;
   defaultFrameRate: number;
   nextEpisode: number;
+  smartFormat: boolean;
+  /** Key terms as typed: one per line. */
+  keyTerms: string;
 }
 
 const draftOf = (s: Show): ShowDetailsDraft => ({
@@ -37,7 +50,19 @@ const draftOf = (s: Show): ShowDetailsDraft => ({
   titleSuffix: s.titleSuffix,
   defaultFrameRate: s.defaultFrameRate,
   nextEpisode: s.nextEpisode,
+  smartFormat: s.smartFormat,
+  keyTerms: s.keyTerms.join('\n'),
 });
+
+/** One term per line; blank lines and repeats dropped (the server de-duplicates too). */
+const parseKeyTerms = (text: string): string[] => [
+  ...new Set(
+    text
+      .split('\n')
+      .map((t) => t.trim())
+      .filter(Boolean),
+  ),
+];
 
 export function ShowDetailsSection() {
   const { team, show, showsLoading } = useActive();
@@ -109,6 +134,17 @@ function ShowDetails({
   useSectionGuard('show-details', draft.dirty, draft.discard);
   const [error, setError] = useState<string | null>(null);
   const value = draft.value ?? draftOf(show);
+  const keyTerms = parseKeyTerms(value.keyTerms);
+  const longTerm = keyTerms.find((t) => t.length > MAX_KEY_TERM_LENGTH);
+  const charsLeft = MAX_KEY_TERMS_TOTAL_CHARS - keyTermsChars(keyTerms);
+  const keyTermsError =
+    keyTerms.length > MAX_KEY_TERMS
+      ? `At most ${MAX_KEY_TERMS} key terms; this list has ${keyTerms.length}.`
+      : longTerm
+        ? `“${longTerm.slice(0, 24)}…” is longer than ${MAX_KEY_TERM_LENGTH} characters.`
+        : charsLeft < 0
+          ? `Key terms can total ${MAX_KEY_TERMS_TOTAL_CHARS} characters; remove ${-charsLeft} more.`
+          : null;
 
   async function save() {
     setError(null);
@@ -119,6 +155,8 @@ function ShowDetails({
     if (value.defaultFrameRate !== show.defaultFrameRate)
       patch.defaultFrameRate = value.defaultFrameRate;
     if (value.nextEpisode !== show.nextEpisode) patch.nextEpisode = value.nextEpisode;
+    if (value.smartFormat !== show.smartFormat) patch.smartFormat = value.smartFormat;
+    if (keyTerms.join('\n') !== show.keyTerms.join('\n')) patch.keyTerms = keyTerms;
     try {
       await update.mutateAsync(patch);
       draft.markSaved();
@@ -228,13 +266,56 @@ function ShowDetails({
                 onChange={(defaultFrameRate) => draft.update({ defaultFrameRate })}
               />
             </SettingRow>
+            <FieldSeparator />
+            <SettingRow
+              label="Smart formatting"
+              labelId="settings-show-smart-format-label"
+              description="Transcripts write numbers, dates and money as digits and symbols. Turn it off for technical or math talk, where it turns “x squared” into “x2”. Applies to new transcriptions; re-transcribe a session to update it."
+              disabled={!canEdit}
+            >
+              <ToggleGroup
+                variant="outline"
+                aria-labelledby="settings-show-smart-format-label"
+                disabled={!canEdit}
+                value={[value.smartFormat ? 'on' : 'off']}
+                onValueChange={([v]) => {
+                  if (v === 'on' || v === 'off') draft.update({ smartFormat: v === 'on' });
+                }}
+              >
+                <ToggleGroupItem value="on">On</ToggleGroupItem>
+                <ToggleGroupItem value="off">Off</ToggleGroupItem>
+              </ToggleGroup>
+            </SettingRow>
+            <FieldSeparator />
+            <SettingRow
+              label="Key terms"
+              htmlFor="settings-show-key-terms"
+              description={
+                keyTermsError ??
+                `Names and jargon the transcriber should listen for, one per line (up to ${MAX_KEY_TERMS}; ${plural(charsLeft, 'character')} left). Applies to new transcriptions.`
+              }
+              disabled={!canEdit}
+            >
+              <Textarea
+                id="settings-show-key-terms"
+                rows={4}
+                spellCheck={false}
+                placeholder={'dx\nL’Hôpital'}
+                disabled={!canEdit}
+                aria-invalid={keyTermsError ? true : undefined}
+                value={value.keyTerms}
+                onChange={(e) => draft.update({ keyTerms: e.target.value })}
+              />
+            </SettingRow>
           </FieldGroup>
         </CardContent>
         {canEdit && (
           <SectionSaveBar
             dirty={draft.dirty}
             saving={update.isPending}
-            valid={value.name.trim() !== '' && value.code.trim() !== '' && validEpisode}
+            valid={
+              value.name.trim() !== '' && value.code.trim() !== '' && validEpisode && !keyTermsError
+            }
             error={error}
             onSave={() => void save()}
           />

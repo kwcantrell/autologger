@@ -81,6 +81,18 @@ export function framesToSeconds(frames: number, frameRate: number): number {
   return frames / frameRate;
 }
 
+/**
+ * Seconds from the session start for a stored event frame count (frames include the start
+ * offset), rounded to milliseconds. Inverse of placing an event with `atSec`; negative when the
+ * frame count is before the start offset.
+ */
+export function framesToAtSec(
+  frames: number,
+  clock: { frameRate: number; startOffsetFrames: number },
+): number {
+  return Math.round(((frames - clock.startOffsetFrames) / clock.frameRate) * 1000) / 1000;
+}
+
 export function secondsToClock(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));
   const h = Math.floor(s / 3600);

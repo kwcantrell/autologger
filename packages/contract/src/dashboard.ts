@@ -16,7 +16,11 @@ export const DashboardQuery = z.discriminatedUnion('name', [
     categories: z.array(z.string()).optional(),
   }),
   z.object({ name: z.literal('speaker_talk_time') }),
-  z.object({ name: z.literal('topics') }),
+  z.object({
+    name: z.literal('topics'),
+    /** Only topics at this level or above: 1 = chapters only, 2 = chapters and sub-topics. */
+    maxLevel: z.number().int().min(1).max(3).optional(),
+  }),
   z.object({
     name: z.literal('events'),
     categories: z.array(z.string()).optional(),

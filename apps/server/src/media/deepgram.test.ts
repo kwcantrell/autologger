@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest';
-import { type DeepgramResponse, mapDeepgram } from './deepgram.ts';
+import { keyTermsChars, MAX_KEY_TERMS_TOTAL_CHARS, opInputs } from '@autologger/contract';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  type DeepgramResponse,
+  deepgramUrl,
+  mapDeepgram,
+  PermanentError,
+  transcribeAudio,
+} from './deepgram.ts';
 import { isYoutubeUrl } from './youtube.ts';
 
 const fixture: DeepgramResponse = {
@@ -118,5 +125,93 @@ describe('isYoutubeUrl', () => {
     expect(isYoutubeUrl('https://youtu.be/abc')).toBe(true);
     expect(isYoutubeUrl('https://youtube.com.evil.example/watch')).toBe(false);
     expect(isYoutubeUrl('ftp://youtube.com/x')).toBe(false);
+  });
+});
+
+describe('deepgramUrl', () => {
+  const params = (url: string) => new URL(url).searchParams;
+
+  it('keeps the previous defaults: nova-3 with smart formatting, no key terms', () => {
+    const q = params(deepgramUrl());
+    expect(q.get('model')).toBe('nova-3');
+    expect(q.get('smart_format')).toBe('true');
+    expect(q.get('punctuate')).toBe('true');
+    expect(q.get('diarize')).toBe('true');
+    expect(q.get('utterances')).toBe('true');
+    expect(q.has('keyterm')).toBe(false);
+  });
+
+  it('turns smart formatting off and repeats keyterm once per URL-encoded term', () => {
+    const url = deepgramUrl({
+      smartFormat: false,
+      keyTerms: [' dx ', 'L’Hôpital', 'chain rule', 'dx', '', 'a&b=c'],
+    });
+    expect(params(url).get('smart_format')).toBe('false');
+    expect(params(url).get('punctuate')).toBe('true');
+    expect(params(url).getAll('keyterm')).toEqual(['dx', 'L’Hôpital', 'chain rule', 'a&b=c']);
+    expect(url).toContain('keyterm=chain+rule');
+    expect(url).toContain('keyterm=a%26b%3Dc');
+    expect(url).not.toContain('Hôpital');
+  });
+
+  it('caps the number and length of key terms', () => {
+    const many = Array.from({ length: 80 }, (_, i) => `term${i}`);
+    expect(
+      params(deepgramUrl({ smartFormat: true, keyTerms: many })).getAll('keyterm'),
+    ).toHaveLength(50);
+    const [long] = params(deepgramUrl({ smartFormat: true, keyTerms: ['x'.repeat(200)] })).getAll(
+      'keyterm',
+    );
+    expect(long).toHaveLength(50);
+  });
+
+  it('drops key terms past the total character budget', () => {
+    // 30 distinct 40-character terms = 1200 characters; only 25 fit in 1000.
+    const terms = Array.from({ length: 30 }, (_, i) => `${i}`.padStart(40, 'k'));
+    const sent = params(deepgramUrl({ smartFormat: true, keyTerms: terms })).getAll('keyterm');
+    expect(sent).toEqual(terms.slice(0, 25));
+    expect(keyTermsChars(sent)).toBeLessThanOrEqual(MAX_KEY_TERMS_TOTAL_CHARS);
+  });
+});
+
+describe('shows.update key term validation', () => {
+  const input = opInputs['shows.update'];
+  it('rejects a list over the total character budget with a clear message', () => {
+    const over = input.safeParse({
+      showId: 'show_1',
+      keyTerms: Array.from({ length: 21 }, (_, i) => `${i}`.padStart(50, 'k')),
+    });
+    expect(over.success).toBe(false);
+    expect(over.error?.issues[0]?.message).toMatch(/at most 1000 characters/);
+    expect(
+      input.safeParse({ showId: 'show_1', keyTerms: Array(20).fill('k'.repeat(50)) }).success,
+    ).toBe(true);
+  });
+});
+
+describe('transcribeAudio errors', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const call = () => transcribeAudio('key', new Blob(['x']).stream(), 'audio/mpeg', 1);
+  const answer = (status: number, body: string) =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status })),
+    );
+
+  it('makes a 4xx permanent, with Deepgram’s (truncated) reason', async () => {
+    answer(400, `{"err_msg":"Too many keyterm tokens"}${' '.repeat(10)}${'x'.repeat(500)}`);
+    const err = await call().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PermanentError);
+    expect((err as Error).message).toMatch(/rejected the request \(400\).*Too many keyterm tokens/);
+    expect((err as Error).message.length).toBeLessThan(500);
+  });
+
+  it('keeps rate limiting and server errors retryable', async () => {
+    for (const status of [429, 503]) {
+      answer(status, 'busy');
+      const err = await call().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(PermanentError);
+    }
   });
 });
