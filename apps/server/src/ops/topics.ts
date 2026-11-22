@@ -90,10 +90,10 @@ defineOp({
 defineOp({
   name: 'topics.replace',
   description:
-    'Replace every topic in the session with this list — the usual way to (re)generate topics from the transcript. Each removed and added topic is in the change log, so the operator can undo it.',
+    'Replace every topic in the session with this list — the usual way to (re)generate topics from the transcript. Each removed and added topic is in the change log, so the operator can undo it. Returns the new topics sorted by startSec; pass `compact: true` to get only `[{ id, startSec, level, title }]` per topic, which saves context.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, topics: list }) {
+  async run(ctx, { sessionId, topics: list, compact }) {
     const { session } = await requireSession(ctx, sessionId, 'write');
     const old = await ctx.db.select().from(topics).where(eq(topics.sessionId, sessionId));
     await ctx.db.delete(topics).where(eq(topics.sessionId, sessionId));
@@ -112,6 +112,8 @@ defineOp({
     for (const t of [...list].sort((a, b) => a.startSec - b.startSec))
       rows.push(await insertTopic(ctx, sessionId, session.showId, t));
     ctx.publish(`session:${sessionId}`, { type: 'invalidate', entity: 'topic' });
+    if (compact)
+      return rows.map(({ id, startSec, level, title }) => ({ id, startSec, level, title }));
     return entities(ctx, rows);
   },
 });
