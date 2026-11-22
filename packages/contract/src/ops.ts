@@ -16,6 +16,7 @@ import type {
   Me,
   SearchHit,
   Session,
+  SessionDetail,
   SessionEvent,
   Show,
   Team,
@@ -444,13 +445,20 @@ export const opInputs = {
   }),
 
   // ── change log ────────────────────────────────────────────
-  'changes.list': z.object({
-    sessionId: id.optional(),
-    showId: id.optional(),
-    via: z.enum(['web', 'mcp', 'companion', 'worker', 'system']).optional(),
-    limit: z.number().int().min(1).max(500).default(100),
-  }),
+  'changes.list': z
+    .object({
+      sessionId: id.optional(),
+      showId: id.optional(),
+      via: z.enum(['web', 'mcp', 'companion', 'worker', 'system']).optional(),
+      groupId: id.optional(),
+      grouped: z.boolean().default(false),
+      limit: z.number().int().min(1).max(500).default(100),
+    })
+    .refine((v) => !v.grouped || v.sessionId !== undefined || v.showId !== undefined, {
+      message: 'grouped: true needs a sessionId or showId.',
+    }),
   'changes.revert': z.object({ changeId: id }),
+  'changes.revertGroup': z.object({ groupId: id }),
 
   // ── tokens (agents) ───────────────────────────────────────
   'tokens.list': z.object({}),
@@ -556,7 +564,7 @@ export interface OpOutputs {
   'categories.list': Category[];
   'categories.save': Category[];
   'sessions.list': Session[];
-  'sessions.get': Session;
+  'sessions.get': SessionDetail;
   'sessions.create': Session;
   'sessions.update': Session;
   'sessions.archive': Session;
@@ -607,7 +615,7 @@ export interface OpOutputs {
   'wiki.get': WikiPage;
   'wiki.upsert': WikiPage;
   // The page summary (WikiPageSummary), spelled via WikiPage so it doesn't depend on that import.
-  'wiki.patch': Omit<WikiPage, 'bodyMd' | 'backlinks'>;
+  'wiki.patch': Omit<WikiPage, 'bodyMd' | 'backlinks' | 'backlinkCount'>;
   'wiki.delete': { deleted: true };
   'wiki.revisions': WikiRevision[];
   'wiki.restore': WikiPage;
@@ -628,6 +636,7 @@ export interface OpOutputs {
   search: SearchHit[];
   'changes.list': Change[];
   'changes.revert': Change;
+  'changes.revertGroup': { groupId: string; reverted: number };
   'tokens.list': ApiToken[];
   'tokens.createPat': { token: string; apiToken: ApiToken };
   'tokens.revoke': { revoked: true };

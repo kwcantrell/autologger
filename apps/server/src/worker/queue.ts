@@ -26,7 +26,7 @@ function publishJob(job: JobRow): void {
  */
 export async function claimJob(): Promise<JobRow | null> {
   const rows = await db.execute<{ id: string }>(sql`
-    update jobs set status = 'running', locked_at = now(), updated_at = now(),
+    update jobs set status = 'running', locked_at = now(), started_at = now(), updated_at = now(),
       attempts = attempts + 1, progress = 'Starting'
     where id = (
       select id from jobs
@@ -75,6 +75,7 @@ export async function failJob(job: JobRow, message: string, permanent: boolean):
             progress: `Retrying (attempt ${job.attempts + 1} of ${MAX_ATTEMPTS})`,
             runAfter: new Date(Date.now() + delaySec * 1000),
             lockedAt: null,
+            startedAt: null,
             updatedAt: new Date(),
           }
         : {
@@ -94,7 +95,7 @@ export async function failJob(job: JobRow, message: string, permanent: boolean):
 /** Put a job we hold back in the queue without counting the attempt (worker shutdown). */
 export async function releaseJob(jobId: string): Promise<void> {
   await db.execute(sql`
-    update jobs set status = 'queued', locked_at = null, updated_at = now(),
+    update jobs set status = 'queued', locked_at = null, started_at = null, updated_at = now(),
       attempts = greatest(attempts - 1, 0), progress = 'Queued'
     where id = ${jobId} and status = 'running'`);
 }
@@ -105,7 +106,7 @@ export async function releaseJob(jobId: string): Promise<void> {
  */
 export async function recoverStuckJobs(): Promise<JobRow[]> {
   const requeued = await db.execute<{ id: string }>(sql`
-    update jobs set status = 'queued', locked_at = null, updated_at = now(), progress = 'Requeued after a worker stopped'
+    update jobs set status = 'queued', locked_at = null, started_at = null, updated_at = now(), progress = 'Requeued after a worker stopped'
     where status = 'running' and locked_at < now() - make_interval(mins => ${STUCK_AFTER_MIN})
       and attempts < ${MAX_ATTEMPTS}
     returning id`);

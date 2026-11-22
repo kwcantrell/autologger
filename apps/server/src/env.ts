@@ -43,6 +43,8 @@ export const env = {
   deepgramApiKey: str('DEEPGRAM_API_KEY'),
   ytDlpPath: str('YTDLP_PATH', 'yt-dlp')!,
   youtubeEnabled: str('YOUTUBE_IMPORT', '1') === '1',
+  /** Jobs a worker process runs in parallel (the API also uses it for jobs.list etaSec). */
+  workerConcurrency: Math.max(1, Math.floor(Number(str('WORKER_CONCURRENCY', '2'))) || 1),
 };
 
 export const isProd = env.nodeEnv === 'production';

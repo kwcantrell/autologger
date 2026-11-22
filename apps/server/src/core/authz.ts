@@ -9,9 +9,9 @@
 
 import type { ShowAccess, TeamRole } from '@autologger/contract';
 import { and, eq, inArray, or, type SQL, sql } from 'drizzle-orm';
-import { schema } from '../db/client.ts';
+import { db, schema } from '../db/client.ts';
 import { forbidden, notFound } from './errors.ts';
-import type { Ctx } from './op.ts';
+import type { Actor, Ctx } from './op.ts';
 
 const { teamMembers, shows, showGrants, sessions } = schema;
 
@@ -95,6 +95,20 @@ export async function requireSession(
     if ((e as { code?: string }).code === 'not_found') throw notFound('Session');
     throw e;
   }
+}
+
+/**
+ * Access check outside an op (WebSocket handshakes and re-checks): true when the actor can read
+ * the session. The checks above only use ctx.actor and ctx.db, so no op context is needed.
+ */
+export async function canReadSession(actor: Actor, sessionId: string): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const ctx = { actor, db: tx } as Pick<Ctx, 'actor' | 'db'> as Ctx;
+    return requireSession(ctx, sessionId, 'read').then(
+      () => true,
+      () => false,
+    );
+  });
 }
 
 /**

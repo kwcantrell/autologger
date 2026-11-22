@@ -8,6 +8,7 @@ import type {
   Job,
   LiveEntity,
   Session,
+  SessionDetail,
   SessionEvent,
   SessionServerMessage,
   Topic,
@@ -75,16 +76,26 @@ function invalidateDerived(qc: QueryClient, entity: LiveEntity, sessionId: strin
     void qc.invalidateQueries({ queryKey: qk.dashboardQueryAll(sessionId) });
   }
   if (entity === 'event') void qc.invalidateQueries({ queryKey: qk.sessionsAll });
-  // audioSeconds is derived from the audio segments: refresh the session and the rail.
-  if (entity === 'audio_segment') void qc.invalidateQueries({ queryKey: qk.session(sessionId) });
+  // audioSeconds is derived from the audio segments, transcriptJob from the jobs: refresh the
+  // session (and the rail, below).
+  if (entity === 'audio_segment' || entity === 'job')
+    void qc.invalidateQueries({ queryKey: qk.session(sessionId) });
   if (entity === 'audio_segment' || entity === 'session')
     void qc.invalidateQueries({ queryKey: qk.sessionsAll });
+}
+
+/** Pushed sessions are plain `Session`s: keep the cached sessions.get `transcriptJob`. */
+function setSession(qc: QueryClient, sessionId: string, s: Session) {
+  qc.setQueryData<SessionDetail>(qk.session(sessionId), (old) => ({
+    ...s,
+    transcriptJob: old?.transcriptJob ?? null,
+  }));
 }
 
 export function applySessionMessage(qc: QueryClient, sessionId: string, m: SessionServerMessage) {
   switch (m.type) {
     case 'transport': {
-      qc.setQueryData<Session>(qk.session(sessionId), m.session);
+      setSession(qc, sessionId, m.session);
       void qc.invalidateQueries({ queryKey: qk.sessionsAll });
       return;
     }
@@ -105,7 +116,7 @@ export function applySessionMessage(qc: QueryClient, sessionId: string, m: Sessi
       switch (entity) {
         case 'session':
           if (op === 'delete') qc.removeQueries({ queryKey: qk.session(sessionId) });
-          else if (data) qc.setQueryData<Session>(qk.session(sessionId), data as Session);
+          else if (data) setSession(qc, sessionId, data as Session);
           void qc.invalidateQueries({ queryKey: qk.sessionsAll });
           break;
         case 'event':

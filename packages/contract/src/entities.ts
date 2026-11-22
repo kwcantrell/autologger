@@ -119,6 +119,11 @@ export interface Session {
   access: ShowAccess;
 }
 
+/** sessions.get: a session plus its unfinished transcription work. */
+export interface SessionDetail extends Session {
+  transcriptJob: TranscriptJob | null;
+}
+
 export type EventSource = 'operator' | 'companion' | 'agent' | 'import';
 
 export interface SessionEvent {
@@ -304,8 +309,10 @@ export interface WikiLint {
 
 export interface WikiPage extends WikiPageSummary {
   bodyMd: string;
-  /** Pages that link to this one via [[Title]]. */
+  /** Pages that link to this one via [[Title]] or an alias, by title; the first 50. */
   backlinks: { id: string; title: string; kind: WikiKind }[];
+  /** How many pages link to this one (backlinks lists at most 50). */
+  backlinkCount: number;
 }
 
 export interface WikiRevision {
@@ -340,6 +347,17 @@ export interface Change {
   showId: string;
   revertedAt: string | null;
   revertOf: string | null;
+  /** Shared by every change one op call wrote; null on changes logged before groups existed. */
+  groupId: string | null;
+  /** changes.list with grouped: true — how many changes this row stands for (only when > 1). */
+  groupSize?: number;
+  /** With groupSize: how many of them are already undone. */
+  groupUndone?: number;
+  /**
+   * With groupSize: how many changes the whole group has, in every session (the session filter
+   * only counts its own). changes.revertGroup undoes all of them.
+   */
+  groupTotal?: number;
 }
 
 export interface ApiToken {
@@ -372,10 +390,26 @@ export interface Job {
   sessionTitle?: string;
   /** Queued jobs only (jobs.list): jobs ahead of this one in the worker queue, 0 = next. */
   queuePosition?: number;
+  /**
+   * Queued and running jobs (jobs.list): rough estimate of seconds until the job finishes, from
+   * recent finished jobs of the same kind. Absent when there is no history to estimate from.
+   */
+  etaSec?: number;
   error: string | null;
   progress: string | null;
+  /** When the current (or last) attempt started; null while queued. */
+  startedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** sessions.get: the queued or running job that will produce the session's transcript. */
+export interface TranscriptJob {
+  id: string;
+  kind: string;
+  status: 'queued' | 'running';
+  queuePosition?: number;
+  etaSec?: number;
 }
 
 export interface AdminUser {

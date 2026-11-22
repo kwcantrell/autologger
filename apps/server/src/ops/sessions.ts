@@ -1,5 +1,11 @@
-import { parseTimecode, type Session, transportElapsed } from '@autologger/contract';
-import { and, desc, eq, isNull, type SQL, sql } from 'drizzle-orm';
+import {
+  parseTimecode,
+  type Session,
+  type SessionDetail,
+  type TranscriptJob,
+  transportElapsed,
+} from '@autologger/contract';
+import { and, desc, eq, inArray, isNull, type SQL, sql } from 'drizzle-orm';
 import {
   readableShowCondition,
   requireSession,
@@ -11,9 +17,10 @@ import { badRequest, conflict } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp } from '../core/op.ts';
 import { schema } from '../db/client.ts';
+import { toJob, withJobEstimates } from '../media/jobs.ts';
 import { iso, userRefs } from './map.ts';
 
-const { sessions, shows } = schema;
+const { jobs, sessions, shows } = schema;
 
 const aggregates = {
   eventCount: sql<number>`(select count(*)::int from events e where e.session_id = ${sessions.id})`,
@@ -87,6 +94,27 @@ export async function getSession(ctx: Ctx, sessionId: string): Promise<Session> 
   return s!;
 }
 
+/** The unfinished job expected to finish last that leads to the session's transcript, or null. */
+async function transcriptJob(ctx: Ctx, sessionId: string): Promise<TranscriptJob | null> {
+  const rows = await ctx.db
+    .select()
+    .from(jobs)
+    .where(and(eq(jobs.sessionId, sessionId), inArray(jobs.status, ['queued', 'running'])));
+  if (!rows.length) return null;
+  const list = await withJobEstimates(ctx.db, rows.map(toJob));
+  // No estimate (no history, or waiting out a retry) sorts as the latest.
+  const last = list.reduce((a, b) =>
+    (b.etaSec ?? Number.POSITIVE_INFINITY) > (a.etaSec ?? Number.POSITIVE_INFINITY) ? b : a,
+  );
+  return {
+    id: last.id,
+    kind: last.kind,
+    status: last.status as TranscriptJob['status'],
+    ...(last.queuePosition !== undefined ? { queuePosition: last.queuePosition } : {}),
+    ...(last.etaSec !== undefined ? { etaSec: last.etaSec } : {}),
+  };
+}
+
 /** Publish the session's new state to its live subscribers. */
 export async function publishSession(ctx: Ctx, sessionId: string): Promise<Session> {
   const s = await getSession(ctx, sessionId);
@@ -138,12 +166,13 @@ defineOp({
 defineOp({
   name: 'sessions.get',
   description:
-    'One session: metadata, transport state, frame rate, event count and transcript status.',
+    'One session: metadata, transport state, frame rate, event count and transcript status. transcriptJob is the queued or running background job that will produce the transcript, or null when none is (then transcriptStatus is final: done, partial, failed or none): {id, kind, status, queuePosition?, etaSec?}. kind is "transcribe", or "youtube_import" while a YouTube import is still downloading (its transcription is queued when the download finishes, so etaSec covers the download only). With several (one per audio segment) it is the one expected to finish last. queuePosition and etaSec mean the same as in jobs.list (etaSec is a rough estimate in seconds); wait for the job with jobs.list (sessionId, waitSec).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId }) {
+  async run(ctx, { sessionId }): Promise<SessionDetail> {
     await requireSession(ctx, sessionId, 'read');
-    return getSession(ctx, sessionId);
+    const session = await getSession(ctx, sessionId);
+    return { ...session, transcriptJob: await transcriptJob(ctx, sessionId) };
   },
 });
 
