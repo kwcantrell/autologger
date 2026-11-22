@@ -1,20 +1,43 @@
 // Decorative product mocks for the landing page, filled with sample data and hidden from
 // assistive tech (each feature row says the same thing in text) and from the keyboard (inert).
-// Where the app has a presentational piece (the log button; the Event feed, Transcript, Topics
-// and Agents rows and their feed table) the mock renders that same component, so it follows the
-// real UI. The rest is static markup in the app's Show Ignition classes; each such mock names the
-// component it imitates: changed that component's look? Update its mock.
+// Where the app has a presentational piece the mock renders that same component, so it follows
+// the real UI: the log button; the Event feed, Transcript, Topics and Agents rows and their feed
+// table; the stat, timeline and table dashboard widgets; the wiki page header, body and backlinks;
+// the compilation card; the playlist import preview; the export list. The rest (the hero's top
+// bar, clock and waveform, the Stream Deck page, ConnectCard's Claude Code line) is static markup
+// in the app's Show Ignition classes and names the component it imitates: changed that
+// component's look? Update its mock.
 
-import type { Change, SessionEvent, Topic, TranscriptSegment } from '@autologger/contract';
-import { Download, Play } from 'lucide-react';
+import type {
+  Change,
+  Compilation,
+  PlaylistImport,
+  SessionEvent,
+  Topic,
+  TranscriptSegment,
+  Widget,
+} from '@autologger/contract';
 import type { CSSProperties, ReactNode } from 'react';
+import { CompilationCard } from '@/routes/compilations/CompilationCard';
+import { PlaylistResult } from '@/routes/PlaylistResult';
+import { WikiMarkdown } from '@/routes/wiki/WikiMarkdown';
+import { BacklinksSection, WikiPageHeader } from '@/routes/wiki/WikiPageParts';
+import type { WikiResolver } from '@/routes/wiki/wikiShared';
+import {
+  StatWidget,
+  TableWidget,
+  TimelineWidget,
+  WidgetFrame,
+} from '@/session/dashboards/WidgetParts';
 import { FeedTable } from '@/session/feed';
 import { LogButton } from '@/session/LogButton';
 import { CHANGE_COLUMNS, ChangeRow } from '@/session/tabs/ChangeRow';
 import { EventRow, eventColumns } from '@/session/tabs/EventRow';
+import { ExportOptions } from '@/session/tabs/ExportOptions';
 import { SEGMENT_COLUMNS, SegmentRow } from '@/session/tabs/SegmentRow';
 import { TOPIC_COLUMNS, TopicRow } from '@/session/tabs/TopicRow';
 import { Badge } from '@/shared/components/ui/badge';
+import { Input } from '@/shared/components/ui/input';
 import { cn } from '@/shared/lib/utils';
 
 const CATS = [
@@ -31,7 +54,6 @@ const LABEL =
 const TC = 'font-tc text-[0.75rem] font-medium tabular-nums text-si-dim';
 const LIVE_PILL =
   'border-[color-mix(in_oklab,var(--si-accent)_88%,#000)] bg-[color-mix(in_oklab,var(--si-accent)_88%,#000)] text-white tracking-[0.14em] shadow-[0_0_18px_-4px_color-mix(in_oklab,var(--si-accent)_46%,transparent)]';
-const SEL = 'bg-(--sel-bg) shadow-[inset_0_0_0_1px_var(--sel-line)]';
 const ACCENT_TEXT = 'text-[color-mix(in_oklab,var(--si-accent)_72%,#ffffff)]';
 
 /** A mock surface: the app's card, with an optional label row. */
@@ -76,6 +98,7 @@ function Swatch({ color }: { color: string }) {
 }
 
 const noop = () => {};
+type StatW = Extract<Widget, { type: 'stat' }>;
 // The feed table's scroll area, minus the height cap and the scrollbars: a table wider than the
 // card is cropped at its edge, like a screenshot.
 const MOCK_TABLE = 'overflow-hidden';
@@ -199,6 +222,14 @@ function mockChange(
     ...(groupSize ? { groupSize } : {}),
   };
 }
+
+const MOCK_TOPICS = [
+  mockTopic(0, 252, 'Cold open: the double ticket', 'Two tickets, one car, zero minutes over.'),
+  mockTopic(252, 678, 'Listener mail', 'Sandwich court rulings and a fan theory.'),
+  mockTopic(930, 1391, 'Guest: Priya on touring', 'Twelve cities, one van, no parking.'),
+  mockTopic(2321, 141, 'Ad break', 'Sponsor read, take 2.'),
+  mockTopic(2462, 1030, 'Lightning round', 'Dana keeps the tally.'),
+];
 
 // Deterministic waveform heights (no randomness between renders).
 const WAVE = Array.from({ length: 72 }, (_, i) => {
@@ -414,18 +445,11 @@ export function TranscriptMock() {
 
 /** Topics tab: chapters with start, length and an agent-written summary. */
 export function TopicsMock() {
-  const topics = [
-    mockTopic(0, 252, 'Cold open: the double ticket', 'Two tickets, one car, zero minutes over.'),
-    mockTopic(252, 678, 'Listener mail', 'Sandwich court rulings and a fan theory.'),
-    mockTopic(930, 1391, 'Guest: Priya on touring', 'Twelve cities, one van, no parking.'),
-    mockTopic(2321, 141, 'Ad break', 'Sponsor read, take 2.'),
-    mockTopic(2462, 1030, 'Lightning round', 'Dana keeps the tally.'),
-  ];
   return (
     <MockFrame title="Topics" aside={<span className={TC}>5 chapters</span>}>
       {/* No Level column (4th): in a half-width card it squeezes the times. */}
       <FeedTable columns={TOPIC_COLUMNS} maxHeight={cn(MOCK_TABLE, '[&_tr>:nth-child(4)]:hidden')}>
-        {topics.map((t) => (
+        {MOCK_TOPICS.map((t) => (
           <TopicRow
             key={t.id}
             t={t}
@@ -441,175 +465,154 @@ export function TopicsMock() {
   );
 }
 
-/**
- * Dashboards tab: stat tiles, events by category, speaker talk time. Static: see
- * session/dashboards/widgets.tsx.
- */
+/** Dashboards tab: the real stat, timeline and table widgets, fed sample rows. */
 export function DashboardMock() {
-  const byCat = [
-    { ...CATS[0], n: 41 },
-    { ...CATS[4], n: 18 },
-    { ...CATS[1], n: 12 },
-    { ...CATS[3], n: 6 },
-    { ...CATS[2], n: 4 },
+  const stats: StatW[] = [
+    { id: 'events', type: 'stat', title: 'Events', span: 1, value: 128 },
+    { id: 'talk', type: 'stat', title: 'Talk time', span: 1, value: 58, unit: 'min' },
+    { id: 'laughs', type: 'stat', title: 'Laughs', span: 1, value: 41, caption: '0.7 a minute' },
   ];
-  const max = Math.max(...byCat.map((c) => c.n));
-  const talk = [
-    { who: 'Dana', pct: 44 },
-    { who: 'Marcus', pct: 31 },
-    { who: 'Priya', pct: 25 },
-  ];
-  const tones = [
-    'bg-si-accent',
-    'bg-[color-mix(in_oklab,var(--si-accent)_55%,var(--si-panel))]',
-    'bg-(--si-line-strong)',
-  ];
+  const timeline: Extract<Widget, { type: 'timeline' }> = {
+    id: 'topics',
+    type: 'timeline',
+    title: 'Topic timeline',
+    span: 4,
+    at: 'startSec',
+    duration: 'durationSec',
+    label: 'title',
+    data: MOCK_TOPICS.slice(0, 4).map((t) => ({
+      startSec: t.startSec,
+      durationSec: t.durationSec,
+      title: t.title,
+    })),
+  };
+  const byCategory: Extract<Widget, { type: 'table' }> = {
+    id: 'by-category',
+    type: 'table',
+    title: 'Events by category',
+    span: 4,
+    columns: [
+      { key: 'category', label: 'Category' },
+      { key: 'events', label: 'Events' },
+    ],
+    data: [
+      { category: CATS[0].name, events: 41 },
+      { category: CATS[4].name, events: 18 },
+      { category: CATS[1].name, events: 12 },
+      { category: CATS[3].name, events: 6 },
+    ],
+  };
   return (
     <MockFrame title="Dashboard · Episode stats">
-      <div className="grid grid-cols-3 gap-2">
-        {[
-          ['Events', '128'],
-          ['Talk time', '58:12'],
-          ['Laughs / min', '0.7'],
-        ].map(([k, v]) => (
-          <div key={k} className="min-w-0 rounded-ctl border border-si-line bg-si-bg p-2.5 sm:p-3">
-            <span className={cn(LABEL, 'block truncate')}>{k}</span>
-            <span className="mt-2 block font-tc text-[1.05rem] font-semibold tabular-nums sm:text-[1.25rem]">
-              {v}
-            </span>
-          </div>
-        ))}
-      </div>
-      <div className="mt-4 rounded-ctl border border-si-line bg-si-bg p-3">
-        <span className={LABEL}>Events by category</span>
-        <div className="mt-3 flex flex-col gap-2">
-          {byCat.map((c) => (
-            <div
-              key={c.name}
-              className="grid grid-cols-[6.5rem_minmax(0,1fr)_2rem] items-center gap-2"
-            >
-              <span className="flex min-w-0 items-center gap-2 text-[0.8rem] text-si-muted">
-                <Swatch color={c.color} />
-                <span className="truncate">{c.name}</span>
-              </span>
-              <span
-                className="h-2.5 rounded-r-[3px] bg-si-accent"
-                style={{ width: `${(c.n / max) * 100}%` }}
-              />
-              <span className={cn(TC, 'text-right')}>{c.n}</span>
-            </div>
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-3 gap-2">
+          {stats.map((w) => (
+            <WidgetFrame key={w.id} widget={w}>
+              <StatWidget widget={w} rows={[]} />
+            </WidgetFrame>
           ))}
         </div>
-      </div>
-      <div className="mt-3 rounded-ctl border border-si-line bg-si-bg p-3">
-        <span className={LABEL}>Speaker talk time</span>
-        <div className="mt-3 flex h-3 gap-0.5 overflow-hidden rounded-full">
-          {talk.map((t, i) => (
-            <span key={t.who} className={tones[i]} style={{ width: `${t.pct}%` }} />
-          ))}
-        </div>
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-          {talk.map((t, i) => (
-            <span key={t.who} className="flex items-center gap-1.5 text-[0.78rem] text-si-muted">
-              <span className={cn('size-2 rounded-full', tones[i])} />
-              {t.who} <span className={TC}>{t.pct}%</span>
-            </span>
-          ))}
-        </div>
+        <WidgetFrame widget={timeline}>
+          <TimelineWidget widget={timeline} rows={timeline.data ?? []} onSeek={noop} />
+        </WidgetFrame>
+        <WidgetFrame widget={byCategory}>
+          <TableWidget widget={byCategory} rows={byCategory.data ?? []} />
+        </WidgetFrame>
       </div>
     </MockFrame>
   );
 }
 
-/** Wiki: a person page with [[links]] and backlinks. Static: see routes/wiki/WikiPageView.tsx. */
+// Sample wiki: the pages [[links]] resolve to and the sessions citations name.
+const WIKI_PAGES = ['Lightning Round', 'Parking Ticket Saga', 'Priya Nair', 'Ep. 112 recap'];
+const resolveWiki: WikiResolver = (title) =>
+  WIKI_PAGES.includes(title) ? { id: `wiki-${WIKI_PAGES.indexOf(title)}`, title } : null;
+const SESSION_TITLES: Record<string, string> = {
+  ses109: 'Ep. 109 · Sandwich court',
+  ses112: 'Ep. 112 · The long table',
+  ses118: 'Ep. 118 · Live in Tulsa',
+};
+const sessionTitle = (id: string) => SESSION_TITLES[id] ?? null;
+
+/** Wiki: a person page (the real header, body with [[links]] and a citation, and backlinks). */
 export function WikiMock() {
-  const link = cn(
-    ACCENT_TEXT,
-    'underline decoration-[color-mix(in_oklab,var(--si-accent)_45%,transparent)] underline-offset-2',
-  );
   return (
-    <MockFrame title="Show wiki" aside={<span className={TC}>r14</span>}>
-      <h3 className="m-0 text-[1.375rem] font-semibold leading-tight">Dana Ruiz</h3>
-      <p className="m-0 mt-1 text-[0.8rem] text-si-dim">Co-host · since Ep. 1</p>
-      <div className="mt-4 flex flex-col gap-2.5 text-[0.875rem] leading-[1.55] text-si-muted">
-        <p className="m-0">
-          Runs the <span className={link}>Lightning Round</span> and keeps the running tally for the{' '}
-          <span className={link}>Parking Ticket Saga</span>.
-        </p>
-        <p className="m-0">
-          Toured with <span className={link}>Priya Nair</span> in 2024; first told the double-ticket
-          story in <span className={link}>Ep. 112 recap</span>.
-        </p>
-      </div>
-      <div className="mt-4 border-t border-si-line pt-3">
-        <span className={LABEL}>Linked from</span>
-        <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0">
-          {['Ep. 112 recap', 'Ep. 109 recap', 'Lightning Round', 'Recurring bits'].map((t, i) => (
-            <li
-              key={t}
-              className={cn(
-                'flex items-center justify-between rounded-ctl px-2.5 py-1.5 text-[0.84rem]',
-                i === 0 && SEL,
-              )}
-            >
-              <span>{t}</span>
-              <span className={TC}>{i < 2 ? 'Recap' : 'Page'}</span>
-            </li>
-          ))}
-        </ul>
+    <MockFrame title="Show wiki">
+      <div className="flex flex-col gap-4">
+        <WikiPageHeader
+          page={{
+            kind: 'person',
+            title: 'Dana Ruiz',
+            aliases: ['Dana'],
+            updatedBy: HOST,
+            updatedAt: MOCK_AT,
+            revision: 14,
+            sessionId: null,
+          }}
+        />
+        <WikiMarkdown
+          body={[
+            'Co-host since Ep. 1. Runs the [[Lightning Round]] and keeps the running tally for the [[Parking Ticket Saga]].',
+            'Toured with [[Priya Nair]] in 2024; first told the double-ticket story in [[Ep. 112 recap]] [@ses112:2512-2541].',
+          ].join('\n\n')}
+          resolve={resolveWiki}
+          sessionTitle={sessionTitle}
+        />
+        <BacklinksSection
+          backlinks={[
+            { id: 'wiki-3', title: 'Ep. 112 recap', kind: 'session' },
+            { id: 'wiki-0', title: 'Lightning Round', kind: 'bit' },
+            { id: 'wiki-1', title: 'Parking Ticket Saga', kind: 'bit' },
+          ]}
+        />
       </div>
     </MockFrame>
   );
 }
 
 /**
- * Ask & compile: a question page whose cited ranges become one video. Static: see
- * routes/wiki/WikiPageView.tsx and routes/compilations/CompilationsRoute.tsx.
+ * Ask & compile: a question page whose citations become one video (the real wiki body and
+ * compilation card, building).
  */
 export function CompileMock() {
-  const clips = [
-    { ep: 'Ep. 109', range: '00:41:02–00:43:10', w: 30 },
-    { ep: 'Ep. 112', range: '00:12:30–00:15:10', w: 38 },
-    { ep: 'Ep. 118', range: '01:04:15–01:05:40', w: 20 },
-  ];
-  const shades = ['bg-si-accent', 'bg-[color-mix(in_oklab,var(--si-accent)_60%,var(--si-panel))]'];
+  const compilation: Compilation = {
+    id: 'comp-mock',
+    showId: 'mock',
+    title: 'The Parking Ticket Saga',
+    status: 'running',
+    progress: 'Cutting clip 2 of 3',
+    etaSec: 60,
+    clips: [
+      { sessionId: 'ses109', sessionTitle: SESSION_TITLES.ses109!, startSec: 2462, endSec: 2590 },
+      { sessionId: 'ses112', sessionTitle: SESSION_TITLES.ses112!, startSec: 750, endSec: 910 },
+      { sessionId: 'ses118', sessionTitle: SESSION_TITLES.ses118!, startSec: 3855, endSec: 3940 },
+    ],
+    durationSec: 373,
+    createdBy: HOST,
+    createdAt: MOCK_AT,
+    updatedAt: MOCK_AT,
+  };
   return (
     <MockFrame title="Question" aside={<span className={TC}>3 citations</span>}>
-      <h3 className="m-0 text-[1.25rem] font-semibold leading-tight">
-        How did the Parking Ticket Saga start?
-      </h3>
-      <p className="m-0 mt-2 text-[0.875rem] leading-[1.55] text-si-muted">
-        Dana got two tickets for the same spot on the same morning, then kept a running tally.
-      </p>
-      <ul className="m-0 mt-4 flex list-none flex-col gap-1.5 p-0">
-        {clips.map((c, i) => (
-          <li
-            key={c.ep}
-            className={cn(
-              'flex items-center gap-2.5 rounded-ctl border border-si-line px-2.5 py-1.5 text-[0.84rem]',
-              i === 1 && SEL,
-            )}
-          >
-            <Play className="size-3.5 shrink-0 text-si-dim" />
-            <span className="font-semibold">{c.ep}</span>
-            <span className={cn(TC, 'ml-auto')}>{c.range}</span>
-          </li>
-        ))}
-      </ul>
-      <div className="mt-4 border-t border-si-line pt-3">
-        <div className="flex items-center justify-between gap-3">
-          <span className={LABEL}>Compilation</span>
-          <Badge variant="outline">Ready · 6:13 · 720p</Badge>
-        </div>
-        <div className="mt-3 flex h-2.5 gap-0.5 overflow-hidden rounded-full">
-          {clips.map((c, i) => (
-            <span key={c.ep} className={shades[i % 2]} style={{ flexGrow: c.w }} />
-          ))}
-        </div>
-        <span className="mt-3 inline-flex h-(--h-sm) items-center gap-1.5 rounded-ctl border border-si-line bg-si-panel-2 px-3 text-[0.8125rem] font-semibold">
-          <Download className="size-3.5" />
-          Download MP4
-        </span>
+      <div className="flex flex-col gap-4">
+        <WikiMarkdown
+          body={[
+            '## How did the Parking Ticket Saga start?',
+            'Dana got two tickets for the same spot on the same morning [@ses109:2462-2590], told it on air [@ses112:750-910] and kept a running tally until Tulsa [@ses118:3855-3940].',
+          ].join('\n\n')}
+          resolve={resolveWiki}
+          sessionTitle={sessionTitle}
+        />
+        <ul className="m-0 list-none p-0">
+          <CompilationCard
+            c={compilation}
+            canWrite
+            onDelete={noop}
+            deleting={false}
+            onRetry={noop}
+            retrying={false}
+          />
+        </ul>
       </div>
     </MockFrame>
   );
@@ -652,61 +655,47 @@ export function AgentsMock() {
   );
 }
 
-/**
- * Import dialog: a YouTube playlist becoming one session per video. Static: see
- * routes/PlaylistImportForm.tsx.
- */
+/** Import dialog: a YouTube playlist previewed as one new session per video (PlaylistResult). */
 export function ImportMock() {
-  const videos = [
-    { title: 'Ep. 110 · Sandwich court', state: 'Transcribed' },
-    { title: 'Ep. 111 · The garage tapes', state: 'Transcribing' },
-    { title: 'Ep. 112 · The long table', state: 'Downloading' },
-    { title: 'Ep. 113 · Live in Tulsa', state: 'Queued' },
-  ];
+  const preview: PlaylistImport = {
+    playlistTitle: 'The Long Table · Season 3',
+    dryRun: true,
+    created: [
+      ['Ep. 112 · The long table', 3492],
+      ['Ep. 113 · The garage tapes', 3310],
+      ['Ep. 114 · Live in Tulsa', 4105],
+    ].map(([title, durationSec], i) => ({
+      sessionId: null,
+      title: String(title),
+      episode: String(112 + i),
+      videoId: `vid-${i}`,
+      durationSec: Number(durationSec),
+      jobId: null,
+    })),
+    skipped: [
+      {
+        videoId: 'vid-old',
+        title: 'Ep. 111 · Sandwich court',
+        reason: 'already_imported',
+        sessionId: null,
+      },
+    ],
+  };
   return (
     <MockFrame title="Import · YouTube playlist">
-      <div className="flex h-(--h-ctl) items-center rounded-ctl border border-(--si-line-strong) bg-si-bg px-2.5 text-[0.84rem] text-si-muted">
-        <span className="truncate">youtube.com/playlist?list=PL7tL0ng-Table</span>
+      <div className="flex flex-col gap-3">
+        <Input readOnly value="https://www.youtube.com/playlist?list=PL7tL0ng-Table" />
+        <PlaylistResult data={preview} onOpenSession={noop} />
       </div>
-      <ul className="m-0 mt-3 flex list-none flex-col gap-1.5 p-0">
-        {videos.map((v) => (
-          <li
-            key={v.title}
-            className="flex items-center justify-between gap-3 rounded-ctl border border-si-line bg-si-bg px-3 py-2"
-          >
-            <span className="min-w-0 truncate text-[0.84rem]">{v.title}</span>
-            <Badge variant={v.state === 'Transcribed' ? 'secondary' : 'outline'}>{v.state}</Badge>
-          </li>
-        ))}
-      </ul>
     </MockFrame>
   );
 }
 
-/** Export tab: the download formats. Static: see session/tabs/ExportTab.tsx. */
+/** Export tab: the download formats (ExportOptions, without links). */
 export function ExportMock() {
-  const formats = [
-    ['Event feed CSV', 'events.csv'],
-    ['Transcript subtitles (SRT)', 'transcript.srt'],
-    ['Transcript (text)', 'transcript.txt'],
-    ['Topics CSV', 'topics.csv'],
-  ];
   return (
     <MockFrame title="Export">
-      <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
-        {formats.map(([label, file]) => (
-          <li
-            key={file}
-            className="flex items-center justify-between gap-3 rounded-ctl border border-si-line bg-si-bg px-3 py-2"
-          >
-            <span className="min-w-0">
-              <span className="block truncate text-[0.84rem]">{label}</span>
-              <span className={TC}>{file}</span>
-            </span>
-            <Download className="size-4 shrink-0 text-si-muted" />
-          </li>
-        ))}
-      </ul>
+      <ExportOptions />
     </MockFrame>
   );
 }

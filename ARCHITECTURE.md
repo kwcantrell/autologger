@@ -87,7 +87,8 @@ Writes to session/show content (`events`, `topics`, `transcript_segments`, `dash
 `wiki_pages`, `categories`) call `ctx.record({ entity, id, before, after, sessionId?, showId })`
 in the same transaction. Each change row stores actor, surface (`via`), MCP client name, op name,
 before/after JSON. `changes.revert` restores `before` (or deletes when `before` is null) and is
-itself recorded. The Agents tab lists changes with `via = 'mcp'` for the session and offers undo.
+itself recorded. The Agents tab lists the session's changes and offers undo; `/changes` lists the
+whole show's, including show-level ones (wiki pages, event buttons: `sessionId` null).
 
 ## Realtime
 
@@ -99,7 +100,9 @@ The web app applies them to the TanStack Query cache. The bus publishes in-proce
 The rail opens `/ws/show/:id` for the active show (show read access): job changes and
 session-list invalidations for every session of the show (`ShowServerMessage`). It relays the
 `session:<id>` messages of the show's sessions plus `show_changed` on `show:<id>`, so publishers
-keep publishing per session. While it is open the jobs indicator doesn't poll.
+keep publishing per session. While it is open the jobs indicator doesn't poll. Recorded changes
+also become a throttled `invalidate change` hint (show-level ones are published on `show:<id>`),
+which keeps `/changes` current.
 
 ## Timecode
 

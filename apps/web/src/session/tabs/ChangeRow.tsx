@@ -78,6 +78,7 @@ export function ChangeRow({
   busy,
   error,
   onUndo,
+  context,
 }: {
   change: Change;
   now: number;
@@ -87,6 +88,8 @@ export function ChangeRow({
   busy: boolean;
   error: string | undefined;
   onUndo: () => void;
+  /** Where the change happened (the show change log names the session or wiki page). */
+  context?: ReactNode;
 }) {
   const isAgent = c.via === 'mcp';
   return (
@@ -135,6 +138,7 @@ export function ChangeRow({
             )}
           </span>
         </div>
+        {context && <div className="mt-0.5 text-[0.72rem] text-si-muted">{context}</div>}
         {error && (
           <p role="alert" className="m-0 mt-0.5 text-[0.75rem] text-(--si-danger)">
             {error}
