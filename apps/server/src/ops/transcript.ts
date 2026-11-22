@@ -5,6 +5,7 @@ import { changeMessage } from '../core/bus.ts';
 import { badRequest, notFound } from '../core/errors.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
+import { alignWordTimings } from '../media/words.ts';
 import { toTranscriptSegment } from './map.ts';
 
 const { transcriptSegments: ts } = schema;
@@ -73,14 +74,8 @@ function toTranscriptLine(r: SegmentRow): TranscriptLine {
 
 /** Word timings for a segment whose text was edited. */
 function wordsForEditedText(row: SegmentRow, text: string): SegmentRow['words'] {
-  // Word timings no longer match edited text; spread them evenly over the segment.
-  const words = text.split(/\s+/).filter(Boolean);
-  const step = (row.endSec - row.startSec) / Math.max(1, words.length);
-  return words.map((w, i) => ({
-    w,
-    s: row.startSec + i * step,
-    e: row.startSec + (i + 1) * step,
-  }));
+  // Keep real timings for unchanged words; only inserted or replaced words get interpolated ones.
+  return alignWordTimings(row.words, text, row.startSec, row.endSec);
 }
 
 /**
@@ -119,7 +114,10 @@ async function editSegment(
 defineOp({
   name: 'transcript.updateSegment',
   description:
-    'Correct the text or speaker of one transcript segment (segmentId from transcript.find or transcript.get). Returns the segment with word timings. To fix many lines, use transcript.updateSegments instead.',
+    'Correct the text or speaker of one transcript segment (segmentId from transcript.find or transcript.get). ' +
+    'Unchanged words keep their recorded word timings; only inserted or replaced words get ' +
+    'interpolated timings, so prefer small targeted edits over rewriting a whole segment. ' +
+    'Returns the segment with word timings. To fix many lines, use transcript.updateSegments instead.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { segmentId, text, speaker }) {
@@ -172,7 +170,7 @@ defineOp({
 defineOp({
   name: 'transcript.updateSegments',
   description:
-    'Correct the text and/or speaker of up to 500 transcript segments of one session in a single call (ids from transcript.find or transcript.get). All edits apply in one transaction: if any segmentId is unknown or belongs to another session, nothing changes. Each changed segment is its own entry in the change log, so the operator can undo edits one by one from the Agents tab; entries that change nothing are skipped. Edited text gets evenly spread word timings. Returns `{ updated, segments }` with compact `{ id, startSec, endSec, speaker, text, edited }` lines (no word timings), in the order given.',
+    'Correct the text and/or speaker of up to 500 transcript segments of one session in a single call (ids from transcript.find or transcript.get). All edits apply in one transaction: if any segmentId is unknown or belongs to another session, nothing changes. Each changed segment is its own entry in the change log, so the operator can undo edits one by one from the Agents tab; entries that change nothing are skipped. Unchanged words keep their recorded word timings; only inserted or replaced words get interpolated ones. Returns `{ updated, segments }` with compact `{ id, startSec, endSec, speaker, text, edited }` lines (no word timings), in the order given.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, updates }) {

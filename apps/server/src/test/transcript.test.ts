@@ -64,6 +64,14 @@ describe('transcript find and batch update', () => {
     expect(res.updated).toBe(2);
     expect(res.segments.map((s) => s.edited)).toEqual([true, false, true]);
     expect(res.segments[2]).toMatchObject({ speaker: 'Dana', text: 'the dr said 50% off' });
+    // Batch edits keep the recorded timings of unchanged words too.
+    const [first] = await call(agent, 'transcript.get', { sessionId: session.id, toSec: 9 });
+    expect(first!.words.slice(0, 4)).toEqual([
+      { w: 'Ask', s: 0, e: 1 },
+      { w: 'Dr', s: 1, e: 2 },
+      { w: 'Smith', s: 2, e: 3 },
+      { w: 'about', s: 3, e: 4 },
+    ]);
 
     const changes = await call(owner, 'changes.list', { sessionId: session.id, via: 'mcp' });
     expect(changes).toHaveLength(2);
@@ -120,5 +128,48 @@ describe('transcript find and batch update', () => {
     // The foreign id is rejected up front; the valid entry in the same batch is not applied.
     const [unchanged] = await call(owner, 'transcript.get', { sessionId: session.id });
     expect(unchanged?.text).toBe('hello there');
+  });
+});
+
+const words = [
+  { w: 'Ask', s: 10, e: 10.4 },
+  { w: 'the', s: 10.4, e: 10.6 },
+  { w: 'doctor', s: 10.7, e: 11.2 },
+  { w: 'about', s: 11.3, e: 11.6 },
+  { w: 'it.', s: 11.6, e: 12 },
+];
+
+describe('transcript.updateSegment', () => {
+  it('keeps real word timings for unchanged words, and undo restores the original', async () => {
+    const { owner, session } = await studio();
+    const segmentId = newId('seg');
+    await db.insert(schema.transcriptSegments).values({
+      id: segmentId,
+      sessionId: session.id,
+      startSec: 10,
+      endSec: 12,
+      speaker: 'Speaker 1',
+      text: 'Ask the doctor about it.',
+      words,
+    });
+
+    const outsider = await makeUser('outsider@example.com');
+    await failsWith(
+      call(outsider, 'transcript.updateSegment', { segmentId, text: 'Ask the dr about it.' }),
+      'not_found',
+    );
+
+    const edited = await call(owner, 'transcript.updateSegment', {
+      segmentId,
+      text: 'Ask the dr about it.',
+    });
+    expect(edited.words).toEqual([words[0], words[1], { ...words[2], w: 'dr' }, ...words.slice(3)]);
+
+    const change = (await call(owner, 'changes.list', { sessionId: session.id })).find(
+      (c) => c.entity === 'transcript_segment' && c.entityId === segmentId,
+    );
+    await call(owner, 'changes.revert', { changeId: change!.id });
+    const [restored] = await call(owner, 'transcript.get', { sessionId: session.id });
+    expect(restored).toMatchObject({ text: 'Ask the doctor about it.', words });
   });
 });
