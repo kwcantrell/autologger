@@ -1,6 +1,26 @@
-# Local development dependencies only (run the app with `npm run dev:server` / `dev:web`):
+# Local development dependencies (run the app with `npm run dev:server` / `dev:web`):
 #   docker compose -f compose.dev.yaml up -d
+# Optionally run the background worker here too, with yt-dlp + ffmpeg from the image, so they
+# need not be installed on the host (use instead of `npm run dev:worker`; needs `npm install` first):
+#   docker compose -f compose.dev.yaml --profile worker up -d --build
 services:
+  worker:
+    profiles: [worker]
+    build: { context: ., target: tools }
+    # Source (including the host's node_modules; server deps are pure JS) mounted read-only;
+    # --watch restarts on edits.
+    volumes: [".:/app:ro"]
+    working_dir: /app/apps/server
+    command: ["node", "--watch", "src/worker/main.ts"]
+    env_file: [{ path: .env, required: false }]
+    environment:
+      # Same settings as the host dev stack, but reach Postgres and S3 over the compose network.
+      DATABASE_URL: postgres://autologger:autologger@postgres:5432/autologger
+      S3_ENDPOINT: http://s3:8333
+      YTDLP_PATH: yt-dlp
+    depends_on: [postgres, s3]
+    restart: unless-stopped
+
   postgres:
     image: postgres:17-alpine
     environment:

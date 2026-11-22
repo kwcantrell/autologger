@@ -39,6 +39,14 @@ npm run dev:worker -w apps/server     # watch mode, reads ../../.env
 cd apps/server && node --env-file=../../.env src/worker/main.ts
 ```
 
+Or in Docker, with `yt-dlp` and `ffmpeg` from the image so they need not be installed on the host
+(it mounts the repo read-only, so run `npm install` first, and reads `.env` with Postgres and S3
+pointed at the compose services):
+
+```sh
+docker compose -f compose.dev.yaml --profile worker up -d --build
+```
+
 In production: `node src/worker/main.ts` with the same environment as the app (compose service
 `worker`). Several workers may run at once.
 
