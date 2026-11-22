@@ -537,6 +537,8 @@ export const jobs = pgTable(
     lockedAt: ts('locked_at'),
     /** When the current (or last) attempt was claimed; cleared when the job is requeued. */
     startedAt: ts('started_at'),
+    /** Failed jobs only: when someone acknowledged the failure (jobs.dismiss). */
+    dismissedAt: ts('dismissed_at'),
     createdAt: created(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },

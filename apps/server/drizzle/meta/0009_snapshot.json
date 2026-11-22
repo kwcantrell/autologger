@@ -1,5 +1,5 @@
 {
-  "id": "0d76377b-be0b-47c1-9204-0e24cef9ab4f",
+  "id": "316850c3-8388-4138-8da9-4f06392accb5",
   "prevId": "992ec3d5-2140-4a8d-819a-0e8b8f94e288",
   "version": "7",
   "dialect": "postgresql",
@@ -1281,6 +1281,12 @@
         },
         "started_at": {
           "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dismissed_at": {
+          "name": "dismissed_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -2693,81 +2699,6 @@
           ]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.wiki_links": {
-      "name": "wiki_links",
-      "schema": "",
-      "columns": {
-        "from_page_id": {
-          "name": "from_page_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "target_norm": {
-          "name": "target_norm",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "target": {
-          "name": "target",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ord": {
-          "name": "ord",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "wiki_links_target": {
-          "name": "wiki_links_target",
-          "columns": [
-            {
-              "expression": "target_norm",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "wiki_links_from_page_id_wiki_pages_id_fk": {
-          "name": "wiki_links_from_page_id_wiki_pages_id_fk",
-          "tableFrom": "wiki_links",
-          "tableTo": "wiki_pages",
-          "columnsFrom": [
-            "from_page_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "wiki_links_from_page_id_target_norm_pk": {
-          "name": "wiki_links_from_page_id_target_norm_pk",
-          "columns": [
-            "from_page_id",
-            "target_norm"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

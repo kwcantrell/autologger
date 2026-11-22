@@ -70,6 +70,7 @@ export function toJob(r: JobRow): Job {
     error: r.error,
     progress: r.progress,
     startedAt: r.startedAt?.toISOString() ?? null,
+    dismissedAt: r.dismissedAt?.toISOString() ?? null,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
   };
