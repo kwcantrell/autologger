@@ -207,6 +207,11 @@ describe('compilations ops', () => {
     const t = Date.now();
     await call(owner, 'compilations.get', { compilationId: c.id, waitSec: 10 });
     expect(Date.now() - t).toBeLessThan(2000);
+    // Longer waits would outlast MCP clients' ~60 s request timeout.
+    await failsWith(
+      call(owner, 'compilations.get', { compilationId: c.id, waitSec: 60 }),
+      'bad_request',
+    );
   });
 });
 
