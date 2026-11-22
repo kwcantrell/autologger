@@ -1,7 +1,9 @@
 import { and, eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { newId } from '../core/ids.ts';
 import { executeOp } from '../core/op.ts';
 import { db, schema } from '../db/client.ts';
+import { env } from '../env.ts';
 import { enqueueJob } from '../media/jobs.ts';
 import { claimJob, completeJob, setProgress } from '../worker/queue.ts';
 import { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
@@ -194,5 +196,104 @@ describe('job queue order', () => {
     );
     expect((await claimJob())?.id).toBe(transcribe.id);
     expect(imports.map((j) => j.id)).toContain((await claimJob())?.id);
+  });
+});
+
+describe('job timing', () => {
+  it('sets startedAt on claim and estimates etaSec from finished jobs; sessions.get shows it', async () => {
+    const { owner, session } = await studio();
+    const agent = asAgent(owner);
+    const segment = async (durationSec: number) => {
+      const id = newId('aud');
+      await db.insert(schema.audioSegments).values({
+        id,
+        sessionId: session.id,
+        ordinal: 0,
+        durationSec,
+        mimeType: 'audio/mpeg',
+        origin: 'file',
+        objectKey: `test/${id}`,
+        status: 'ready',
+      });
+      return id;
+    };
+    expect((await call(agent, 'sessions.get', { sessionId: session.id })).transcriptJob).toBeNull();
+
+    // History: transcriptions take 0.1 s per audio second (60 s for 10 min), imports 30 s.
+    const ago = (sec: number) => new Date(Date.now() - sec * 1000);
+    for (let i = 0; i < 3; i++) {
+      const segmentId = await segment(600);
+      await db.insert(schema.jobs).values([
+        {
+          id: newId('job'),
+          kind: 'transcribe',
+          status: 'done',
+          sessionId: session.id,
+          payload: { segmentId },
+          startedAt: ago(1000),
+          updatedAt: ago(940),
+        },
+        {
+          id: newId('job'),
+          kind: 'youtube_import',
+          status: 'done',
+          sessionId: session.id,
+          payload: { url: 'https://youtu.be/x' },
+          startedAt: ago(1000),
+          updatedAt: ago(970),
+        },
+      ]);
+    }
+
+    const transcribe = await enqueueJob(db, {
+      kind: 'transcribe',
+      sessionId: session.id,
+      actorId: null,
+      payload: { segmentId: await segment(1200) },
+    });
+    const imp = await enqueueJob(db, {
+      kind: 'youtube_import',
+      sessionId: session.id,
+      actorId: owner.user.id,
+      payload: { url: 'https://youtu.be/y' },
+    });
+    const pending = { sessionId: session.id, status: ['queued' as const, 'running' as const] };
+    const queued = await call(agent, 'jobs.list', pending);
+    const byId = new Map(queued.map((j) => [j.id, j]));
+    // Own duration: 1200 s of audio × 0.1. Import: 30 s + 1 job ahead × median 45 s ÷ concurrency.
+    expect(byId.get(transcribe.id)).toMatchObject({
+      queuePosition: 0,
+      etaSec: 120,
+      startedAt: null,
+    });
+    expect(byId.get(imp.id)).toMatchObject({
+      queuePosition: 1,
+      etaSec: Math.round(30 + 45 / env.workerConcurrency),
+    });
+    // The job expected to finish last.
+    expect((await call(agent, 'sessions.get', { sessionId: session.id })).transcriptJob).toEqual({
+      id: transcribe.id,
+      kind: 'transcribe',
+      status: 'queued',
+      queuePosition: 0,
+      etaSec: 120,
+    });
+
+    const claimed = (await claimJob())!;
+    expect(claimed.id).toBe(transcribe.id);
+    expect(claimed.startedAt).toBeInstanceOf(Date);
+    await db
+      .update(schema.jobs)
+      .set({ startedAt: ago(100) })
+      .where(eq(schema.jobs.id, claimed.id));
+    const running = (await call(agent, 'jobs.list', pending)).find((j) => j.id === claimed.id)!;
+    expect(running.status).toBe('running');
+    expect(running.startedAt).not.toBeNull();
+    expect(running.etaSec).toBeGreaterThanOrEqual(19);
+    expect(running.etaSec).toBeLessThanOrEqual(20);
+
+    await completeJob(claimed);
+    await completeJob((await claimJob())!);
+    expect((await call(agent, 'sessions.get', { sessionId: session.id })).transcriptJob).toBeNull();
   });
 });

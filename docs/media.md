@@ -16,7 +16,7 @@ the **worker** (`apps/server/src/worker/main.ts`), a second entrypoint of the se
 | `DEEPGRAM_API_KEY`                                      | app, worker | Enables transcription (`nova-3`, diarized). Without it uploads still work but are not transcribed and `media.retranscribe` answers `unavailable`. |
 | `YOUTUBE_IMPORT`                                        | app         | `1` (default) enables `media.importYoutube`.                                                                                                      |
 | `YTDLP_PATH`                                            | worker      | yt-dlp binary (default `yt-dlp` on `PATH`). Best audio is downloaded as-is, ffmpeg is not required.                                               |
-| `WORKER_CONCURRENCY`                                    | worker      | Jobs run in parallel per worker process (default 2).                                                                                              |
+| `WORKER_CONCURRENCY`                                    | worker, api | Jobs run in parallel per worker process (default 2).                                                                                              |
 
 The bucket is created on first use (worker start, or the first upload) if the credentials allow it.
 
