@@ -238,7 +238,7 @@ function BarWidget({ widget, rows }: { widget: Extract<Widget, { type: 'bar' }>;
   const h = widget.horizontal ? Math.max(CHART_H, Math.min(data.length * 28 + 30, 600)) : CHART_H;
   return (
     <div style={{ height: h }} className="w-full">
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height={h}>
         {widget.horizontal ? (
           <BarChart
             data={data}
@@ -305,7 +305,7 @@ function LineWidget({ widget, rows }: { widget: Extract<Widget, { type: 'line' }
   const yTick = tickFor(widget.y, widget.format);
   return (
     <div style={{ height: CHART_H }} className="w-full">
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height={CHART_H}>
         <LineChart data={data} margin={{ top: 6, right: 12, bottom: 4, left: 0 }}>
           <CartesianGrid stroke={C.line} vertical={false} />
           {numericX ? (
@@ -374,7 +374,7 @@ function PieWidget({ widget, rows }: { widget: Extract<Widget, { type: 'pie' }>;
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-4">
       <div style={{ height: 180, width: 180 }} className="shrink-0">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={180}>
           <PieChart>
             <Pie
               data={slices}
