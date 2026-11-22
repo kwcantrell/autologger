@@ -5,6 +5,7 @@ import { changeMessage } from '../core/bus.ts';
 import { notFound } from '../core/errors.ts';
 import { defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
+import { alignWordTimings } from '../media/words.ts';
 import { toTranscriptSegment } from './map.ts';
 
 const { transcriptSegments: ts } = schema;
@@ -59,7 +60,10 @@ defineOp({
 
 defineOp({
   name: 'transcript.updateSegment',
-  description: 'Correct the text or speaker of one transcript segment.',
+  description:
+    'Correct the text or speaker of one transcript segment (segmentId from transcript.get). ' +
+    'Unchanged words keep their recorded word timings; only inserted or replaced words get ' +
+    'interpolated timings, so prefer small targeted edits over rewriting a whole segment.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { segmentId, text, speaker }) {
@@ -70,14 +74,8 @@ defineOp({
     if (speaker !== undefined) set.speaker = speaker;
     if (text !== undefined && text !== row.text) {
       set.text = text;
-      // Word timings no longer match edited text; spread them evenly over the segment.
-      const words = text.split(/\s+/).filter(Boolean);
-      const step = (row.endSec - row.startSec) / Math.max(1, words.length);
-      set.words = words.map((w, i) => ({
-        w,
-        s: row.startSec + i * step,
-        e: row.startSec + (i + 1) * step,
-      }));
+      // Keep real timings for unchanged words; only changed words get interpolated ones.
+      set.words = alignWordTimings(row.words, text, row.startSec, row.endSec);
     }
     const [after] = await ctx.db.update(ts).set(set).where(eq(ts.id, segmentId)).returning();
     await ctx.record({
