@@ -162,6 +162,7 @@ export function toCompilation(
       startSec: c.startSec,
       endSec: c.endSec,
       ...(c.label ? { label: c.label } : {}),
+      ...(c.eventId ? { eventId: c.eventId } : {}),
     })),
     durationSec: Math.round(r.durationSec * 1000) / 1000,
     ...(r.sizeBytes !== null ? { sizeBytes: r.sizeBytes } : {}),
