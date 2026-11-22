@@ -1,8 +1,8 @@
 import { Route, Switch } from 'wouter';
-import { Toast } from '@/shared/components/Toast';
-import { TooltipProvider } from '@/shared/components/ui/tooltip';
 import { ConsentPage } from '@/routes/ConsentPage';
 import { LoginPage } from '@/routes/LoginPage';
+import { Toast } from '@/shared/components/Toast';
+import { TooltipProvider } from '@/shared/components/ui/tooltip';
 import { RootGate } from './RootGate';
 
 export function App() {

@@ -32,7 +32,11 @@ function toDevice(r: DeviceRow): CompanionDevice {
 }
 
 /** A live (not revoked) device the actor may administer with at least `need` on its show. */
-async function loadDevice(ctx: Ctx, deviceId: string, need: 'write' | 'manage'): Promise<DeviceRow> {
+async function loadDevice(
+  ctx: Ctx,
+  deviceId: string,
+  need: 'write' | 'manage',
+): Promise<DeviceRow> {
   if (ctx.actor.device) throw forbidden();
   const [row] = await ctx.db
     .select()
@@ -76,7 +80,8 @@ defineOp({
 
 defineOp({
   name: 'companion.create',
-  description: 'Create a Companion device for a show. The token is returned once; paste it into the Companion module.',
+  description:
+    'Create a Companion device for a show. The token is returned once; paste it into the Companion module.',
   kind: 'write',
   surfaces: ['web'],
   async run(ctx, { showId, name }) {
@@ -101,20 +106,29 @@ defineOp({
 
 defineOp({
   name: 'companion.revoke',
-  description: 'Revoke a Companion device. Its token stops working and any open connection is closed.',
+  description:
+    'Revoke a Companion device. Its token stops working and any open connection is closed.',
   kind: 'write',
   surfaces: ['web'],
   async run(ctx, { deviceId }) {
     const row = await loadDevice(ctx, deviceId, 'manage');
-    await ctx.db.update(companionDevices).set({ revokedAt: new Date() }).where(eq(companionDevices.id, deviceId));
-    ctx.publish(`show:${row.showId}`, { type: 'show_changed', showId: row.showId, entity: 'device' });
+    await ctx.db
+      .update(companionDevices)
+      .set({ revokedAt: new Date() })
+      .where(eq(companionDevices.id, deviceId));
+    ctx.publish(`show:${row.showId}`, {
+      type: 'show_changed',
+      showId: row.showId,
+      entity: 'device',
+    });
     return { revoked: true };
   },
 });
 
 defineOp({
   name: 'companion.setTarget',
-  description: 'Choose the session a Companion device controls (null = follow the show’s live or newest session).',
+  description:
+    'Choose the session a Companion device controls (null = follow the show’s live or newest session).',
   kind: 'write',
   surfaces: ['web'],
   async run(ctx, { deviceId, sessionId }) {
@@ -128,13 +142,20 @@ defineOp({
       .set({ targetSessionId: sessionId })
       .where(eq(companionDevices.id, deviceId))
       .returning();
-    ctx.publish(`show:${row.showId}`, { type: 'show_changed', showId: row.showId, entity: 'device' });
+    ctx.publish(`show:${row.showId}`, {
+      type: 'show_changed',
+      showId: row.showId,
+      entity: 'device',
+    });
     return toDevice(after!);
   },
 });
 
 /** The session a device acts on: its explicit target, else the show's rolling session, else the newest one. */
-export async function resolveTargetSessionId(ctx: Ctx, device: { showId: string; targetSessionId: string | null }) {
+export async function resolveTargetSessionId(
+  ctx: Ctx,
+  device: { showId: string; targetSessionId: string | null },
+) {
   if (device.targetSessionId) return device.targetSessionId;
   const [row] = await ctx.db
     .select({ id: sessions.id })
@@ -147,7 +168,8 @@ export async function resolveTargetSessionId(ctx: Ctx, device: { showId: string;
 
 defineOp({
   name: 'companion.state',
-  description: 'Current state for the calling Companion device: show, target session transport, event buttons and last event.',
+  description:
+    'Current state for the calling Companion device: show, target session transport, event buttons and last event.',
   kind: 'read',
   surfaces: ['companion'],
   async run(ctx) {
@@ -164,7 +186,12 @@ defineOp({
     let lastEvent: CompanionState['lastEvent'] = null;
     if (s) {
       const [e] = await ctx.db
-        .select({ id: events.id, category: events.category, message: events.message, timecodeFrames: events.timecodeFrames })
+        .select({
+          id: events.id,
+          category: events.category,
+          message: events.message,
+          timecodeFrames: events.timecodeFrames,
+        })
         .from(events)
         .where(eq(events.sessionId, s.id))
         .orderBy(desc(events.createdAt))

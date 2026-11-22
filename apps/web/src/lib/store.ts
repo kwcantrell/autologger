@@ -75,7 +75,11 @@ export interface TransportStatus {
   sessionId: string | null;
   title: string | null;
 }
-export const transportStatus = createStore<TransportStatus>({ state: 'stopped', sessionId: null, title: null });
+export const transportStatus = createStore<TransportStatus>({
+  state: 'stopped',
+  sessionId: null,
+  title: null,
+});
 
 // ── shell overlays ──────────────────────────────────────────────────
 

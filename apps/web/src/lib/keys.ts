@@ -4,7 +4,9 @@ export function isTypingTarget(el: EventTarget | null): boolean {
   const tag = el.tagName;
   if (tag === 'INPUT') {
     const type = (el as HTMLInputElement).type;
-    return !['button', 'checkbox', 'radio', 'range', 'submit', 'reset', 'color', 'file'].includes(type);
+    return !['button', 'checkbox', 'radio', 'range', 'submit', 'reset', 'color', 'file'].includes(
+      type,
+    );
   }
   return tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
 }

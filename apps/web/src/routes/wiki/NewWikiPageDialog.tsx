@@ -11,7 +11,13 @@ import { Button } from '@/shared/components/ui/button';
 import { Field, FieldLabel } from '@/shared/components/ui/field';
 import { Input } from '@/shared/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/shared/components/ui/radio-group';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/shared/components/ui/select';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { Dialog, DialogActions } from '@/shared/ui/Dialog';
 import { useWikiUpsert, WIKI_KIND_LABEL, wikiHref } from './wikiShared';
@@ -28,7 +34,9 @@ interface Props {
 export function NewWikiPageDialog({ showId, open, onOpenChange, initialKind }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange} title="New page">
-      {open && <NewPageForm showId={showId} initialKind={initialKind} onOpenChange={onOpenChange} />}
+      {open && (
+        <NewPageForm showId={showId} initialKind={initialKind} onOpenChange={onOpenChange} />
+      )}
     </Dialog>
   );
 }
@@ -54,7 +62,10 @@ function NewPageForm({ showId, initialKind, onOpenChange }: Omit<Props, 'open'>)
     try {
       try {
         const existing = await rpc('wiki.get', { showId, title: trimmed });
-        setError({ message: `A page called “${existing.title}” already exists.`, pageId: existing.id });
+        setError({
+          message: `A page called “${existing.title}” already exists.`,
+          pageId: existing.id,
+        });
         return;
       } catch (err) {
         if (!(err instanceof RpcError && err.code === 'not_found')) throw err;
@@ -75,7 +86,10 @@ function NewPageForm({ showId, initialKind, onOpenChange }: Omit<Props, 'open'>)
     }
   };
 
-  const sessionItems = (sessions.data ?? []).map((s) => ({ value: s.id, label: s.title.trim() || 'Untitled session' }));
+  const sessionItems = (sessions.data ?? []).map((s) => ({
+    value: s.id,
+    label: s.title.trim() || 'Untitled session',
+  }));
 
   return (
     <form className="flex flex-col gap-4" onSubmit={(e) => void submit(e)}>
@@ -100,9 +114,15 @@ function NewPageForm({ showId, initialKind, onOpenChange }: Omit<Props, 'open'>)
       {kind === 'session' && (
         <Field>
           <FieldLabel id={`${ids}-session`}>Session</FieldLabel>
-          <Select items={sessionItems} value={sessionId} onValueChange={(v) => setSessionId(v ? String(v) : null)}>
+          <Select
+            items={sessionItems}
+            value={sessionId}
+            onValueChange={(v) => setSessionId(v ? String(v) : null)}
+          >
             <SelectTrigger aria-labelledby={`${ids}-session`}>
-              <SelectValue placeholder={sessions.isPending ? 'Loading sessions…' : 'Choose a session'} />
+              <SelectValue
+                placeholder={sessions.isPending ? 'Loading sessions…' : 'Choose a session'}
+              />
             </SelectTrigger>
             <SelectContent>
               {sessionItems.map((s) => (

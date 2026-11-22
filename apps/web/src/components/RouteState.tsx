@@ -7,11 +7,13 @@ import { AUTOLOGGER_LOADING_VIDEO_SRC } from '@/shared/utils/loadingVideo';
 export const ROUTE_STATE_PAGE =
   'relative z-[1] flex w-full items-center justify-center px-5 py-16 min-h-[calc(100dvh-var(--topbar-h)-2.2rem)] max-md:min-h-0';
 /** Full-viewport frame for states shown before the shell exists. */
-export const GATE_PAGE = 'relative z-[1] flex min-h-screen min-h-[100dvh] w-full items-center justify-center px-5 py-10';
+export const GATE_PAGE =
+  'relative z-[1] flex min-h-screen min-h-[100dvh] w-full items-center justify-center px-5 py-10';
 
 export const PANEL =
   'relative box-border w-full max-w-[25rem] gap-0 rounded-card border border-(--si-line-strong) bg-si-panel-2 px-7 py-9 text-center text-si-fg';
-const TITLE = 'm-0 font-league-gothic font-bold text-[2.25rem] leading-none tracking-[0.02em] uppercase text-si-fg';
+const TITLE =
+  'm-0 font-league-gothic font-bold text-[2.25rem] leading-none tracking-[0.02em] uppercase text-si-fg';
 const COPY = 'mx-auto mb-0 mt-3 max-w-[19rem] text-[0.9rem] leading-[1.5] text-si-muted';
 const BADGE = 'm-0 text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-si-muted';
 
@@ -42,7 +44,16 @@ interface RouteStateProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title' |
 }
 
 /** Full-page state panel: not found, archived, errors, denied. */
-export function RouteState({ frame, role, title, badge, children, actions, className, ...rest }: RouteStateProps) {
+export function RouteState({
+  frame,
+  role,
+  title,
+  badge,
+  children,
+  actions,
+  className,
+  ...rest
+}: RouteStateProps) {
   return (
     <div className={frame === 'route' ? ROUTE_STATE_PAGE : GATE_PAGE}>
       <Empty role={role} className={cn(PANEL, className)} {...rest}>
@@ -57,9 +68,20 @@ export function RouteState({ frame, role, title, badge, children, actions, class
   );
 }
 
-export function RouteLoadingState({ label = 'Loading', frame = 'route' }: { label?: string; frame?: 'route' | 'gate' }) {
+export function RouteLoadingState({
+  label = 'Loading',
+  frame = 'route',
+}: {
+  label?: string;
+  frame?: 'route' | 'gate';
+}) {
   return (
-    <output className={frame === 'route' ? ROUTE_STATE_PAGE : GATE_PAGE} aria-busy="true" aria-live="polite" aria-label={label}>
+    <output
+      className={frame === 'route' ? ROUTE_STATE_PAGE : GATE_PAGE}
+      aria-busy="true"
+      aria-live="polite"
+      aria-label={label}
+    >
       <div className="m-0 flex min-h-10 items-center justify-center p-0">
         <LoadingVideo />
       </div>
@@ -71,7 +93,9 @@ export function RouteLoadingState({ label = 'Loading', frame = 'route' }: { labe
 export function PageFrame({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div className="md:absolute md:inset-0 md:overflow-y-auto">
-      <div className={cn('mx-auto flex max-w-[52rem] flex-col gap-5 px-4 py-6', className)}>{children}</div>
+      <div className={cn('mx-auto flex max-w-[52rem] flex-col gap-5 px-4 py-6', className)}>
+        {children}
+      </div>
     </div>
   );
 }

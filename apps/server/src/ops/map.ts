@@ -19,7 +19,10 @@ type Row<T extends { $inferSelect: unknown }> = T['$inferSelect'];
 export const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null);
 
 /** Resolve user ids to `{ id, name }` refs in one query. */
-export async function userRefs(db: Tx, ids: (string | null | undefined)[]): Promise<Map<string, UserRef>> {
+export async function userRefs(
+  db: Tx,
+  ids: (string | null | undefined)[],
+): Promise<Map<string, UserRef>> {
   const unique = [...new Set(ids.filter((x): x is string => Boolean(x)))];
   if (unique.length === 0) return new Map();
   const rows = await db
@@ -109,7 +112,10 @@ export function toAudioSegment(r: Row<typeof schema.audioSegments>): AudioSegmen
   };
 }
 
-export function toDashboard(r: Row<typeof schema.dashboards>, users: Map<string, UserRef>): Dashboard {
+export function toDashboard(
+  r: Row<typeof schema.dashboards>,
+  users: Map<string, UserRef>,
+): Dashboard {
   return {
     id: r.id,
     sessionId: r.sessionId,

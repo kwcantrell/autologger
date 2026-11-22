@@ -3,8 +3,8 @@
 // Session socket: GET /ws/session/:sessionId (cookie auth). Server → client only, apart from ping.
 // Companion socket: GET /ws/companion with `Authorization: Bearer <device token>` (or ?token=).
 
-import type { CompanionState, OpName, RpcError } from './ops.ts';
 import type { Session } from './entities.ts';
+import type { CompanionState, OpName, RpcError } from './ops.ts';
 
 export type LiveEntity =
   | 'session'

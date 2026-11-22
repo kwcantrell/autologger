@@ -1,4 +1,8 @@
-import { type CompanionButtonPresetDefinition, type CompanionPresetDefinitions, combineRgb } from '@companion-module/base';
+import {
+  type CompanionButtonPresetDefinition,
+  type CompanionPresetDefinitions,
+  combineRgb,
+} from '@companion-module/base';
 import { type CompanionState, hexToRgb, SLOTS, textColorFor } from './state.js';
 
 const BLACK = combineRgb(0, 0, 0);
@@ -35,10 +39,16 @@ export function presetDefinitions(state: CompanionState | null): CompanionPreset
         { feedbackId: 'no_session', options: {} },
       ],
     ),
-    transport_start: button('Transport', 'Roll', 'ROLL', [{ actionId: 'transport', options: { action: 'start' } }], [
-      { feedbackId: 'rolling', options: {} },
+    transport_start: button(
+      'Transport',
+      'Roll',
+      'ROLL',
+      [{ actionId: 'transport', options: { action: 'start' } }],
+      [{ feedbackId: 'rolling', options: {} }],
+    ),
+    transport_stop: button('Transport', 'Stop', 'STOP', [
+      { actionId: 'transport', options: { action: 'stop' } },
     ]),
-    transport_stop: button('Transport', 'Stop', 'STOP', [{ actionId: 'transport', options: { action: 'stop' } }]),
     timecode: button(
       'Status',
       'Timecode',
@@ -65,7 +75,11 @@ export function presetDefinitions(state: CompanionState | null): CompanionPreset
   for (const cat of state?.categories ?? []) {
     const bg = hexToRgb(cat.color) ?? BLACK;
     const values =
-      cat.kind === 'dropdown' ? cat.options : cat.kind === 'toggle' ? [cat.onLabel, cat.offLabel] : [];
+      cat.kind === 'dropdown'
+        ? cat.options
+        : cat.kind === 'toggle'
+          ? [cat.onLabel, cat.offLabel]
+          : [];
     values.forEach((value, i) => {
       out[`opt_${cat.id}_${i}`] = button(
         `Options: ${cat.name}`,

@@ -26,7 +26,9 @@ export function fmtDate(iso: string): string {
 
 export function fmtWhen(iso: string): string {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return Number.isNaN(d.getTime())
+    ? ''
+    : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 export interface ResolvedPage {
@@ -36,14 +38,18 @@ export interface ResolvedPage {
 export type WikiResolver = (title: string) => ResolvedPage | null;
 
 /** `[[Title]]` resolution over a show's page titles and aliases, case-insensitive. */
-export function useWikiResolver(showId: string | undefined): { resolve: WikiResolver; pages: WikiPageSummary[] } {
+export function useWikiResolver(showId: string | undefined): {
+  resolve: WikiResolver;
+  pages: WikiPageSummary[];
+} {
   const list = useWikiList(showId);
   return useMemo(() => {
     const pages = list.data ?? [];
     const map = new Map<string, ResolvedPage>();
     for (const p of pages) map.set(normTitle(p.title), { id: p.id, title: p.title });
     for (const p of pages)
-      for (const a of p.aliases) if (!map.has(normTitle(a))) map.set(normTitle(a), { id: p.id, title: p.title });
+      for (const a of p.aliases)
+        if (!map.has(normTitle(a))) map.set(normTitle(a), { id: p.id, title: p.title });
     return { pages, resolve: (title: string) => map.get(normTitle(title)) ?? null };
   }, [list.data]);
 }

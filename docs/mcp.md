@@ -46,25 +46,25 @@ Accounts waiting for administrator approval cannot authorise agents.
 app authorisation) with when they were created and last used. Revoking a token stops it at once;
 disconnecting an OAuth app revokes all of its access and refresh tokens.
 
-| Token | Prefix | Lifetime |
-|---|---|---|
+| Token                 | Prefix | Lifetime                         |
+| --------------------- | ------ | -------------------------------- |
 | Personal access token | `alp_` | no expiry unless set at creation |
-| OAuth access token | `alo_` | 1 hour |
-| OAuth refresh token | `alr_` | 30 days, rotated on every use |
+| OAuth access token    | `alo_` | 1 hour                           |
+| OAuth refresh token   | `alr_` | 30 days, rotated on every use    |
 
 Only SHA-256 hashes of tokens are stored. Refresh tokens rotate: each refresh returns a new pair,
 and presenting an already-used refresh token is treated as theft and revokes the whole grant.
 
 ## OAuth endpoints (for client authors)
 
-| | |
-|---|---|
-| Protected resource metadata | `GET /.well-known/oauth-protected-resource` (also `/…/mcp`) |
-| Authorization server metadata | `GET /.well-known/oauth-authorization-server` |
-| Dynamic client registration | `POST /oauth/register` (public clients, `token_endpoint_auth_method: none`) |
-| Authorization | `GET /oauth/authorize` — `response_type=code`, PKCE `S256` required, optional `resource` |
-| Token | `POST /oauth/token` — `authorization_code`, `refresh_token`; form or JSON body |
-| Revocation | `POST /oauth/revoke` (RFC 7009) |
+|                               |                                                                                          |
+| ----------------------------- | ---------------------------------------------------------------------------------------- |
+| Protected resource metadata   | `GET /.well-known/oauth-protected-resource` (also `/…/mcp`)                              |
+| Authorization server metadata | `GET /.well-known/oauth-authorization-server`                                            |
+| Dynamic client registration   | `POST /oauth/register` (public clients, `token_endpoint_auth_method: none`)              |
+| Authorization                 | `GET /oauth/authorize` — `response_type=code`, PKCE `S256` required, optional `resource` |
+| Token                         | `POST /oauth/token` — `authorization_code`, `refresh_token`; form or JSON body           |
+| Revocation                    | `POST /oauth/revoke` (RFC 7009)                                                          |
 
 The only scope is `autologger`. Redirect URIs must be `https://`, `http://localhost` /
 `127.0.0.1` (any port at request time), or a private-use scheme such as `claude://`. Authorization
@@ -81,7 +81,7 @@ With the server running (`DEV_LOGIN=1`):
 
 ```sh
 cd apps/server
-node scripts/mcp-smoke.ts http://localhost:8080           # PAT + full OAuth flow
-node scripts/mcp-sdk-client.ts http://localhost:8080 alp_…  # official SDK client
+node scripts/mcp-smoke.ts http://localhost:18081           # PAT + full OAuth flow
+node scripts/mcp-sdk-client.ts http://localhost:18081 alp_…  # official SDK client
 npx vitest run src/mcp                                     # PKCE / redirect / rotation rules
 ```

@@ -8,7 +8,11 @@ import { schema } from '../db/client.ts';
 const { users, teams, teamMembers, authSessions } = schema;
 
 async function loadUsers(ctx: Ctx, userId?: string): Promise<AdminUser[]> {
-  const rows = await ctx.db.select().from(users).where(userId ? eq(users.id, userId) : undefined).orderBy(asc(users.status), asc(users.email));
+  const rows = await ctx.db
+    .select()
+    .from(users)
+    .where(userId ? eq(users.id, userId) : undefined)
+    .orderBy(asc(users.status), asc(users.email));
   const memberships = await ctx.db
     .select({ userId: teamMembers.userId, id: teams.id, name: teams.name, role: teamMembers.role })
     .from(teamMembers)
@@ -20,7 +24,9 @@ async function loadUsers(ctx: Ctx, userId?: string): Promise<AdminUser[]> {
     status: u.status,
     isSuperadmin: u.isSuperadmin,
     createdAt: u.createdAt.toISOString(),
-    teams: memberships.filter((m) => m.userId === u.id).map(({ id, name, role }) => ({ id, name, role })),
+    teams: memberships
+      .filter((m) => m.userId === u.id)
+      .map(({ id, name, role }) => ({ id, name, role })),
   }));
 }
 
@@ -48,12 +54,16 @@ defineOp({
   surfaces: ['web'],
   async run(ctx, { userId, status }) {
     requireSuperadmin(ctx);
-    if (userId === ctx.actor.user.id && status !== 'active') throw badRequest('You cannot disable your own account.');
+    if (userId === ctx.actor.user.id && status !== 'active')
+      throw badRequest('You cannot disable your own account.');
     await one(ctx, userId);
     await ctx.db.update(users).set({ status }).where(eq(users.id, userId));
     if (status === 'disabled') {
       await ctx.db.delete(authSessions).where(eq(authSessions.userId, userId));
-      await ctx.db.update(schema.apiTokens).set({ revokedAt: new Date() }).where(eq(schema.apiTokens.userId, userId));
+      await ctx.db
+        .update(schema.apiTokens)
+        .set({ revokedAt: new Date() })
+        .where(eq(schema.apiTokens.userId, userId));
       ctx.publish(`user:${userId}`, { type: 'access_changed', userId });
     }
     return one(ctx, userId);
@@ -68,11 +78,17 @@ defineOp({
   async run(ctx, { userId, value }) {
     requireSuperadmin(ctx);
     if (!value) {
-      const others = await ctx.db.select({ id: users.id }).from(users).where(and(eq(users.isSuperadmin, true), ne(users.id, userId)));
+      const others = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.isSuperadmin, true), ne(users.id, userId)));
       if (others.length === 0) throw badRequest('At least one instance admin must remain.');
     }
     await one(ctx, userId);
-    await ctx.db.update(users).set({ isSuperadmin: value, ...(value ? { status: 'active' as const } : {}) }).where(eq(users.id, userId));
+    await ctx.db
+      .update(users)
+      .set({ isSuperadmin: value, ...(value ? { status: 'active' as const } : {}) })
+      .where(eq(users.id, userId));
     return one(ctx, userId);
   },
 });

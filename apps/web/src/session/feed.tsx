@@ -32,11 +32,17 @@ export function FeedShell({
       )}
     >
       <div className="mb-2 flex w-full min-w-0 shrink-0 flex-row items-start justify-between gap-x-5 gap-y-4 max-md:flex-wrap">
-        <h2 role="status" className="m-0 min-w-0 flex-1 text-left font-ui text-[1.25rem] font-semibold leading-tight tabular-nums text-si-fg">
+        <h2
+          role="status"
+          className="m-0 min-w-0 flex-1 text-left font-ui text-[1.25rem] font-semibold leading-tight tabular-nums text-si-fg"
+        >
           {countLabel}
         </h2>
         {toolbar && (
-          <div role="toolbar" className="flex max-w-full flex-row flex-wrap justify-start gap-2 self-start">
+          <div
+            role="toolbar"
+            className="flex max-w-full flex-row flex-wrap justify-start gap-2 self-start"
+          >
             {toolbar}
           </div>
         )}
@@ -70,7 +76,8 @@ export const IconDownload = () => <Download {...ICON} />;
 export const FEED_EMPTY =
   'px-4 py-[1.35rem] text-center text-[0.85rem] text-si-muted border border-si-line rounded-card bg-[rgba(0,0,0,0.22)]';
 export const FEED_ROW = 'hover-always:bg-[rgba(255,255,255,0.03)]';
-export const FEED_CELL = 'px-[0.4rem] py-[0.1rem] text-[0.78rem] [border-bottom:1px_solid_rgba(255,255,255,0.04)]';
+export const FEED_CELL =
+  'px-[0.4rem] py-[0.1rem] text-[0.78rem] [border-bottom:1px_solid_rgba(255,255,255,0.04)]';
 export const FEED_TC = 'font-tc text-legacy-accent whitespace-nowrap tabular-nums';
 export const FEED_CELL_TEXT = 'text-(--color-text)';
 export const FEED_CELL_LABEL = 'text-(--color-text) font-semibold';
@@ -141,7 +148,12 @@ export function FeedTable({
 const JUMP_BTN =
   'inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-[0.35rem] border border-transparent bg-transparent p-0 text-si-muted [transition:border-color_0.15s_ease,color_0.15s_ease,background_0.15s_ease] hover-always:border-(--sel-line) hover-always:bg-(--sel-bg) hover-always:text-(--si-accent) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring aria-disabled:pointer-events-none aria-disabled:cursor-not-allowed aria-disabled:opacity-45';
 
-export const JUMP_COLUMN: Column = { key: 'jump', label: 'Jump to time', className: 'w-8', srOnly: true };
+export const JUMP_COLUMN: Column = {
+  key: 'jump',
+  label: 'Jump to time',
+  className: 'w-8',
+  srOnly: true,
+};
 
 /** Leading play button that seeks the session audio to a row's time. */
 export function JumpButton({

@@ -13,13 +13,29 @@ describe('access control', () => {
     expect(await call(member, 'shows.list', {})).toEqual([]);
     await failsWith(call(member, 'sessions.get', { sessionId: session.id }), 'not_found');
 
-    await call(owner, 'teams.setGrant', { teamId: team.id, userId: member.user.id, showId: show.id, access: 'read' });
+    await call(owner, 'teams.setGrant', {
+      teamId: team.id,
+      userId: member.user.id,
+      showId: show.id,
+      access: 'read',
+    });
     expect((await call(member, 'sessions.get', { sessionId: session.id })).access).toBe('read');
-    await failsWith(call(member, 'events.create', { sessionId: session.id, category: 'Note' }), 'forbidden');
+    await failsWith(
+      call(member, 'events.create', { sessionId: session.id, category: 'Note' }),
+      'forbidden',
+    );
 
-    await call(owner, 'teams.setGrant', { teamId: team.id, userId: member.user.id, showId: show.id, access: 'write' });
+    await call(owner, 'teams.setGrant', {
+      teamId: team.id,
+      userId: member.user.id,
+      showId: show.id,
+      access: 'write',
+    });
     await call(member, 'events.create', { sessionId: session.id, category: 'Note', message: 'hi' });
-    await failsWith(call(member, 'categories.save', { showId: show.id, categories: [] }), 'forbidden');
+    await failsWith(
+      call(member, 'categories.save', { showId: show.id, categories: [] }),
+      'forbidden',
+    );
   });
 
   it('outsiders cannot see another team’s data and search does not leak it', async () => {
@@ -54,16 +70,31 @@ describe('access control', () => {
 describe('timecode and events', () => {
   it('places events by explicit timecode, atSec, or the live transport', async () => {
     const { owner, session } = await studio();
-    const a = await call(owner, 'events.create', { sessionId: session.id, category: 'Scene', timecode: '01:00:10:00' });
+    const a = await call(owner, 'events.create', {
+      sessionId: session.id,
+      category: 'Scene',
+      timecode: '01:00:10:00',
+    });
     expect(a.timecodeFrames).toBe(24 * 3610);
     expect(a.categoryId).not.toBeNull(); // matched the default "Scene" button
 
-    const b = await call(asAgent(owner), 'events.create', { sessionId: session.id, category: 'Laugh', atSec: 2 });
+    const b = await call(asAgent(owner), 'events.create', {
+      sessionId: session.id,
+      category: 'Laugh',
+      atSec: 2,
+    });
     expect(b.timecodeFrames).toBe(24 * 3600 + 48);
     expect(b.source).toBe('agent');
     expect(b.categoryId).toBeNull(); // free label
 
-    await failsWith(call(owner, 'events.create', { sessionId: session.id, category: 'Scene', timecode: '01:00:00:30' }), 'bad_request');
+    await failsWith(
+      call(owner, 'events.create', {
+        sessionId: session.id,
+        category: 'Scene',
+        timecode: '01:00:00:30',
+      }),
+      'bad_request',
+    );
 
     const rolling = await call(owner, 'transport.start', { sessionId: session.id });
     expect(rolling.isRolling).toBe(true);
@@ -109,7 +140,11 @@ describe('change log and undo', () => {
 
   it('restores a deleted event and refuses to undo a stale change', async () => {
     const { owner, session } = await studio();
-    const e = await call(owner, 'events.create', { sessionId: session.id, category: 'Note', message: 'one' });
+    const e = await call(owner, 'events.create', {
+      sessionId: session.id,
+      category: 'Note',
+      message: 'one',
+    });
     await call(owner, 'events.update', { eventId: e.id, message: 'two' });
     const [update, create] = await call(owner, 'changes.list', { sessionId: session.id });
     await failsWith(call(owner, 'changes.revert', { changeId: create!.id }), 'conflict');
@@ -130,27 +165,56 @@ describe('dashboards and wiki', () => {
     const { owner, session } = await studio();
     await call(owner, 'events.create', { sessionId: session.id, category: 'Scene', atSec: 1 });
     await call(owner, 'events.create', { sessionId: session.id, category: 'Scene', atSec: 400 });
-    const rows = await call(owner, 'dashboards.query', { sessionId: session.id, query: { name: 'events_over_time', bucketSec: 300 } });
+    const rows = await call(owner, 'dashboards.query', {
+      sessionId: session.id,
+      query: { name: 'events_over_time', bucketSec: 300 },
+    });
     expect(rows).toEqual([
       { atSec: 0, category: 'Scene', count: 1 },
       { atSec: 300, category: 'Scene', count: 1 },
     ]);
     await failsWith(
-      // biome-ignore lint/suspicious/noExplicitAny: deliberately invalid
-      call(owner, 'dashboards.save', { sessionId: session.id, spec: { title: 'x', widgets: [{ id: 'a', type: 'html' }] } as any }),
+      call(owner, 'dashboards.save', {
+        sessionId: session.id,
+        // biome-ignore lint/suspicious/noExplicitAny: deliberately invalid widget type
+        spec: { title: 'x', widgets: [{ id: 'a', type: 'html' }] } as any,
+      }),
       'bad_request',
     );
   });
 
   it('upserts wiki pages by title or alias and keeps revisions', async () => {
     const { owner, show } = await studio();
-    const p = await call(owner, 'wiki.upsert', { showId: show.id, kind: 'person', title: 'Dana Ruiz', bodyMd: 'Host.', aliases: ['Dana'] });
-    const q = await call(owner, 'wiki.upsert', { showId: show.id, kind: 'person', title: 'dana', bodyMd: 'Host of the show.' });
+    const p = await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'person',
+      title: 'Dana Ruiz',
+      bodyMd: 'Host.',
+      aliases: ['Dana'],
+    });
+    const q = await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'person',
+      title: 'dana',
+      bodyMd: 'Host of the show.',
+    });
     expect(q.id).toBe(p.id);
     expect(q.revision).toBe(2);
-    await call(owner, 'wiki.upsert', { showId: show.id, kind: 'bit', title: 'Cold Open', bodyMd: 'With [[Dana]].' });
-    await call(owner, 'wiki.upsert', { showId: show.id, kind: 'topic', title: 'Recap', bodyMd: 'Thanks [[Dana Ruiz|our host]].' });
-    expect((await call(owner, 'wiki.get', { pageId: p.id })).backlinks.map((b) => b.title)).toEqual(['Cold Open', 'Recap']);
+    await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'bit',
+      title: 'Cold Open',
+      bodyMd: 'With [[Dana]].',
+    });
+    await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'topic',
+      title: 'Recap',
+      bodyMd: 'Thanks [[Dana Ruiz|our host]].',
+    });
+    expect((await call(owner, 'wiki.get', { pageId: p.id })).backlinks.map((b) => b.title)).toEqual(
+      ['Cold Open', 'Recap'],
+    );
     expect(await call(owner, 'wiki.revisions', { pageId: p.id })).toHaveLength(2);
   });
 });

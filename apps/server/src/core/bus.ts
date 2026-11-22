@@ -1,8 +1,8 @@
 // Realtime fan-out. Publishes in-process and through Postgres NOTIFY so that writes made by the
 // worker (or another app instance) reach this process's WebSocket clients.
 
-import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import type { LiveEntity, SessionServerMessage } from '@autologger/contract';
 import { sqlClient } from '../db/client.ts';
 

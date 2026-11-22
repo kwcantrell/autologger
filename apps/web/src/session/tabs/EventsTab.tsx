@@ -62,23 +62,35 @@ export function EventsTab({
   const editable = canWrite && (editing || session.isRolling);
 
   const list = events.data ?? [];
-  const labels = useMemo(() => [...new Set([...categories.map((c) => c.name), ...list.map((e) => e.category)])], [categories, list]);
+  const labels = useMemo(
+    () => [...new Set([...categories.map((c) => c.name), ...list.map((e) => e.category)])],
+    [categories, list],
+  );
   const shown = list.filter((e) => !hidden.has(e.category));
 
   // Reveal + flash a row (timeline marker clicks, search deep links).
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  // biome-ignore lint/correctness/useExhaustiveDependencies: list.length retries the flash once the target row has loaded
   useEffect(() => {
     if (!flash) return;
     const el = rowRefs.current.get(flash.id);
     if (!el) return;
-    el.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    el.scrollIntoView({
+      block: 'center',
+      behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    });
     el.classList.remove('event-row-flash');
     void el.offsetWidth;
     el.classList.add('event-row-flash');
   }, [flash, list.length]);
 
   const remove = async (e: SessionEvent) => {
-    const ok = await confirm({ title: 'Delete log row', message: 'Delete this log row? It can be restored from the Agents tab change log.', confirmLabel: 'Delete', danger: true });
+    const ok = await confirm({
+      title: 'Delete log row',
+      message: 'Delete this log row? It can be restored from the Agents tab change log.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
     if (!ok) return;
     try {
       await rpc('events.delete', { eventId: e.id });
@@ -90,8 +102,15 @@ export function EventsTab({
   const toolbar = (
     <>
       {canWrite && !session.isRolling && (
-        <Button variant={editing ? 'glass-primary' : 'glass'} onClick={() => setEditing((v) => !v)} aria-pressed={editing}>
-          <ToolbarCaption label={editing ? 'Done' : 'Edit'} icon={editing ? <IconCheck /> : <IconPencil />} />
+        <Button
+          variant={editing ? 'glass-primary' : 'glass'}
+          onClick={() => setEditing((v) => !v)}
+          aria-pressed={editing}
+        >
+          <ToolbarCaption
+            label={editing ? 'Done' : 'Edit'}
+            icon={editing ? <IconCheck /> : <IconPencil />}
+          />
         </Button>
       )}
       <DropdownMenu>
@@ -101,7 +120,10 @@ export function EventsTab({
         <DropdownMenuContent align="end">
           <DropdownMenuGroup>
             <DropdownMenuLabel>Time display</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={timeMode} onValueChange={(v: string) => setTimeMode(v as TimeMode)}>
+            <DropdownMenuRadioGroup
+              value={timeMode}
+              onValueChange={(v: string) => setTimeMode(v as TimeMode)}
+            >
               <DropdownMenuRadioItem value="session">Session Time</DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="world">World Clock (UTC)</DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
@@ -110,7 +132,10 @@ export function EventsTab({
       </DropdownMenu>
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="glass" />}>
-          <ToolbarCaption label={hidden.size ? `Filter (${hidden.size} hidden)` : 'Filter'} icon={<IconFilter />} />
+          <ToolbarCaption
+            label={hidden.size ? `Filter (${hidden.size} hidden)` : 'Filter'}
+            icon={<IconFilter />}
+          />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="max-h-80 overflow-y-auto">
           <DropdownMenuGroup>
@@ -138,7 +163,11 @@ export function EventsTab({
   );
 
   return (
-    <FeedShell countLabel={feedCountLabel(list.length, 'event')} toolbar={toolbar} id="v4-log-sheet">
+    <FeedShell
+      countLabel={feedCountLabel(list.length, 'event')}
+      toolbar={toolbar}
+      id="v4-log-sheet"
+    >
       {events.isError ? (
         <p className="m-0 text-sm text-si-danger">
           Couldn't load the events. {errorMessage(events.error)}{' '}
@@ -150,7 +179,11 @@ export function EventsTab({
         <FeedTable
           columns={[
             JUMP_COLUMN,
-            { key: 'time', label: timeMode === 'session' ? 'Session Time' : 'World Clock', className: 'w-[6.5rem]' },
+            {
+              key: 'time',
+              label: timeMode === 'session' ? 'Session Time' : 'World Clock',
+              className: 'w-[6.5rem]',
+            },
             { key: 'event', label: 'Event', className: 'w-32 max-md:hidden' },
             { key: 'message', label: 'Message' },
             { key: 'actions', label: 'Actions', srOnly: true, className: 'w-8' },
@@ -212,7 +245,8 @@ function EventRow({
 }) {
   const sec = eventSec(e.timecodeFrames, session);
   const tc = e.timecodeFrames != null ? formatFrames(e.timecodeFrames, session.frameRate) : '—';
-  const timeText = timeMode === 'session' ? tc.replace(/[:;]\d{2}$/, '') : formatWallUtcYmdHms(e.wallTime);
+  const timeText =
+    timeMode === 'session' ? tc.replace(/[:;]\d{2}$/, '') : formatWallUtcYmdHms(e.wallTime);
   const [msg, setMsg] = useState(e.message);
   const [tcText, setTcText] = useState(tc);
   useEffect(() => setMsg(e.message), [e.message]);
@@ -229,12 +263,19 @@ function EventRow({
   };
 
   const agent = e.source === 'agent';
-  const messageText = [e.value && e.value !== e.message ? e.value : null, e.message].filter(Boolean).join(' — ');
+  const messageText = [e.value && e.value !== e.message ? e.value : null, e.message]
+    .filter(Boolean)
+    .join(' — ');
 
   return (
     <tr ref={rowRef} className={cn(FEED_ROW, 'group')} data-event-id={e.id}>
       <td className={cn(FEED_CELL, 'align-middle')}>
-        <JumpButton sec={sec} label={timeText} onJump={onJump} unavailable={session.isRolling ? 'Playback is off while timecode rolls.' : null} />
+        <JumpButton
+          sec={sec}
+          label={timeText}
+          onJump={onJump}
+          unavailable={session.isRolling ? 'Playback is off while timecode rolls.' : null}
+        />
       </td>
       <td className={cn(FEED_CELL, FEED_TC, 'align-middle')}>
         {editable && timeMode === 'session' ? (
@@ -254,20 +295,33 @@ function EventRow({
             }}
           />
         ) : (
-          <span title={timeMode === 'session' ? `${tc} · ${formatWallUtcYmdHms(e.wallTime)} UTC` : tc}>{timeText}</span>
+          <span
+            title={timeMode === 'session' ? `${tc} · ${formatWallUtcYmdHms(e.wallTime)} UTC` : tc}
+          >
+            {timeText}
+          </span>
         )}
         <span className="block text-[0.68rem] font-semibold md:hidden" style={{ color: e.color }}>
           {e.category}
         </span>
       </td>
-      <td className={cn(FEED_CELL, FEED_CELL_LABEL, 'align-middle whitespace-nowrap max-md:hidden')} style={{ color: e.color }}>
+      <td
+        className={cn(FEED_CELL, FEED_CELL_LABEL, 'align-middle whitespace-nowrap max-md:hidden')}
+        style={{ color: e.color }}
+      >
         {editable ? (
           <select
             className={cn(FEED_INLINE_INPUT, 'bg-si-panel')}
             aria-label="Category"
             value={e.categoryId ?? ''}
             style={{ color: e.color }}
-            onChange={(ev) => void save({ eventId: e.id, categoryId: ev.target.value || null, ...(ev.target.value ? {} : { category: e.category }) })}
+            onChange={(ev) =>
+              void save({
+                eventId: e.id,
+                categoryId: ev.target.value || null,
+                ...(ev.target.value ? {} : { category: e.category }),
+              })
+            }
           >
             {!e.categoryId && <option value="">{e.category}</option>}
             {categories.map((c) => (
@@ -280,7 +334,13 @@ function EventRow({
           e.category
         )}
       </td>
-      <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'max-w-[min(28rem,38vw)] align-middle max-md:max-w-none')}>
+      <td
+        className={cn(
+          FEED_CELL,
+          FEED_CELL_TEXT,
+          'max-w-[min(28rem,38vw)] align-middle max-md:max-w-none',
+        )}
+      >
         <span className="flex items-center gap-1.5">
           {editable ? (
             <input
@@ -301,12 +361,20 @@ function EventRow({
             <span className="min-w-0 break-words">{messageText}</span>
           )}
           {agent && (
-            <Badge variant="outline" className="shrink-0 px-1 py-px text-[0.6rem]" title={`Logged by an agent${e.createdBy ? ` acting as ${e.createdBy.name}` : ''}`}>
+            <Badge
+              variant="outline"
+              className="shrink-0 px-1 py-px text-[0.6rem]"
+              title={`Logged by an agent${e.createdBy ? ` acting as ${e.createdBy.name}` : ''}`}
+            >
               agent
             </Badge>
           )}
           {e.source === 'companion' && (
-            <Badge variant="outline" className="shrink-0 px-1 py-px text-[0.6rem]" title="Logged from a Companion device">
+            <Badge
+              variant="outline"
+              className="shrink-0 px-1 py-px text-[0.6rem]"
+              title="Logged from a Companion device"
+            >
               deck
             </Badge>
           )}

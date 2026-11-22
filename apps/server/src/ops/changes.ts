@@ -37,7 +37,10 @@ function revive(table: PgTable, snap: Record<string, unknown>): Record<string, u
 }
 
 async function toChanges(ctx: Ctx, rows: (typeof changes.$inferSelect)[]): Promise<Change[]> {
-  const users = await userRefs(ctx.db, rows.map((r) => r.actorId));
+  const users = await userRefs(
+    ctx.db,
+    rows.map((r) => r.actorId),
+  );
   return rows.map((r) => ({
     id: r.id,
     at: r.at.toISOString(),
@@ -58,7 +61,8 @@ async function toChanges(ctx: Ctx, rows: (typeof changes.$inferSelect)[]): Promi
 
 defineOp({
   name: 'changes.list',
-  description: 'The change log: who changed what, from where (web, mcp agent, companion), newest first. Filter by session, show or surface.',
+  description:
+    'The change log: who changed what, from where (web, mcp agent, companion), newest first. Filter by session, show or surface.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, showId, via, limit }) {
@@ -83,7 +87,8 @@ defineOp({
 
 defineOp({
   name: 'changes.revert',
-  description: 'Undo one change. Only the most recent change to an item can be undone; undo newer ones first.',
+  description:
+    'Undo one change. Only the most recent change to an item can be undone; undo newer ones first.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { changeId }) {
@@ -95,10 +100,17 @@ defineOp({
     const [latest] = await ctx.db
       .select({ id: changes.id })
       .from(changes)
-      .where(and(eq(changes.entity, c.entity), eq(changes.entityId, c.entityId), isNull(changes.revertedAt)))
+      .where(
+        and(
+          eq(changes.entity, c.entity),
+          eq(changes.entityId, c.entityId),
+          isNull(changes.revertedAt),
+        ),
+      )
       .orderBy(desc(changes.at))
       .limit(1);
-    if (latest?.id !== c.id) throw conflict('This item changed again since; undo the newer change first.');
+    if (latest?.id !== c.id)
+      throw conflict('This item changed again since; undo the newer change first.');
 
     const { table, live } = TABLES[c.entity];
     const idCol = table.id;
@@ -108,10 +120,17 @@ defineOp({
       if (current) await ctx.db.delete(table).where(eq(idCol, c.entityId));
     } else if (c.kind === 'update') {
       if (!current) throw conflict('That item no longer exists.');
-      [restored] = (await ctx.db.update(table).set(revive(table, c.before as Record<string, unknown>)).where(eq(idCol, c.entityId)).returning()) as Record<string, unknown>[];
+      [restored] = (await ctx.db
+        .update(table)
+        .set(revive(table, c.before as Record<string, unknown>))
+        .where(eq(idCol, c.entityId))
+        .returning()) as Record<string, unknown>[];
     } else {
       if (current) throw conflict('That item already exists again.');
-      [restored] = (await ctx.db.insert(table).values(revive(table, c.before as Record<string, unknown>)).returning()) as Record<string, unknown>[];
+      [restored] = (await ctx.db
+        .insert(table)
+        .values(revive(table, c.before as Record<string, unknown>))
+        .returning()) as Record<string, unknown>[];
     }
     await ctx.db.update(changes).set({ revertedAt: new Date() }).where(eq(changes.id, c.id));
     const revertId = await ctx.record({
@@ -126,10 +145,20 @@ defineOp({
       revertOf: c.id,
     });
     // The undo is now the latest change for the item, so undoing it again acts as redo.
-    if (c.sessionId && live) ctx.publish(`session:${c.sessionId}`, { type: 'invalidate', entity: live });
-    if (c.sessionId && c.entity === 'event') ctx.publish(`session:${c.sessionId}`, { type: 'invalidate', entity: 'session' });
-    if (c.entity === 'category') ctx.publish(`show:${c.showId}`, { type: 'show_changed', showId: c.showId, entity: 'category' });
-    const [out] = await toChanges(ctx, (await ctx.db.select().from(changes).where(eq(changes.id, revertId))));
+    if (c.sessionId && live)
+      ctx.publish(`session:${c.sessionId}`, { type: 'invalidate', entity: live });
+    if (c.sessionId && c.entity === 'event')
+      ctx.publish(`session:${c.sessionId}`, { type: 'invalidate', entity: 'session' });
+    if (c.entity === 'category')
+      ctx.publish(`show:${c.showId}`, {
+        type: 'show_changed',
+        showId: c.showId,
+        entity: 'category',
+      });
+    const [out] = await toChanges(
+      ctx,
+      await ctx.db.select().from(changes).where(eq(changes.id, revertId)),
+    );
     return out!;
   },
 });

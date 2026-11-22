@@ -41,7 +41,8 @@ export function toRpcError(err: unknown): RpcError {
     };
   }
   // Unique-violation from Postgres → conflict.
-  const pgCode = (err as { code?: string; cause?: { code?: string } })?.cause?.code ??
+  const pgCode =
+    (err as { code?: string; cause?: { code?: string } })?.cause?.code ??
     (err as { code?: string })?.code;
   if (pgCode === '23505') return { code: 'conflict', message: 'That already exists.' };
   console.error(err);

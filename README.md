@@ -63,10 +63,10 @@ Settings → Agents. Details in [docs/mcp.md](docs/mcp.md).
 
 ## Repository
 
-| Path | What |
-|---|---|
+| Path                | What                                                                        |
+| ------------------- | --------------------------------------------------------------------------- |
 | `packages/contract` | Shared Zod schemas, entity types, op catalog, dashboard spec, timecode math |
-| `apps/server` | API, WebSockets, MCP + OAuth, worker (`src/worker`) |
-| `apps/web` | React SPA |
-| `apps/companion` | Bitfocus Companion module |
-| `docs/` | Feature notes (MCP, media, companion, UI inventory) |
+| `apps/server`       | API, WebSockets, MCP + OAuth, worker (`src/worker`)                         |
+| `apps/web`          | React SPA                                                                   |
+| `apps/companion`    | Bitfocus Companion module                                                   |
+| `docs/`             | Feature notes (MCP, media, companion, UI inventory)                         |

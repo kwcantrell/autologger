@@ -12,7 +12,13 @@ const queryClient = new QueryClient({
       refetchOnWindowFocus: true,
       // Never retry what retrying can't fix.
       retry: (count, e) =>
-        count < 1 && !(e instanceof RpcError && ['forbidden', 'not_found', 'unauthenticated', 'bad_request', 'unavailable'].includes(e.code)),
+        count < 1 &&
+        !(
+          e instanceof RpcError &&
+          ['forbidden', 'not_found', 'unauthenticated', 'bad_request', 'unavailable'].includes(
+            e.code,
+          )
+        ),
     },
   },
 });

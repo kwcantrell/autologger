@@ -10,7 +10,8 @@ export type RecorderState = 'idle' | 'starting' | 'recording' | 'stopping';
 
 function pickMime(): string {
   const options = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
-  for (const m of options) if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)) return m;
+  for (const m of options)
+    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)) return m;
   return '';
 }
 
@@ -18,7 +19,8 @@ export function recorderSupport(): string | null {
   if (typeof window === 'undefined') return null;
   if (!window.isSecureContext) return 'Recording needs a secure connection (https or localhost).';
   if (!navigator.mediaDevices?.getUserMedia) return "This browser can't access a microphone.";
-  if (typeof MediaRecorder === 'undefined') return "This browser can't record audio (no MediaRecorder).";
+  if (typeof MediaRecorder === 'undefined')
+    return "This browser can't record audio (no MediaRecorder).";
   return null;
 }
 
@@ -70,7 +72,7 @@ export function useRecorder(sessionId: string, elapsedSec: () => number) {
   const cleanup = useCallback(() => {
     clearInterval(rolloverRef.current);
     cancelAnimationFrame(levelRafRef.current);
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    for (const track of streamRef.current?.getTracks() ?? []) track.stop();
     streamRef.current = null;
     void ctxRef.current?.close().catch(() => undefined);
     ctxRef.current = null;
@@ -90,7 +92,9 @@ export function useRecorder(sessionId: string, elapsedSec: () => number) {
     setState('starting');
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false } });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false },
+      });
     } catch (e) {
       setState('idle');
       const name = e instanceof DOMException ? e.name : '';
@@ -139,7 +143,9 @@ export function useRecorder(sessionId: string, elapsedSec: () => number) {
     }
     // A track ending (device unplugged) stops the recording honestly.
     stream.getAudioTracks()[0]?.addEventListener('ended', () => {
-      setError('The microphone was disconnected. Recording stopped; the audio so far is being uploaded.');
+      setError(
+        'The microphone was disconnected. Recording stopped; the audio so far is being uploaded.',
+      );
       stoppingRef.current = true;
       if (recRef.current && recRef.current.state !== 'inactive') recRef.current.stop();
       cleanup();

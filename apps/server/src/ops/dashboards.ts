@@ -22,21 +22,33 @@ async function loadDashboard(ctx: Ctx, id: string, need: 'read' | 'write') {
 }
 
 /** Evaluate a named live query over one session. Rows use stable, documented field names. */
-export async function runDashboardQuery(ctx: Ctx, sessionId: string, q: DashboardQuery): Promise<DashboardRows> {
+export async function runDashboardQuery(
+  ctx: Ctx,
+  sessionId: string,
+  q: DashboardQuery,
+): Promise<DashboardRows> {
   const [s] = await ctx.db.select().from(sessions).where(eq(sessions.id, sessionId));
   if (!s) throw notFound('Session');
   const atSec = sql<number>`greatest(0, (${events.timecodeFrames} - ${s.startOffsetFrames})::float / ${s.frameRate})`;
   switch (q.name) {
     case 'events_by_category':
       return ctx.db
-        .select({ category: events.category, color: sql<string>`max(${events.color})`, count: sql<number>`count(*)::int` })
+        .select({
+          category: events.category,
+          color: sql<string>`max(${events.color})`,
+          count: sql<number>`count(*)::int`,
+        })
         .from(events)
         .where(eq(events.sessionId, sessionId))
         .groupBy(events.category)
         .orderBy(desc(sql`count(*)`));
     case 'events_over_time': {
       const rows = await ctx.db
-        .select({ bucket: sql<number>`floor(${atSec} / ${q.bucketSec})::int`, category: events.category, count: sql<number>`count(*)::int` })
+        .select({
+          bucket: sql<number>`floor(${atSec} / ${q.bucketSec})::int`,
+          category: events.category,
+          count: sql<number>`count(*)::int`,
+        })
         .from(events)
         .where(eq(events.sessionId, sessionId))
         .groupBy(sql`1`, events.category)
@@ -58,18 +70,33 @@ export async function runDashboardQuery(ctx: Ctx, sessionId: string, q: Dashboar
         .orderBy(desc(sql`2`));
     case 'topics':
       return ctx.db
-        .select({ atSec: topics.startSec, durationSec: topics.durationSec, label: topics.title, level: topics.level, summary: topics.summary })
+        .select({
+          atSec: topics.startSec,
+          durationSec: topics.durationSec,
+          label: topics.title,
+          level: topics.level,
+          summary: topics.summary,
+        })
         .from(topics)
         .where(eq(topics.sessionId, sessionId))
         .orderBy(asc(topics.startSec));
     case 'events': {
       const rows = await ctx.db
-        .select({ atSec, label: events.category, category: events.category, message: events.message, value: events.value, color: events.color })
+        .select({
+          atSec,
+          label: events.category,
+          category: events.category,
+          message: events.message,
+          value: events.value,
+          color: events.color,
+        })
         .from(events)
         .where(eq(events.sessionId, sessionId))
         .orderBy(asc(events.timecodeFrames))
         .limit(2000);
-      return rows.filter((r) => !q.categories || q.categories.includes(r.category)).slice(0, q.limit);
+      return rows
+        .filter((r) => !q.categories || q.categories.includes(r.category))
+        .slice(0, q.limit);
     }
     case 'summary_stats': {
       const [r] = await ctx.db
@@ -93,8 +120,15 @@ defineOp({
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId }) {
     await requireSession(ctx, sessionId, 'read');
-    const rows = await ctx.db.select().from(dashboards).where(eq(dashboards.sessionId, sessionId)).orderBy(asc(dashboards.createdAt));
-    const users = await userRefs(ctx.db, rows.flatMap((r) => [r.createdBy, r.updatedBy]));
+    const rows = await ctx.db
+      .select()
+      .from(dashboards)
+      .where(eq(dashboards.sessionId, sessionId))
+      .orderBy(asc(dashboards.createdAt));
+    const users = await userRefs(
+      ctx.db,
+      rows.flatMap((r) => [r.createdBy, r.updatedBy]),
+    );
     return rows.map((r) => toDashboard(r, users));
   },
 });
@@ -130,16 +164,47 @@ Prefer live queries for counts so the dashboard stays current. Markdown is rende
       const prev = await loadDashboard(ctx, dashboardId, 'write');
       [row] = (await ctx.db
         .update(dashboards)
-        .set({ title: spec.title, spec, revision: prev.row.revision + 1, updatedBy: ctx.actor.user.id, updatedAt: new Date() })
+        .set({
+          title: spec.title,
+          spec,
+          revision: prev.row.revision + 1,
+          updatedBy: ctx.actor.user.id,
+          updatedAt: new Date(),
+        })
         .where(eq(dashboards.id, dashboardId))
         .returning()) as [typeof row];
-      await ctx.record({ entity: 'dashboard', entityId: row.id, kind: 'update', summary: `Updated dashboard “${spec.title}”`, showId: session.showId, sessionId, before: snapshot(prev.row), after: snapshot(row) });
+      await ctx.record({
+        entity: 'dashboard',
+        entityId: row.id,
+        kind: 'update',
+        summary: `Updated dashboard “${spec.title}”`,
+        showId: session.showId,
+        sessionId,
+        before: snapshot(prev.row),
+        after: snapshot(row),
+      });
     } else {
       [row] = (await ctx.db
         .insert(dashboards)
-        .values({ id: newId('dsh'), sessionId, title: spec.title, spec, via: ctx.actor.via, createdBy: ctx.actor.user.id, updatedBy: ctx.actor.user.id })
+        .values({
+          id: newId('dsh'),
+          sessionId,
+          title: spec.title,
+          spec,
+          via: ctx.actor.via,
+          createdBy: ctx.actor.user.id,
+          updatedBy: ctx.actor.user.id,
+        })
         .returning()) as [typeof row];
-      await ctx.record({ entity: 'dashboard', entityId: row.id, kind: 'create', summary: `Created dashboard “${spec.title}”`, showId: session.showId, sessionId, after: snapshot(row) });
+      await ctx.record({
+        entity: 'dashboard',
+        entityId: row.id,
+        kind: 'create',
+        summary: `Created dashboard “${spec.title}”`,
+        showId: session.showId,
+        sessionId,
+        after: snapshot(row),
+      });
     }
     const out = await entity(ctx, row);
     ctx.publish(`session:${sessionId}`, changeMessage('dashboard', 'upsert', out.id, out));
@@ -155,7 +220,15 @@ defineOp({
   async run(ctx, { dashboardId }) {
     const { row, session } = await loadDashboard(ctx, dashboardId, 'write');
     await ctx.db.delete(dashboards).where(eq(dashboards.id, dashboardId));
-    await ctx.record({ entity: 'dashboard', entityId: row.id, kind: 'delete', summary: `Deleted dashboard “${row.title}”`, showId: session.showId, sessionId: session.id, before: snapshot(row) });
+    await ctx.record({
+      entity: 'dashboard',
+      entityId: row.id,
+      kind: 'delete',
+      summary: `Deleted dashboard “${row.title}”`,
+      showId: session.showId,
+      sessionId: session.id,
+      before: snapshot(row),
+    });
     ctx.publish(`session:${session.id}`, changeMessage('dashboard', 'delete', dashboardId));
     return { deleted: true };
   },
@@ -163,7 +236,8 @@ defineOp({
 
 defineOp({
   name: 'dashboards.query',
-  description: 'Run one live dashboard query and return its rows (useful to preview data before saving a dashboard).',
+  description:
+    'Run one live dashboard query and return its rows (useful to preview data before saving a dashboard).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, query }) {

@@ -1,10 +1,22 @@
-import { InstanceBase, InstanceStatus, runEntrypoint, type SomeCompanionConfigField } from '@companion-module/base';
+import {
+  InstanceBase,
+  InstanceStatus,
+  runEntrypoint,
+  type SomeCompanionConfigField,
+} from '@companion-module/base';
 import { actionDefinitions } from './actions.js';
 import { getConfigFields, type ModuleConfig, type ModuleSecrets } from './config.js';
 import { CompanionConnection, type ConnectionStatus } from './connection.js';
 import { feedbackDefinitions } from './feedbacks.js';
 import { presetDefinitions } from './presets.js';
-import { type CompanionState, type LiveState, liveState, socketUrl, timecodeAt, toVariableValues } from './state.js';
+import {
+  type CompanionState,
+  type LiveState,
+  liveState,
+  socketUrl,
+  timecodeAt,
+  toVariableValues,
+} from './state.js';
 import { UpgradeScripts } from './upgrades.js';
 import { variableDefinitions } from './variables.js';
 
@@ -12,7 +24,17 @@ const TICK_MS = 100;
 
 /** Category ids + names + kinds/options: when this changes, actions and presets are rebuilt. */
 function categoriesKey(s: CompanionState | null): string {
-  return JSON.stringify(s?.categories.map((c) => [c.id, c.name, c.position, c.kind, c.options, c.onLabel, c.offLabel]) ?? []);
+  return JSON.stringify(
+    s?.categories.map((c) => [
+      c.id,
+      c.name,
+      c.position,
+      c.kind,
+      c.options,
+      c.onLabel,
+      c.offLabel,
+    ]) ?? [],
+  );
 }
 
 class AutologgerInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
@@ -38,8 +60,13 @@ class AutologgerInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
     this.conn?.stop();
     this.conn = null;
     this.applyState(null);
-    if (!this.config.url?.trim()) return this.updateStatus(InstanceStatus.BadConfig, 'Enter the AutoLogger server URL');
-    if (!this.token) return this.updateStatus(InstanceStatus.BadConfig, 'Paste a device token (Settings → Companion devices)');
+    if (!this.config.url?.trim())
+      return this.updateStatus(InstanceStatus.BadConfig, 'Enter the AutoLogger server URL');
+    if (!this.token)
+      return this.updateStatus(
+        InstanceStatus.BadConfig,
+        'Paste a device token (Settings → Companion devices)',
+      );
     let url: string;
     try {
       url = socketUrl(this.config.url);
@@ -68,17 +95,21 @@ class AutologgerInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
   private applyStatus(status: ConnectionStatus, message?: string): void {
     switch (status) {
       case 'ok':
-        return this.updateStatus(InstanceStatus.Ok);
+        this.updateStatus(InstanceStatus.Ok);
+        break;
       case 'connecting':
-        return this.updateStatus(InstanceStatus.Connecting);
+        this.updateStatus(InstanceStatus.Connecting);
+        break;
       case 'bad_token':
         this.applyState(null);
-        return this.updateStatus(
+        this.updateStatus(
           InstanceStatus.AuthenticationFailure,
           `${message ?? 'Device token rejected'}: create a new device in AutoLogger Settings → Companion devices`,
         );
+        break;
       case 'error':
-        return this.updateStatus(InstanceStatus.ConnectionFailure, message ?? 'Cannot reach AutoLogger');
+        this.updateStatus(InstanceStatus.ConnectionFailure, message ?? 'Cannot reach AutoLogger');
+        break;
     }
   }
 

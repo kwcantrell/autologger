@@ -15,7 +15,7 @@ x-app-env: &app-env
   S3_BUCKET: autologger
   S3_ACCESS_KEY_ID: autologger
   S3_SECRET_ACCESS_KEY: ${S3_PASSWORD:?set S3_PASSWORD}
-  S3_FORCE_PATH_STYLE: '1'
+  S3_FORCE_PATH_STYLE: "1"
   DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
 
 services:
@@ -27,13 +27,19 @@ services:
       postgres: { condition: service_healthy }
       s3: { condition: service_started }
     healthcheck:
-      test: ['CMD', 'node', '-e', "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
       interval: 15s
 
   worker:
     build: .
     restart: unless-stopped
-    command: ['node', 'src/worker/main.ts']
+    command: ["node", "src/worker/main.ts"]
     environment: *app-env
     depends_on:
       app: { condition: service_healthy }
@@ -47,7 +53,7 @@ services:
       POSTGRES_DB: autologger
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U autologger']
+      test: ["CMD-SHELL", "pg_isready -U autologger"]
       interval: 5s
 
   s3:
@@ -56,7 +62,7 @@ services:
     restart: unless-stopped
     environment:
       S3_SECRET: ${S3_PASSWORD}
-    entrypoint: ['/bin/sh', '-c']
+    entrypoint: ["/bin/sh", "-c"]
     # Write the S3 credentials file from env, then start SeaweedFS with its S3 gateway on :8333.
     command:
       - >-
@@ -67,7 +73,7 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
-    ports: ['80:80', '443:443']
+    ports: ["80:80", "443:443"]
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
     volumes:

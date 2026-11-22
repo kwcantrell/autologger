@@ -47,7 +47,11 @@ export type ServerMessage =
   | { type: 'result'; reqId: string; ok: false; error: RpcError }
   | { type: 'pong' };
 
-export type CompanionOp = 'companion.state' | 'transport.start' | 'transport.stop' | 'events.create';
+export type CompanionOp =
+  | 'companion.state'
+  | 'transport.start'
+  | 'transport.stop'
+  | 'events.create';
 
 // ── timecode (copy of packages/contract/src/timecode.ts essentials) ─────
 
@@ -90,7 +94,11 @@ export interface LiveState {
   clockOffsetMs: number;
 }
 
-export function liveState(state: CompanionState, serverTime: string, localNowMs: number): LiveState {
+export function liveState(
+  state: CompanionState,
+  serverTime: string,
+  localNowMs: number,
+): LiveState {
   const server = Date.parse(serverTime);
   return { state, clockOffsetMs: Number.isFinite(server) ? server - localNowMs : 0 };
 }
@@ -107,7 +115,10 @@ export const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
 export type VariableValues = Record<string, string | number | undefined>;
 
-export function categoryAtSlot(state: CompanionState | null | undefined, slot: number): Category | undefined {
+export function categoryAtSlot(
+  state: CompanionState | null | undefined,
+  slot: number,
+): Category | undefined {
   return state?.categories.find((c) => c.position === slot - 1);
 }
 
@@ -130,7 +141,8 @@ export function toVariableValues(live: LiveState | null, localNowMs: number): Va
     rolling: s?.isRolling ? 'ROLLING' : 'STOPPED',
     frame_rate: s ? s.frameRate : '',
     last_event: lastEventText(st),
-    last_event_timecode: st?.lastEvent && s ? formatFrames(st.lastEvent.timecodeFrames, s.frameRate) : '',
+    last_event_timecode:
+      st?.lastEvent && s ? formatFrames(st.lastEvent.timecodeFrames, s.frameRate) : '',
   };
   for (const slot of SLOTS) out[`cat_${slot}`] = categoryAtSlot(st, slot)?.name ?? '';
   return out;
@@ -171,6 +183,7 @@ export function socketUrl(raw: string): string {
   const u = new URL(base);
   if (u.protocol === 'http:') u.protocol = 'ws:';
   else if (u.protocol === 'https:') u.protocol = 'wss:';
-  if (!u.pathname.endsWith('/ws/companion')) u.pathname = `${u.pathname.replace(/\/+$/, '')}/ws/companion`;
+  if (!u.pathname.endsWith('/ws/companion'))
+    u.pathname = `${u.pathname.replace(/\/+$/, '')}/ws/companion`;
   return u.toString();
 }

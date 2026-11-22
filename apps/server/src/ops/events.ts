@@ -15,7 +15,10 @@ const FREE_COLOR = '#a3a3a3';
 type EventRow = typeof events.$inferSelect;
 
 export async function eventEntities(ctx: Ctx, rows: EventRow[]): Promise<SessionEvent[]> {
-  const users = await userRefs(ctx.db, rows.map((r) => r.createdBy));
+  const users = await userRefs(
+    ctx.db,
+    rows.map((r) => r.createdBy),
+  );
   return rows.map((r) => toEvent(r, users));
 }
 
@@ -28,10 +31,12 @@ function sourceFor(ctx: Ctx): EventRow['source'] {
 function resolveFrames(session: SessionRow, t: { timecode?: string; atSec?: number }): number {
   if (t.timecode) {
     const f = parseTimecode(t.timecode, session.frameRate);
-    if (f === null) throw badRequest(`Timecode ${t.timecode} is not valid at ${session.frameRate} fps.`);
+    if (f === null)
+      throw badRequest(`Timecode ${t.timecode} is not valid at ${session.frameRate} fps.`);
     return f;
   }
-  if (t.atSec !== undefined) return session.startOffsetFrames + Math.round(t.atSec * session.frameRate);
+  if (t.atSec !== undefined)
+    return session.startOffsetFrames + Math.round(t.atSec * session.frameRate);
   return transportFrames({
     isRolling: session.isRolling,
     rollStartedAt: iso(session.rollStartedAt),
@@ -61,7 +66,9 @@ async function resolveCategory(
     .select()
     .from(categories)
     .where(and(eq(categories.showId, showId), sql`lower(${categories.name}) = lower(${label})`));
-  return c ? { categoryId: c.id, category: c.name, color: c.color } : { categoryId: null, category: label, color: FREE_COLOR };
+  return c
+    ? { categoryId: c.id, category: c.name, color: c.color }
+    : { categoryId: null, category: label, color: FREE_COLOR };
 }
 
 type EventInput = {
@@ -73,7 +80,12 @@ type EventInput = {
   atSec?: number;
 };
 
-async function insertEvent(ctx: Ctx, session: SessionRow, input: EventInput, source = sourceFor(ctx)): Promise<EventRow> {
+async function insertEvent(
+  ctx: Ctx,
+  session: SessionRow,
+  input: EventInput,
+  source = sourceFor(ctx),
+): Promise<EventRow> {
   const cat = await resolveCategory(ctx, session.showId, input);
   const [row] = await ctx.db
     .insert(events)
@@ -101,16 +113,22 @@ async function insertEvent(ctx: Ctx, session: SessionRow, input: EventInput, sou
   return row!;
 }
 
-async function publishEvents(ctx: Ctx, sessionId: string, rows: EventRow[]): Promise<SessionEvent[]> {
+async function publishEvents(
+  ctx: Ctx,
+  sessionId: string,
+  rows: EventRow[],
+): Promise<SessionEvent[]> {
   const out = await eventEntities(ctx, rows);
-  for (const e of out) ctx.publish(`session:${sessionId}`, changeMessage('event', 'upsert', e.id, e));
+  for (const e of out)
+    ctx.publish(`session:${sessionId}`, changeMessage('event', 'upsert', e.id, e));
   await publishSession(ctx, sessionId);
   return out;
 }
 
 defineOp({
   name: 'events.list',
-  description: 'All events logged in a session, in timecode order. Times are frame counts on the session clock (see sessions.get for frameRate and startOffsetFrames).',
+  description:
+    'All events logged in a session, in timecode order. Times are frame counts on the session clock (see sessions.get for frameRate and startOffsetFrames).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, categoryIds, source }) {
@@ -146,7 +164,8 @@ defineOp({
 
 defineOp({
   name: 'events.createMany',
-  description: 'Log up to 500 events at once (same fields as events.create). Use atSec to line events up with the transcript.',
+  description:
+    'Log up to 500 events at once (same fields as events.create). Use atSec to line events up with the transcript.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, events: list }) {
@@ -173,11 +192,18 @@ defineOp({
     const { row, session } = await loadEvent(ctx, eventId, 'write');
     const set: Partial<typeof events.$inferInsert> = { updatedAt: new Date() };
     if (categoryId !== undefined || category !== undefined) {
-      Object.assign(set, await resolveCategory(ctx, session.showId, { categoryId, category: category ?? row.category }));
+      Object.assign(
+        set,
+        await resolveCategory(ctx, session.showId, {
+          categoryId,
+          category: category ?? row.category,
+        }),
+      );
     }
     if (message !== undefined) set.message = message;
     if (value !== undefined) set.value = value;
-    if (timecode !== undefined || atSec !== undefined) set.timecodeFrames = resolveFrames(session, { timecode, atSec });
+    if (timecode !== undefined || atSec !== undefined)
+      set.timecodeFrames = resolveFrames(session, { timecode, atSec });
     const [after] = await ctx.db.update(events).set(set).where(eq(events.id, eventId)).returning();
     await ctx.record({
       entity: 'event',
@@ -264,7 +290,12 @@ defineOp({
     const header = rows[0]?.map((h) => h.trim().toLowerCase());
     if (header?.includes('timecode') || header?.includes('category')) {
       const idx = (n: string, d: number) => (header.indexOf(n) >= 0 ? header.indexOf(n) : d);
-      cols = { timecode: idx('timecode', 0), category: idx('category', 1), message: idx('message', 2), value: idx('value', 3) };
+      cols = {
+        timecode: idx('timecode', 0),
+        category: idx('category', 1),
+        message: idx('message', 2),
+        value: idx('value', 3),
+      };
       start = 1;
     }
     const skipped: { line: number; reason: string }[] = [];
@@ -282,7 +313,17 @@ defineOp({
         continue;
       }
       inserted.push(
-        await insertEvent(ctx, session, { timecode: tc, category, message: r[cols.message] ?? '', value: r[cols.value]?.trim() || null }, 'import'),
+        await insertEvent(
+          ctx,
+          session,
+          {
+            timecode: tc,
+            category,
+            message: r[cols.message] ?? '',
+            value: r[cols.value]?.trim() || null,
+          },
+          'import',
+        ),
       );
     }
     ctx.publish(`session:${sessionId}`, { type: 'invalidate', entity: 'event' });

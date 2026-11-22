@@ -6,8 +6,13 @@ import { useMemo } from 'react';
 import { useMe, useShows } from '@/api/queries';
 import { activeScope, useStore } from '@/lib/store';
 
-export const ROLE_LABEL: Record<TeamRole, string> = { owner: 'Owner', admin: 'Admin', member: 'Member' };
-export const isManager = (role: TeamRole | undefined | null) => role === 'owner' || role === 'admin';
+export const ROLE_LABEL: Record<TeamRole, string> = {
+  owner: 'Owner',
+  admin: 'Admin',
+  member: 'Member',
+};
+export const isManager = (role: TeamRole | undefined | null) =>
+  role === 'owner' || role === 'admin';
 
 export interface Active {
   teams: Team[];
@@ -30,7 +35,9 @@ export function selectTeam(teamId: string) {
   activeScope.set((s) => (s.teamId === teamId ? s : { teamId, showId: null }));
 }
 export function selectShow(show: Pick<Show, 'id' | 'teamId'>) {
-  activeScope.set((s) => (s.teamId === show.teamId && s.showId === show.id ? s : { teamId: show.teamId, showId: show.id }));
+  activeScope.set((s) =>
+    s.teamId === show.teamId && s.showId === show.id ? s : { teamId: show.teamId, showId: show.id },
+  );
 }
 
 export function useActive(): Active {

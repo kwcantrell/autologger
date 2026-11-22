@@ -78,17 +78,25 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
   );
 
   /** Segment containing `sec`, or the next one after it. */
-  const locate = (sec: number) =>
-    listRef.current.find((p) => sec >= p.start && sec < Math.max(p.end, p.start + 0.01)) ??
-    listRef.current.find((p) => p.start >= sec) ??
-    null;
+  const locate = useCallback(
+    (sec: number) =>
+      listRef.current.find((p) => sec >= p.start && sec < Math.max(p.end, p.start + 0.01)) ??
+      listRef.current.find((p) => p.start >= sec) ??
+      null,
+    [],
+  );
 
   const seek = useCallback(
     async (sec: number, play = false) => {
       setPositionSec(sec);
       const ps = locate(sec);
       if (!ps) {
-        if (play) setError(listRef.current.length ? 'No audio at this point of the session.' : 'This session has no playable audio yet.');
+        if (play)
+          setError(
+            listRef.current.length
+              ? 'No audio at this point of the session.'
+              : 'This session has no playable audio yet.',
+          );
         return;
       }
       try {
@@ -99,7 +107,7 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
         setError(errorMessage(e));
       }
     },
-    [load],
+    [load, locate],
   );
 
   const toggle = useCallback(async () => {
@@ -134,7 +142,8 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
     const onEnded = () => {
       // Continue into the next segment.
       const cur = currentRef.current;
-      const next = cur && listRef.current.find((p) => p.start >= cur.end - 0.5 && p.seg.id !== cur.seg.id);
+      const next =
+        cur && listRef.current.find((p) => p.start >= cur.end - 0.5 && p.seg.id !== cur.seg.id);
       if (next) void seek(next.start, true);
       else onPause();
     };
@@ -164,7 +173,15 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
     [],
   );
 
-  return { segments: list, isPlaying, positionSec, error, seek, toggle, clearError: () => setError(null) };
+  return {
+    segments: list,
+    isPlaying,
+    positionSec,
+    error,
+    seek,
+    toggle,
+    clearError: () => setError(null),
+  };
 }
 
 export type Player = ReturnType<typeof usePlayer>;

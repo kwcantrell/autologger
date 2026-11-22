@@ -34,7 +34,10 @@ export function HomeRoute() {
           {recent && (
             <section className="flex w-full justify-center" aria-labelledby="home-resume-title">
               <Card className={RESUME_CARD}>
-                <h2 id="home-resume-title" className="m-0 truncate text-[1.05rem] font-semibold leading-snug">
+                <h2
+                  id="home-resume-title"
+                  className="m-0 truncate text-[1.05rem] font-semibold leading-snug"
+                >
                   {recent.title || 'Untitled session'}
                 </h2>
                 <p className="m-0 text-[0.72rem] leading-[1.35] text-si-muted">
@@ -57,7 +60,11 @@ export function HomeRoute() {
           )}
 
           {active.canWriteShow ? (
-            <Button variant={recent ? 'outline' : 'default'} id="home-new-session" onClick={() => newSessionOpen.set(true)}>
+            <Button
+              variant={recent ? 'outline' : 'default'}
+              id="home-new-session"
+              onClick={() => newSessionOpen.set(true)}
+            >
               <Plus strokeWidth={2} aria-hidden="true" />
               {recent ? 'New session' : 'Start a session'}
             </Button>
@@ -68,7 +75,11 @@ export function HomeRoute() {
                   active.canManageTeam ? (
                     <>
                       {active.team?.name} has no shows yet.{' '}
-                      <button type="button" className="underline underline-offset-2 hover:text-si-fg" onClick={() => settingsOpen.set('shows')}>
+                      <button
+                        type="button"
+                        className="underline underline-offset-2 hover:text-si-fg"
+                        onClick={() => settingsOpen.set('shows')}
+                      >
                         Add one in Settings → Shows
                       </button>{' '}
                       to start logging.

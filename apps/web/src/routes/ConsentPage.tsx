@@ -33,8 +33,13 @@ function ConsentCard({ children }: { children: ReactNode }) {
 function Problem({ message }: { message: string }) {
   return (
     <ConsentCard>
-      <Alert variant="destructive" className="mt-6 block border-(--si-danger-line) text-left *:data-[slot=alert-description]:text-si-danger">
-        <AlertDescription className="m-0 block text-[0.85rem] leading-[1.45]">{message}</AlertDescription>
+      <Alert
+        variant="destructive"
+        className="mt-6 block border-(--si-danger-line) text-left *:data-[slot=alert-description]:text-si-danger"
+      >
+        <AlertDescription className="m-0 block text-[0.85rem] leading-[1.45]">
+          {message}
+        </AlertDescription>
       </Alert>
       <p className="mx-auto mt-4 mb-0 max-w-[21rem] text-[0.8rem] leading-[1.5] text-si-muted">
         You can close this tab and start connecting again from your app.
@@ -46,8 +51,12 @@ function Problem({ message }: { message: string }) {
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3 py-2">
-      <dt className="shrink-0 text-xs font-semibold tracking-wide text-si-dim uppercase">{label}</dt>
-      <dd className="m-0 min-w-0 truncate text-right font-tc text-[0.8rem] text-si-fg">{children}</dd>
+      <dt className="shrink-0 text-xs font-semibold tracking-wide text-si-dim uppercase">
+        {label}
+      </dt>
+      <dd className="m-0 min-w-0 truncate text-right font-tc text-[0.8rem] text-si-fg">
+        {children}
+      </dd>
     </div>
   );
 }
@@ -58,7 +67,8 @@ export function ConsentPage() {
   const signedOut = me.data === null;
 
   useEffect(() => {
-    if (signedOut) location.replace(`/login?return=${encodeURIComponent(location.pathname + location.search)}`);
+    if (signedOut)
+      location.replace(`/login?return=${encodeURIComponent(location.pathname + location.search)}`);
   }, [signedOut]);
 
   const req = useQuery({
@@ -85,7 +95,10 @@ export function ConsentPage() {
 
   if (me.isError) return <Problem message={errorMessage(me.error)} />;
   if (me.isPending || signedOut) return <RouteLoadingState frame="gate" label="Loading" />;
-  if (!requestId) return <Problem message="This link is missing its authorization request. Start connecting again from your app." />;
+  if (!requestId)
+    return (
+      <Problem message="This link is missing its authorization request. Start connecting again from your app." />
+    );
   if (req.isPending) return <RouteLoadingState frame="gate" label="Loading request" />;
   if (req.isError) return <Problem message={errorMessage(req.error)} />;
   const user = me.data;
@@ -100,35 +113,51 @@ export function ConsentPage() {
         {clientName} wants to access AutoLogger as you
       </p>
       <p className="mx-auto mt-3 mb-0 max-w-[22rem] text-[0.875rem] leading-[1.5] text-si-muted">
-        It will act as <span className="text-si-fg">{user.name || user.email}</span>, with exactly your access: it can
-        read and change the shows and sessions you can.
+        It will act as <span className="text-si-fg">{user.name || user.email}</span>, with exactly
+        your access: it can read and change the shows and sessions you can.
       </p>
 
       <dl className="mt-5 mb-0 divide-y divide-si-line rounded-ctl border border-si-line bg-si-bg px-3 text-left">
         <Row label="Returns to">{redirectHost}</Row>
         <Row label="Scope">{scope || '—'}</Row>
         {!Number.isNaN(expires.getTime()) && (
-          <Row label="Request expires">{expires.toLocaleTimeString(undefined, { timeStyle: 'short' })}</Row>
+          <Row label="Request expires">
+            {expires.toLocaleTimeString(undefined, { timeStyle: 'short' })}
+          </Row>
         )}
       </dl>
 
       <p className="mx-auto mt-4 mb-0 max-w-[22rem] text-[0.8rem] leading-[1.5] text-si-muted">
-        Every write it makes is logged under your name and can be undone from the session’s Agents tab. You can revoke
-        access any time in Settings › Agents.
+        Every write it makes is logged under your name and can be undone from the session’s Agents
+        tab. You can revoke access any time in Settings › Agents.
       </p>
 
       {decideError && (
-        <Alert variant="destructive" className="mt-5 block border-(--si-danger-line) text-left *:data-[slot=alert-description]:text-si-danger">
-          <AlertDescription className="m-0 block text-[0.85rem] leading-[1.45]">{decideError}</AlertDescription>
+        <Alert
+          variant="destructive"
+          className="mt-5 block border-(--si-danger-line) text-left *:data-[slot=alert-description]:text-si-danger"
+        >
+          <AlertDescription className="m-0 block text-[0.85rem] leading-[1.45]">
+            {decideError}
+          </AlertDescription>
         </Alert>
       )}
 
       <div className="mt-6 flex flex-col gap-3">
-        <Button className="h-11 w-full" disabled={deciding !== null} onClick={() => void decide(true)}>
+        <Button
+          className="h-11 w-full"
+          disabled={deciding !== null}
+          onClick={() => void decide(true)}
+        >
           {deciding === 'approve' && <Spinner role="presentation" aria-hidden="true" />}
           Approve
         </Button>
-        <Button variant="outline" className="h-11 w-full" disabled={deciding !== null} onClick={() => void decide(false)}>
+        <Button
+          variant="outline"
+          className="h-11 w-full"
+          disabled={deciding !== null}
+          onClick={() => void decide(false)}
+        >
           {deciding === 'deny' && <Spinner role="presentation" aria-hidden="true" />}
           Deny
         </Button>

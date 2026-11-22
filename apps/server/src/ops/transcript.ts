@@ -19,12 +19,17 @@ function rangeWhere(sessionId: string, fromSec?: number, toSec?: number) {
 
 defineOp({
   name: 'transcript.get',
-  description: 'Transcript segments (speaker turns) with word timings. Times are seconds from session start. Prefer transcript.text for reading.',
+  description:
+    'Transcript segments (speaker turns) with word timings. Times are seconds from session start. Prefer transcript.text for reading.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, fromSec, toSec }) {
     await requireSession(ctx, sessionId, 'read');
-    const rows = await ctx.db.select().from(ts).where(rangeWhere(sessionId, fromSec, toSec)).orderBy(asc(ts.startSec));
+    const rows = await ctx.db
+      .select()
+      .from(ts)
+      .where(rangeWhere(sessionId, fromSec, toSec))
+      .orderBy(asc(ts.startSec));
     return rows.map(toTranscriptSegment);
   },
 });
@@ -43,7 +48,10 @@ defineOp({
       .where(rangeWhere(sessionId, fromSec, toSec))
       .orderBy(asc(ts.startSec));
     const text = rows
-      .map((r) => `[${secondsToClock(r.startSec)} @${r.startSec.toFixed(1)}s] ${r.speaker || 'Speaker'}: ${r.text}`)
+      .map(
+        (r) =>
+          `[${secondsToClock(r.startSec)} @${r.startSec.toFixed(1)}s] ${r.speaker || 'Speaker'}: ${r.text}`,
+      )
       .join('\n');
     return { text, segments: rows.length };
   },
@@ -65,7 +73,11 @@ defineOp({
       // Word timings no longer match edited text; spread them evenly over the segment.
       const words = text.split(/\s+/).filter(Boolean);
       const step = (row.endSec - row.startSec) / Math.max(1, words.length);
-      set.words = words.map((w, i) => ({ w, s: row.startSec + i * step, e: row.startSec + (i + 1) * step }));
+      set.words = words.map((w, i) => ({
+        w,
+        s: row.startSec + i * step,
+        e: row.startSec + (i + 1) * step,
+      }));
     }
     const [after] = await ctx.db.update(ts).set(set).where(eq(ts.id, segmentId)).returning();
     await ctx.record({
@@ -79,14 +91,18 @@ defineOp({
       after: snapshot(after),
     });
     const out = toTranscriptSegment(after!);
-    ctx.publish(`session:${session.id}`, changeMessage('transcript_segment', 'upsert', out.id, out));
+    ctx.publish(
+      `session:${session.id}`,
+      changeMessage('transcript_segment', 'upsert', out.id, out),
+    );
     return out;
   },
 });
 
 defineOp({
   name: 'transcript.renameSpeaker',
-  description: 'Rename a speaker label across the whole session transcript (e.g. "Speaker 1" → "Dana").',
+  description:
+    'Rename a speaker label across the whole session transcript (e.g. "Speaker 1" → "Dana").',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, from, to }) {

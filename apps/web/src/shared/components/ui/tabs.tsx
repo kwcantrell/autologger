@@ -1,4 +1,3 @@
-
 import { Tabs as TabsPrimitive } from '@base-ui/react/tabs';
 import * as React from 'react';
 import { cn } from '@/shared/lib/utils';

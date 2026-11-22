@@ -38,7 +38,11 @@ function splitText(value: string): MdNode[] | null {
     if (m.index > last) out.push({ type: 'text', value: value.slice(last, m.index) });
     const title = (m[1] ?? '').trim();
     const label = (m[2] ?? '').trim() || title;
-    out.push({ type: 'link', url: WIKI_SCHEME + encodeURIComponent(title), children: [{ type: 'text', value: label }] });
+    out.push({
+      type: 'link',
+      url: WIKI_SCHEME + encodeURIComponent(title),
+      children: [{ type: 'text', value: label }],
+    });
     last = m.index + m[0].length;
   }
   if (last < value.length) out.push({ type: 'text', value: value.slice(last) });
@@ -68,7 +72,8 @@ function remarkWikiLinks() {
 
 // ── renderers ─────────────────────────────────────────────────────────────────────────────────
 
-const LINK_CLASS = 'text-si-fg underline decoration-(--si-line-strong) underline-offset-2 hover-always:text-si-accent';
+const LINK_CLASS =
+  'text-si-fg underline decoration-(--si-line-strong) underline-offset-2 hover-always:text-si-accent';
 
 function components(resolve: WikiResolver): Components {
   return {
@@ -108,6 +113,7 @@ function UnresolvedLink({ title, children }: { title: string; children: ReactNod
     <Tooltip content={`No page named “${title}”`}>
       <span
         data-slot="wiki-link-missing"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: focusable so keyboard users get the "no page" tooltip
         tabIndex={0}
         className="cursor-help text-si-dim underline decoration-dotted decoration-(--si-line-strong) underline-offset-2"
       >
@@ -128,7 +134,15 @@ const PROSE_CLASS = [
   '[&_hr]:my-4 [&_hr]:border-si-line',
 ].join(' ');
 
-export function WikiMarkdown({ body, resolve, className }: { body: string; resolve: WikiResolver; className?: string }) {
+export function WikiMarkdown({
+  body,
+  resolve,
+  className,
+}: {
+  body: string;
+  resolve: WikiResolver;
+  className?: string;
+}) {
   return (
     <div data-slot="wiki-markdown" className={cn(PROSE_CLASS, className)}>
       <Markdown

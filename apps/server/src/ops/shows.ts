@@ -1,22 +1,37 @@
 import type { Category, Show, ShowAccess } from '@autologger/contract';
 import { and, asc, eq, notInArray, type SQL, sql } from 'drizzle-orm';
-import { readableShowCondition, requireShow, requireTeamRole, showAccessMap } from '../core/authz.ts';
+import {
+  readableShowCondition,
+  requireShow,
+  requireTeamRole,
+  showAccessMap,
+} from '../core/authz.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
 import { toCategory } from './map.ts';
 
-const { shows, teams, sessions, categories } = schema;
+const { shows, teams, categories } = schema;
 
 export const DEFAULT_CATEGORIES = [
   { name: 'Scene', color: '#3b82f6', kind: 'button' as const },
-  { name: 'Audio issue', color: '#ef4444', kind: 'dropdown' as const, options: ['Lav', 'Boom', 'Noise', 'Clipping'] },
+  {
+    name: 'Audio issue',
+    color: '#ef4444',
+    kind: 'dropdown' as const,
+    options: ['Lav', 'Boom', 'Noise', 'Clipping'],
+  },
   { name: 'Note', color: '#a3a3a3', kind: 'text' as const },
 ];
 
 export function suggestedCode(name: string): string {
-  const words = name.toUpperCase().replace(/[^A-Z0-9 ]/g, '').split(/\s+/).filter(Boolean);
-  const code = words.length > 1 ? words.map((w) => w[0]).join('') : (words[0] ?? 'SHOW').slice(0, 4);
+  const words = name
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, '')
+    .split(/\s+/)
+    .filter(Boolean);
+  const code =
+    words.length > 1 ? words.map((w) => w[0]).join('') : (words[0] ?? 'SHOW').slice(0, 4);
   return code.slice(0, 8) || 'SHOW';
 }
 
@@ -32,7 +47,10 @@ async function loadShows(ctx: Ctx, where: SQL | undefined): Promise<Show[]> {
     .innerJoin(teams, eq(teams.id, shows.teamId))
     .where(and(readableShowCondition(ctx, shows.id), where))
     .orderBy(asc(teams.name), asc(shows.name));
-  const access = await showAccessMap(ctx, rows.map((r) => r.show));
+  const access = await showAccessMap(
+    ctx,
+    rows.map((r) => r.show),
+  );
   return rows
     .filter((r) => access.has(r.show.id))
     .map((r) => toShow(r.show, r.teamName, access, r.sessionCount, r.lastSessionAt));
@@ -68,13 +86,18 @@ export async function getShow(ctx: Ctx, showId: string): Promise<Show> {
 }
 
 export async function listCategories(ctx: Ctx, showId: string): Promise<Category[]> {
-  const rows = await ctx.db.select().from(categories).where(eq(categories.showId, showId)).orderBy(asc(categories.position));
+  const rows = await ctx.db
+    .select()
+    .from(categories)
+    .where(eq(categories.showId, showId))
+    .orderBy(asc(categories.position));
   return rows.map(toCategory);
 }
 
 defineOp({
   name: 'shows.list',
-  description: 'Shows you can access, across all your teams (or one team). Includes your access level.',
+  description:
+    'Shows you can access, across all your teams (or one team). Includes your access level.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   run: (ctx, { teamId }) => loadShows(ctx, teamId ? eq(shows.teamId, teamId) : undefined),
@@ -99,7 +122,13 @@ defineOp({
   async run(ctx, { teamId, name, code, defaultFrameRate }) {
     await requireTeamRole(ctx, teamId, 'admin');
     const id = newId('show');
-    await ctx.db.insert(shows).values({ id, teamId, name, code: (code || suggestedCode(name)).toUpperCase(), defaultFrameRate });
+    await ctx.db.insert(shows).values({
+      id,
+      teamId,
+      name,
+      code: (code || suggestedCode(name)).toUpperCase(),
+      defaultFrameRate,
+    });
     await ctx.db.insert(categories).values(
       DEFAULT_CATEGORIES.map((c, i) => ({
         id: newId('cat'),
@@ -166,9 +195,23 @@ defineOp({
     const keepIds = list.map((c) => c.id).filter((x): x is string => Boolean(x && byId.has(x)));
     const removed = existing.filter((c) => !keepIds.includes(c.id));
     if (removed.length) {
-      await ctx.db.delete(categories).where(and(eq(categories.showId, showId), keepIds.length ? notInArray(categories.id, keepIds) : undefined));
+      await ctx.db
+        .delete(categories)
+        .where(
+          and(
+            eq(categories.showId, showId),
+            keepIds.length ? notInArray(categories.id, keepIds) : undefined,
+          ),
+        );
       for (const c of removed) {
-        await ctx.record({ entity: 'category', entityId: c.id, kind: 'delete', summary: `Removed button “${c.name}”`, showId, before: snapshot(c) });
+        await ctx.record({
+          entity: 'category',
+          entityId: c.id,
+          kind: 'delete',
+          summary: `Removed button “${c.name}”`,
+          showId,
+          before: snapshot(c),
+        });
       }
     }
     for (const [position, c] of list.entries()) {
@@ -183,19 +226,42 @@ defineOp({
       };
       const prev = c.id ? byId.get(c.id) : undefined;
       if (prev) {
-        const [after] = await ctx.db.update(categories).set(values).where(eq(categories.id, prev.id)).returning();
-        const changed = (['name', 'color', 'kind', 'position', 'onLabel', 'offLabel'] as const).some((k) => prev[k] !== after![k]) ||
-          JSON.stringify(prev.options) !== JSON.stringify(after!.options);
+        const [after] = await ctx.db
+          .update(categories)
+          .set(values)
+          .where(eq(categories.id, prev.id))
+          .returning();
+        const changed =
+          (['name', 'color', 'kind', 'position', 'onLabel', 'offLabel'] as const).some(
+            (k) => prev[k] !== after![k],
+          ) || JSON.stringify(prev.options) !== JSON.stringify(after!.options);
         if (changed) {
-          await ctx.record({ entity: 'category', entityId: prev.id, kind: 'update', summary: `Edited button “${c.name}”`, showId, before: snapshot(prev), after: snapshot(after) });
+          await ctx.record({
+            entity: 'category',
+            entityId: prev.id,
+            kind: 'update',
+            summary: `Edited button “${c.name}”`,
+            showId,
+            before: snapshot(prev),
+            after: snapshot(after),
+          });
         }
       } else {
-        const [after] = await ctx.db.insert(categories).values({ id: newId('cat'), showId, ...values }).returning();
-        await ctx.record({ entity: 'category', entityId: after!.id, kind: 'create', summary: `Added button “${c.name}”`, showId, after: snapshot(after) });
+        const [after] = await ctx.db
+          .insert(categories)
+          .values({ id: newId('cat'), showId, ...values })
+          .returning();
+        await ctx.record({
+          entity: 'category',
+          entityId: after!.id,
+          kind: 'create',
+          summary: `Added button “${c.name}”`,
+          showId,
+          after: snapshot(after),
+        });
       }
     }
     ctx.publish(`show:${showId}`, { type: 'show_changed', showId, entity: 'category' });
     return listCategories(ctx, showId);
   },
 });
-

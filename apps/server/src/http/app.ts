@@ -6,7 +6,13 @@ import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { HTTP_STATUS, toRpcError } from '../core/errors.ts';
 import { type Actor, executeOp } from '../core/op.ts';
-import { env, googleConfigured, isProd, storageConfigured, transcriptionConfigured } from '../env.ts';
+import {
+  env,
+  googleConfigured,
+  isProd,
+  storageConfigured,
+  transcriptionConfigured,
+} from '../env.ts';
 import { actorFromBearer } from '../mcp/tokens.ts';
 import { actorFromSessionToken, authRoutes, SESSION_COOKIE } from './auth.ts';
 import { exportRoutes } from './exports.ts';
@@ -64,7 +70,10 @@ export function createApp(): Hono<Env> {
   app.post('/api/rpc/:op', async (c) => {
     const actor = c.get('actor');
     if (!actor) {
-      return c.json({ ok: false, error: { code: 'unauthenticated', message: 'Sign in first.' } }, 401);
+      return c.json(
+        { ok: false, error: { code: 'unauthenticated', message: 'Sign in first.' } },
+        401,
+      );
     }
     const input = await c.req.json().catch(() => ({}));
     // Bearer callers (agents using plain HTTP) get the MCP surface; browsers get the web surface.
@@ -80,12 +89,20 @@ export function createApp(): Hono<Env> {
 
   app.route('/', exportRoutes);
 
-  app.all('/api/*', (c) => c.json({ ok: false, error: { code: 'not_found', message: 'No such endpoint.' } }, 404));
+  app.all('/api/*', (c) =>
+    c.json({ ok: false, error: { code: 'not_found', message: 'No such endpoint.' } }, 404),
+  );
 
   // Built SPA (production): static assets, then index.html for client routes.
   if (env.webDist && existsSync(env.webDist)) {
     const indexHtml = readFileSync(join(env.webDist, 'index.html'), 'utf8');
-    app.use('/assets/*', serveStatic({ root: env.webDist, onFound: (_p, c) => c.header('Cache-Control', 'public, max-age=31536000, immutable') }));
+    app.use(
+      '/assets/*',
+      serveStatic({
+        root: env.webDist,
+        onFound: (_p, c) => c.header('Cache-Control', 'public, max-age=31536000, immutable'),
+      }),
+    );
     app.use('*', serveStatic({ root: env.webDist }));
     app.get('*', (c) => c.html(indexHtml));
   }

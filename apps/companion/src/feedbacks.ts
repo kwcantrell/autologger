@@ -5,7 +5,9 @@ const WHITE = combineRgb(255, 255, 255);
 const RED = combineRgb(200, 30, 30);
 const AMBER = combineRgb(180, 120, 0);
 
-export function feedbackDefinitions(getState: () => CompanionState | null): CompanionFeedbackDefinitions {
+export function feedbackDefinitions(
+  getState: () => CompanionState | null,
+): CompanionFeedbackDefinitions {
   return {
     rolling: {
       type: 'boolean',

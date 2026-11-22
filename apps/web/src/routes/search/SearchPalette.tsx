@@ -144,7 +144,12 @@ function PaletteBody({ onDone }: { onDone: () => void }) {
   else if (empty) status = `No results for “${query.trim()}”.`;
 
   return (
-    <Command shouldFilter={false} value={selected} onValueChange={setSelected} className="bg-transparent text-si-fg">
+    <Command
+      shouldFilter={false}
+      value={selected}
+      onValueChange={setSelected}
+      className="bg-transparent text-si-fg"
+    >
       <CommandInput
         ref={inputRef}
         value={query}
@@ -208,7 +213,10 @@ function PaletteBody({ onDone }: { onDone: () => void }) {
                 className="flex-col items-start gap-0.5"
               >
                 <span className="flex w-full min-w-0 items-baseline gap-2">
-                  <BookOpenIcon aria-hidden="true" className="size-3.5 shrink-0 self-center text-si-dim" />
+                  <BookOpenIcon
+                    aria-hidden="true"
+                    className="size-3.5 shrink-0 self-center text-si-dim"
+                  />
                   <span className="truncate font-medium">{h.title}</span>
                   <span className="ml-auto shrink-0 text-xs text-si-dim">{h.showName}</span>
                 </span>

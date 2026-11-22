@@ -37,7 +37,11 @@ function PageRow({ page }: { page: WikiPageSummary }) {
     <li>
       <Link href={wikiHref(page.id)} className={ROW} data-title={page.title}>
         <span className="w-full truncate font-medium text-si-fg">{page.title}</span>
-        {page.aliases.length > 0 && <span className="w-full truncate text-xs text-si-muted">Also: {page.aliases.join(', ')}</span>}
+        {page.aliases.length > 0 && (
+          <span className="w-full truncate text-xs text-si-muted">
+            Also: {page.aliases.join(', ')}
+          </span>
+        )}
         <span className="text-xs text-si-dim">
           Updated {fmtDate(page.updatedAt)}
           {page.updatedBy ? ` by ${page.updatedBy.name}` : ''}
@@ -49,13 +53,26 @@ function PageRow({ page }: { page: WikiPageSummary }) {
 
 function Status({ children }: { children: ReactNode }) {
   return (
-    <div role="status" className="flex items-center justify-center gap-2 py-10 text-sm text-si-muted">
+    <div
+      role="status"
+      className="flex items-center justify-center gap-2 py-10 text-sm text-si-muted"
+    >
       {children}
     </div>
   );
 }
 
-function PageList({ showId, tab, needle, filterText }: { showId: string; tab: (typeof TABS)[number]; needle: string; filterText: string }) {
+function PageList({
+  showId,
+  tab,
+  needle,
+  filterText,
+}: {
+  showId: string;
+  tab: (typeof TABS)[number];
+  needle: string;
+  filterText: string;
+}) {
   const { data, isPending, isError, error, refetch } = useWikiList(showId);
   const ofKind = useMemo(() => (data ?? []).filter((p) => p.kind === tab.id), [data, tab.id]);
   const pages = useMemo(() => ofKind.filter((p) => matches(p, needle)), [ofKind, needle]);
@@ -80,12 +97,17 @@ function PageList({ showId, tab, needle, filterText }: { showId: string; tab: (t
       <div className="flex flex-col items-center gap-1 py-10 text-center">
         <p className="m-0 text-sm text-si-muted">{tab.empty}</p>
         <p className="m-0 max-w-[26rem] text-xs text-si-dim">
-          Pages are written by operators here with “New page”, or by agents connected over MCP. Link pages to each other
-          with [[Title]].
+          Pages are written by operators here with “New page”, or by agents connected over MCP. Link
+          pages to each other with [[Title]].
         </p>
       </div>
     );
-  if (pages.length === 0) return <p className="m-0 py-10 text-center text-sm text-si-muted">No pages match “{filterText.trim()}”.</p>;
+  if (pages.length === 0)
+    return (
+      <p className="m-0 py-10 text-center text-sm text-si-muted">
+        No pages match “{filterText.trim()}”.
+      </p>
+    );
   return (
     <ul aria-label={`${tab.label} pages`} className="m-0 flex list-none flex-col p-0">
       {pages.map((p) => (
@@ -162,7 +184,12 @@ export function WikiRoute() {
                 </TabsContent>
               ))}
             </Tabs>
-            <NewWikiPageDialog showId={show.id} open={creating} onOpenChange={setCreating} initialKind={tab} />
+            <NewWikiPageDialog
+              showId={show.id}
+              open={creating}
+              onOpenChange={setCreating}
+              initialKind={tab}
+            />
           </>
         )}
       </div>

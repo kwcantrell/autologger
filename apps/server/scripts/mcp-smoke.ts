@@ -1,12 +1,13 @@
+// biome-ignore-all lint/suspicious/noExplicitAny: smoke script inspects arbitrary JSON responses
 // End-to-end smoke test for agent access against a running dev server (DEV_LOGIN=1):
 // PAT → MCP initialize / tools/list / tools/call, then the full OAuth flow
 // (register → authorize → consent → token + PKCE → MCP → refresh rotation → reuse detection → revoke).
 //
-//   node scripts/mcp-smoke.ts [baseUrl]      (default http://localhost:8080)
+//   node scripts/mcp-smoke.ts [baseUrl]      (default http://localhost:18081)
 
 import { createHash, randomBytes } from 'node:crypto';
 
-const BASE = (process.argv[2] ?? 'http://localhost:8080').replace(/\/$/, '');
+const BASE = (process.argv[2] ?? 'http://localhost:18081').replace(/\/$/, '');
 let cookie = '';
 let failures = 0;
 

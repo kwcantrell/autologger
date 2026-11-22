@@ -109,8 +109,12 @@ export function Timeline({
   const syncView = useCallback(() => {
     const vp = viewportRef.current;
     if (!vp) return;
-    setView({ left: vp.scrollLeft / (vp.scrollWidth || 1), width: vp.clientWidth / (vp.scrollWidth || 1) });
+    setView({
+      left: vp.scrollLeft / (vp.scrollWidth || 1),
+      width: vp.clientWidth / (vp.scrollWidth || 1),
+    });
   }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: zoom is the trigger — re-sync the view after zooming
   useEffect(() => {
     syncView();
   }, [zoom, syncView]);
@@ -145,7 +149,8 @@ export function Timeline({
     const vp = viewportRef.current;
     if (!vp || zoom === 1 || dragging.current) return;
     const x = (playheadSec / totalSec) * vp.scrollWidth;
-    if (x < vp.scrollLeft || x > vp.scrollLeft + vp.clientWidth) vp.scrollLeft = x - vp.clientWidth * 0.2;
+    if (x < vp.scrollLeft || x > vp.scrollLeft + vp.clientWidth)
+      vp.scrollLeft = x - vp.clientWidth * 0.2;
   }, [playheadSec, totalSec, zoom]);
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -191,8 +196,14 @@ export function Timeline({
       if (kind === 'bar') {
         vp.scrollLeft = Math.max(0, Math.min(1 - start.width, start.left + d)) * vp.scrollWidth;
       } else {
-        const left = kind === 'start' ? Math.max(0, Math.min(start.left + start.width - 0.025, start.left + d)) : start.left;
-        const right = kind === 'end' ? Math.min(1, Math.max(start.left + 0.025, start.left + start.width + d)) : start.left + start.width;
+        const left =
+          kind === 'start'
+            ? Math.max(0, Math.min(start.left + start.width - 0.025, start.left + d))
+            : start.left;
+        const right =
+          kind === 'end'
+            ? Math.min(1, Math.max(start.left + 0.025, start.left + start.width + d))
+            : start.left + start.width;
         const width = right - left;
         const z = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, 1 / width));
         setZoom(z);
@@ -219,7 +230,12 @@ export function Timeline({
   const chipColor = current?.event.color ?? 'var(--si-dim)';
 
   return (
-    <div className={cn('flex w-full min-w-0 flex-col gap-[0.3rem]', locked && 'pointer-events-none opacity-[0.48]')}>
+    <div
+      className={cn(
+        'flex w-full min-w-0 flex-col gap-[0.3rem]',
+        locked && 'pointer-events-none opacity-[0.48]',
+      )}
+    >
       {/* Current-marker chip */}
       <div
         className={cn(
@@ -229,7 +245,11 @@ export function Timeline({
         style={{ background: `color-mix(in oklab, ${chipColor} 14%, var(--si-panel-2))` }}
         aria-live="polite"
       >
-        <span className="absolute inset-y-0 left-0 w-1" style={{ background: chipColor }} aria-hidden="true" />
+        <span
+          className="absolute inset-y-0 left-0 w-1"
+          style={{ background: chipColor }}
+          aria-hidden="true"
+        />
         <span className="relative flex min-w-0 flex-1 items-center gap-[0.4rem] rounded-t-[6px] border border-si-line py-0 pr-[0.45rem] pl-[calc(0.25rem+0.45rem)]">
           <span className="sr-only">Current marker: </span>
           <span className="shrink-0 font-label text-[0.6875rem] font-semibold uppercase leading-none tracking-[0.12em] text-si-fg">
@@ -283,7 +303,10 @@ export function Timeline({
                   key={p.seg.id}
                   title={`Audio ${fmtSec(p.start)}–${fmtSec(p.end)}`}
                   className="absolute bottom-0 h-full rounded-[2px] bg-[color-mix(in_oklab,var(--color-legacy-accent)_40%,transparent)]"
-                  style={{ left: pct(p.start), width: `${Math.max(0.15, ((p.end - p.start) / totalSec) * 100)}%` }}
+                  style={{
+                    left: pct(p.start),
+                    width: `${Math.max(0.15, ((p.end - p.start) / totalSec) * 100)}%`,
+                  }}
                 />
               ))}
             </div>
@@ -319,6 +342,7 @@ export function Timeline({
           <div className="h-[0.32rem]" aria-hidden="true" />
           <div className="pointer-events-none flex w-full justify-between gap-2 px-[0.35rem] pt-0.5 font-tc text-[0.6875rem] font-medium leading-none tabular-nums text-si-dim [text-shadow:0_1px_2px_var(--si-bg)]">
             {ticks.map((t, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: ticks are fixed positional labels
               <span key={i} className={i % 2 === 1 ? 'max-md:hidden' : undefined}>
                 {t}
               </span>
@@ -328,7 +352,11 @@ export function Timeline({
       </div>
 
       {/* Zoom rail */}
-      <div className="flex w-full min-w-0 flex-row items-center gap-[0.3rem] pt-1" role="toolbar" aria-label="Timeline zoom">
+      <div
+        className="flex w-full min-w-0 flex-row items-center gap-[0.3rem] pt-1"
+        role="toolbar"
+        aria-label="Timeline zoom"
+      >
         <input
           className={ZOOM_VALUE}
           aria-label="Timeline zoom percent"
@@ -347,7 +375,10 @@ export function Timeline({
           }}
           onBlur={() => setZoomText(`${Math.round(zoom * 100)}%`)}
         />
-        <div ref={railRef} className="relative isolate h-(--v4-zoom-handle-h) min-w-0 flex-1 rounded-full border border-si-line bg-si-panel-2">
+        <div
+          ref={railRef}
+          className="relative isolate h-(--v4-zoom-handle-h) min-w-0 flex-1 rounded-full border border-si-line bg-si-panel-2"
+        >
           <div
             className="absolute top-1/2 z-[1] h-[120%] -translate-y-1/2 cursor-grab touch-none rounded-full bg-[color-mix(in_oklab,var(--si-accent)_55%,var(--si-panel-2))] active:cursor-grabbing"
             style={{ left: `${view.left * 100}%`, width: `${view.width * 100}%` }}
@@ -377,8 +408,12 @@ export function Timeline({
           />
         </div>
         <div className="flex shrink-0 flex-row items-baseline gap-[0.15rem] whitespace-nowrap pl-1 tabular-nums">
-          <span className="font-tc text-[0.8125rem] font-semibold text-si-fg">{fmtSec(playheadSec)}</span>
-          <span className="font-tc text-[0.6875rem] font-medium text-si-dim">/ {fmtSec(totalSec)}</span>
+          <span className="font-tc text-[0.8125rem] font-semibold text-si-fg">
+            {fmtSec(playheadSec)}
+          </span>
+          <span className="font-tc text-[0.6875rem] font-medium text-si-dim">
+            / {fmtSec(totalSec)}
+          </span>
         </div>
       </div>
 
@@ -391,7 +426,9 @@ export function Timeline({
           <span className="mb-[0.12rem] block font-semibold text-si-muted">
             {tip.m.event.category} · {fmtSec(tip.m.sec)}
           </span>
-          <span className="block">{[tip.m.event.value, tip.m.event.message].filter(Boolean).join(' — ') || '—'}</span>
+          <span className="block">
+            {[tip.m.event.value, tip.m.event.message].filter(Boolean).join(' — ') || '—'}
+          </span>
         </div>
       )}
       {hover && !tip && (

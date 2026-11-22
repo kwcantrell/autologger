@@ -11,8 +11,8 @@ timecode, take and the last event on keys.
    and is shown once. Only its SHA-256 hash is stored.
 2. **Install the module.** `npm run build -w companion-module-autologger` (or `npm run package`
    for a `.tgz`), then load it as a developer module in Companion, or install the package.
-3. **Configure the connection** in Companion: *Server URL* = the address you open AutoLogger at
-   (e.g. `https://autologger.example.com`), *Device token* = the `ald_…` token.
+3. **Configure the connection** in Companion: _Server URL_ = the address you open AutoLogger at
+   (e.g. `https://autologger.example.com`), _Device token_ = the `ald_…` token.
 4. Add presets from the **AutoLogger** preset list (transport, slots 1–9, options, status).
 
 The device acts as the user who created it, limited to its one show and never above write
@@ -53,12 +53,12 @@ updates the device's `last_seen_at` on connect and every few minutes.
 
 ### Web ops
 
-| op | access | |
-|---|---|---|
-| `companion.list` `{ showId? }` | manage | devices of a show, or of all shows you manage; `online` = connected to this instance |
-| `companion.create` `{ showId, name }` | manage | returns `{ device, token }` — token shown once |
-| `companion.revoke` `{ deviceId }` | manage | closes open sockets |
-| `companion.setTarget` `{ deviceId, sessionId \| null }` | write | session must be in the device's show |
+| op                                                      | access |                                                                                      |
+| ------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------ |
+| `companion.list` `{ showId? }`                          | manage | devices of a show, or of all shows you manage; `online` = connected to this instance |
+| `companion.create` `{ showId, name }`                   | manage | returns `{ device, token }` — token shown once                                       |
+| `companion.revoke` `{ deviceId }`                       | manage | closes open sockets                                                                  |
+| `companion.setTarget` `{ deviceId, sessionId \| null }` | write  | session must be in the device's show                                                 |
 
 ## Development
 

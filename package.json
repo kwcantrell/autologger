@@ -3,8 +3,13 @@
   "version": "3.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
-  "workspaces": ["packages/*", "apps/*"],
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "dev:server": "npm run dev -w @autologger/server",
     "dev:web": "npm run dev -w @autologger/web",

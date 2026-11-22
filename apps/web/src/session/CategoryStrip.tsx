@@ -12,10 +12,11 @@ import { Button } from '@/shared/components/ui/button';
 import { Field, FieldLabel } from '@/shared/components/ui/field';
 import { Input } from '@/shared/components/ui/input';
 import { Kbd } from '@/shared/components/ui/kbd';
-import { isOverlayOpen } from '@/shared/ui/overlayOpen';
 import { Dialog, DialogActions } from '@/shared/ui/Dialog';
+import { isOverlayOpen } from '@/shared/ui/overlayOpen';
 
-const CAT_TILE = 'min-h-(--h-ctl) min-w-0 max-w-full gap-2 whitespace-normal py-1.5 pr-3 pl-2 text-left';
+const CAT_TILE =
+  'min-h-(--h-ctl) min-w-0 max-w-full gap-2 whitespace-normal py-1.5 pr-3 pl-2 text-left';
 
 type Pending = { cat: Category; atSec: number };
 
@@ -76,7 +77,10 @@ export function CategoryStrip({
           break;
         case 'toggle': {
           const on = phase.get(cat.id) !== 'on';
-          void log(cat, { value: on ? 'ON' : 'OFF', message: (on ? cat.onLabel : cat.offLabel) || '' });
+          void log(cat, {
+            value: on ? 'ON' : 'OFF',
+            message: (on ? cat.onLabel : cat.offLabel) || '',
+          });
           break;
         }
         case 'dropdown':
@@ -110,7 +114,11 @@ export function CategoryStrip({
     return (
       <p className="m-0 text-[0.85rem] text-si-muted">
         This show has no event buttons yet.{' '}
-        <button type="button" className="underline underline-offset-2 hover:text-si-fg" onClick={() => settingsOpen.set('event-buttons')}>
+        <button
+          type="button"
+          className="underline underline-offset-2 hover:text-si-fg"
+          onClick={() => settingsOpen.set('event-buttons')}
+        >
           Set them up in Settings → Event buttons
         </button>
         .
@@ -120,10 +128,19 @@ export function CategoryStrip({
 
   return (
     <>
-      <div className="cat-strip-scrollbar flex w-full min-w-0 flex-wrap content-center items-center gap-1.5" role="toolbar" aria-label="Log category">
+      <div
+        className="cat-strip-scrollbar flex w-full min-w-0 flex-wrap content-center items-center gap-1.5"
+        role="toolbar"
+        aria-label="Log category"
+      >
         {categories.map((cat, idx) => {
           const on = phase.get(cat.id) === 'on';
-          const label = cat.kind === 'toggle' ? (on ? cat.onLabel || cat.name : cat.offLabel || cat.name) : cat.name;
+          const label =
+            cat.kind === 'toggle'
+              ? on
+                ? cat.onLabel || cat.name
+                : cat.offLabel || cat.name
+              : cat.name;
           return (
             <Button
               key={cat.id}
@@ -176,17 +193,39 @@ export function CategoryStrip({
   );
 }
 
-function DropdownDialog({ pending, onClose, onLog }: { pending: Pending; onClose: () => void; onLog: (value: string, message: string) => void }) {
+function DropdownDialog({
+  pending,
+  onClose,
+  onLog,
+}: {
+  pending: Pending;
+  onClose: () => void;
+  onLog: (value: string, message: string) => void;
+}) {
   const [choice, setChoice] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const { cat } = pending;
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()} title={choice ? 'Add a note' : 'Choose option'} description={cat.name}>
+    <Dialog
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title={choice ? 'Add a note' : 'Choose option'}
+      description={cat.name}
+    >
       {!choice ? (
         <div className="flex flex-col gap-2">
-          {cat.options.length === 0 && <p className="m-0 text-sm text-si-muted">This dropdown has no options yet. Add them in Settings → Event buttons.</p>}
+          {cat.options.length === 0 && (
+            <p className="m-0 text-sm text-si-muted">
+              This dropdown has no options yet. Add them in Settings → Event buttons.
+            </p>
+          )}
           {cat.options.map((o) => (
-            <Button key={o} variant="outline" className="h-auto min-h-(--h-ctl) w-full justify-start whitespace-normal py-2 text-left" onClick={() => setChoice(o)}>
+            <Button
+              key={o}
+              variant="outline"
+              className="h-auto min-h-(--h-ctl) w-full justify-start whitespace-normal py-2 text-left"
+              onClick={() => setChoice(o)}
+            >
               {o}
             </Button>
           ))}
@@ -200,7 +239,13 @@ function DropdownDialog({ pending, onClose, onLog }: { pending: Pending; onClose
         >
           <Field>
             <FieldLabel htmlFor="dropdown-note">Note (optional) for “{choice}”</FieldLabel>
-            <Input id="dropdown-note" autoFocus maxLength={4000} value={note} onChange={(e) => setNote(e.target.value)} />
+            <Input
+              id="dropdown-note"
+              autoFocus
+              maxLength={4000}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
           </Field>
           <DialogActions>
             <Button type="button" variant="outline" onClick={() => setChoice(null)}>
@@ -214,10 +259,23 @@ function DropdownDialog({ pending, onClose, onLog }: { pending: Pending; onClose
   );
 }
 
-function TextDialog({ pending, onClose, onLog }: { pending: Pending; onClose: () => void; onLog: (message: string) => void }) {
+function TextDialog({
+  pending,
+  onClose,
+  onLog,
+}: {
+  pending: Pending;
+  onClose: () => void;
+  onLog: (message: string) => void;
+}) {
   const [note, setNote] = useState('');
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()} title="Log note" description={`Add a note for “${pending.cat.name}”. Press Enter or Log.`}>
+    <Dialog
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title="Log note"
+      description={`Add a note for “${pending.cat.name}”. Press Enter or Log.`}
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -226,7 +284,13 @@ function TextDialog({ pending, onClose, onLog }: { pending: Pending; onClose: ()
       >
         <Field>
           <FieldLabel htmlFor="text-note">Note</FieldLabel>
-          <Input id="text-note" autoFocus maxLength={5000} value={note} onChange={(e) => setNote(e.target.value)} />
+          <Input
+            id="text-note"
+            autoFocus
+            maxLength={5000}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
         </Field>
         <DialogActions>
           <Button type="button" variant="outline" onClick={onClose}>

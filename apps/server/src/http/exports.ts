@@ -12,7 +12,11 @@ const csvCell = (v: unknown) => {
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
-const safeName = (s: string) => s.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'session';
+const safeName = (s: string) =>
+  s
+    .replace(/[^\w\- ]+/g, '')
+    .trim()
+    .replace(/\s+/g, '_') || 'session';
 
 function srtTime(sec: number): string {
   const ms = Math.round(sec * 1000);
@@ -24,7 +28,11 @@ export const exportRoutes = new Hono<Env>();
 
 exportRoutes.get('/api/sessions/:sessionId/export/:format', async (c) => {
   const actor = c.get('actor');
-  if (!actor) return c.json({ ok: false, error: { code: 'unauthenticated', message: 'Sign in first.' } }, 401);
+  if (!actor)
+    return c.json(
+      { ok: false, error: { code: 'unauthenticated', message: 'Sign in first.' } },
+      401,
+    );
   const sessionId = c.req.param('sessionId');
   const format = c.req.param('format');
   const surface = actor.via === 'mcp' ? 'mcp' : 'web';
@@ -39,8 +47,22 @@ exportRoutes.get('/api/sessions/:sessionId/export/:format', async (c) => {
 
     if (format === 'events.csv' || format === 'events.jsonl') {
       const events = await executeOp('events.list', { sessionId }, actor, surface);
-      if (format === 'events.jsonl') return send(events.map((e) => JSON.stringify(e)).join('\n'), 'application/x-ndjson', 'events.jsonl');
-      const header = ['timecode', 'category', 'message', 'value', 'take', 'source', 'wall_time', 'logged_by'];
+      if (format === 'events.jsonl')
+        return send(
+          events.map((e) => JSON.stringify(e)).join('\n'),
+          'application/x-ndjson',
+          'events.jsonl',
+        );
+      const header = [
+        'timecode',
+        'category',
+        'message',
+        'value',
+        'take',
+        'source',
+        'wall_time',
+        'logged_by',
+      ];
       const lines = events.map((e) =>
         [
           e.timecodeFrames === null ? '' : formatFrames(e.timecodeFrames, session.frameRate),
@@ -64,16 +86,30 @@ exportRoutes.get('/api/sessions/:sessionId/export/:format', async (c) => {
     if (format === 'transcript.srt') {
       const segs = await executeOp('transcript.get', { sessionId }, actor, surface);
       const body = segs
-        .map((s, i) => `${i + 1}\n${srtTime(s.startSec)} --> ${srtTime(s.endSec)}\n${s.speaker ? `${s.speaker}: ` : ''}${s.text}\n`)
+        .map(
+          (s, i) =>
+            `${i + 1}\n${srtTime(s.startSec)} --> ${srtTime(s.endSec)}\n${s.speaker ? `${s.speaker}: ` : ''}${s.text}\n`,
+        )
         .join('\n');
       return send(body, 'application/x-subrip', 'srt');
     }
     if (format === 'topics.csv') {
       const topics = await executeOp('topics.list', { sessionId }, actor, surface);
-      const lines = topics.map((t) => [t.startSec.toFixed(1), t.durationSec.toFixed(1), t.level, t.title, t.summary].map(csvCell).join(','));
-      return send(['start_sec,duration_sec,level,title,summary', ...lines].join('\n'), 'text/csv', 'topics.csv');
+      const lines = topics.map((t) =>
+        [t.startSec.toFixed(1), t.durationSec.toFixed(1), t.level, t.title, t.summary]
+          .map(csvCell)
+          .join(','),
+      );
+      return send(
+        ['start_sec,duration_sec,level,title,summary', ...lines].join('\n'),
+        'text/csv',
+        'topics.csv',
+      );
     }
-    return c.json({ ok: false, error: { code: 'not_found', message: 'Unknown export format.' } }, 404);
+    return c.json(
+      { ok: false, error: { code: 'not_found', message: 'Unknown export format.' } },
+      404,
+    );
   } catch (e) {
     const error = toRpcError(e);
     return c.json({ ok: false, error }, HTTP_STATUS[error.code]);

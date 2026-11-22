@@ -38,7 +38,10 @@ export class CompanionConnection {
   private idleTimer: NodeJS.Timeout | null = null;
   private stopped = false;
   private reqSeq = 0;
-  private pending = new Map<string, { resolve(v: unknown): void; reject(e: Error): void; timer: NodeJS.Timeout }>();
+  private pending = new Map<
+    string,
+    { resolve(v: unknown): void; reject(e: Error): void; timer: NodeJS.Timeout }
+  >();
 
   constructor(
     private readonly url: string,
@@ -73,7 +76,8 @@ export class CompanionConnection {
   /** Run a companion op on the server. Transport/event ops default to the device's target session. */
   request<T = unknown>(op: CompanionOp, input: Record<string, unknown> = {}): Promise<T> {
     const ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error('Not connected to AutoLogger'));
+    if (!ws || ws.readyState !== WebSocket.OPEN)
+      return Promise.reject(new Error('Not connected to AutoLogger'));
     const reqId = String(++this.reqSeq);
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -90,7 +94,10 @@ export class CompanionConnection {
     this.events.onStatus('connecting');
     let ws: WebSocket;
     try {
-      ws = new WebSocket(this.url, { headers: { authorization: `Bearer ${this.token}` }, handshakeTimeout: 10_000 });
+      ws = new WebSocket(this.url, {
+        headers: { authorization: `Bearer ${this.token}` },
+        handshakeTimeout: 10_000,
+      });
     } catch (e) {
       this.events.onStatus('error', `Invalid server URL: ${(e as Error).message}`);
       return;
@@ -143,7 +150,10 @@ export class CompanionConnection {
       this.failPending(new Error('Connection lost'));
       if (code === 4401 || code === 4403) {
         authFailed = true;
-        this.events.onStatus('bad_token', `Device token ${String(reason) === 'revoked' ? 'revoked' : 'rejected'}`);
+        this.events.onStatus(
+          'bad_token',
+          `Device token ${String(reason) === 'revoked' ? 'revoked' : 'rejected'}`,
+        );
       }
       // A rejected token will not start working by itself: wait for new config.
       if (authFailed || this.stopped) return;

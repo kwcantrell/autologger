@@ -27,7 +27,12 @@ registerWs(
     // Re-check access whenever the user's grants or roles change.
     const offUser = subscribe(`user:${actor.user.id}`, async () => {
       const fresh = await actorFromSessionToken(sessionTokenFromCookieHeader(req.headers.cookie));
-      const ok = fresh && (await executeOp('sessions.get', { sessionId }, fresh, 'web').then(() => true, () => false));
+      const ok =
+        fresh &&
+        (await executeOp('sessions.get', { sessionId }, fresh, 'web').then(
+          () => true,
+          () => false,
+        ));
       if (!ok) {
         send({ type: 'closed', reason: 'access_revoked' });
         ws.close(4403, 'access_revoked');

@@ -4,7 +4,7 @@
 import type { Capabilities, Category, Session, SessionEvent } from '@autologger/contract';
 import { KeyboardIcon, RotateCcw } from 'lucide-react';
 import { useMemo } from 'react';
-import { TRANSPORT_LABEL, shortcutsOpen, type TransportTint } from '@/lib/store';
+import { shortcutsOpen, TRANSPORT_LABEL, type TransportTint } from '@/lib/store';
 import { eventSec, fmtSec, type TransportClock } from '@/lib/timecode';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
@@ -18,7 +18,13 @@ import { Timeline } from './Timeline';
 
 type Recorder = ReturnType<typeof useRecorder>;
 
-function Glyph({ icon, size }: { icon: 'play' | 'pause' | 'record' | 'mic' | 'stop' | 'prev' | 'next'; size: number }) {
+function Glyph({
+  icon,
+  size,
+}: {
+  icon: 'play' | 'pause' | 'record' | 'mic' | 'stop' | 'prev' | 'next';
+  size: number;
+}) {
   switch (icon) {
     case 'play':
       return (
@@ -37,14 +43,27 @@ function Glyph({ icon, size }: { icon: 'play' | 'pause' | 'record' | 'mic' | 'st
       return (
         <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="12" cy="12" r="5.5" fill="currentColor" />
-          <circle cx="12" cy="12" r="8.25" stroke="currentColor" strokeWidth="1.5" fill="none" opacity="0.45" />
+          <circle
+            cx="12"
+            cy="12"
+            r="8.25"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            fill="none"
+            opacity="0.45"
+          />
         </svg>
       );
     case 'mic':
       return (
         <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <rect x="9.25" y="3.5" width="5.5" height="10" rx="2.75" fill="currentColor" />
-          <path d="M6 11.5C6 14.8137 8.68629 17.5 12 17.5C15.3137 17.5 18 14.8137 18 11.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path
+            d="M6 11.5C6 14.8137 8.68629 17.5 12 17.5C15.3137 17.5 18 14.8137 18 11.5"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
           <path d="M12 17.5V21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
         </svg>
       );
@@ -57,13 +76,25 @@ function Glyph({ icon, size }: { icon: 'play' | 'pause' | 'record' | 'mic' | 'st
     case 'prev':
       return (
         <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M12.5 6.5L7 12L12.5 17.5M18 6.5L12.5 12L18 17.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          <path
+            d="M12.5 6.5L7 12L12.5 17.5M18 6.5L12.5 12L18 17.5"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       );
     case 'next':
       return (
         <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M11.5 6.5L17 12L11.5 17.5M6 6.5L11.5 12L6 17.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          <path
+            d="M11.5 6.5L17 12L11.5 17.5M6 6.5L11.5 12L6 17.5"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       );
   }
@@ -89,19 +120,30 @@ function CtlButton({ c }: { c: Ctl }) {
         variant="transport"
         size="icon"
         id={c.id}
-        className={cn('relative md:w-auto md:min-w-(--h-ctl) md:flex-1', !c.enabled && 'max-md:hidden')}
+        className={cn(
+          'relative md:w-auto md:min-w-(--h-ctl) md:flex-1',
+          !c.enabled && 'max-md:hidden',
+        )}
         data-active={c.active || undefined}
         disabled={!c.enabled}
         aria-label={c.label}
         onClick={c.onClick}
       >
-        <span className={cn('pointer-events-none inline-flex items-center justify-center', c.rec && !c.active && c.enabled && 'text-(--si-rec)')}>
+        <span
+          className={cn(
+            'pointer-events-none inline-flex items-center justify-center',
+            c.rec && !c.active && c.enabled && 'text-(--si-rec)',
+          )}
+        >
           <Glyph icon={c.icon} size={18} />
         </span>
         {c.dot && (
           <span
             aria-hidden="true"
-            className={cn('absolute top-1/2 size-1.5 -translate-y-1/2 rounded-full', c.dotSide === 'left' ? 'left-1.5' : 'right-1.5')}
+            className={cn(
+              'absolute top-1/2 size-1.5 -translate-y-1/2 rounded-full',
+              c.dotSide === 'left' ? 'left-1.5' : 'right-1.5',
+            )}
             style={{ background: c.dot }}
           />
         )}
@@ -154,7 +196,10 @@ export function TransportStrip({
 }) {
   const { confirm, confirmElement } = useConfirm();
   const rolling = session.isRolling;
-  const recording = recorder.state === 'recording' || recorder.state === 'starting' || recorder.state === 'stopping';
+  const recording =
+    recorder.state === 'recording' ||
+    recorder.state === 'starting' ||
+    recorder.state === 'stopping';
   const live = rolling || recording;
   const readOnly = canWrite ? null : 'Read-only: you can view this show but not log in it.';
   const hasAudio = player.segments.length > 0;
@@ -163,7 +208,8 @@ export function TransportStrip({
     ? readOnly
     : caps && !caps.storage
       ? "Audio storage isn't configured on this server (S3 settings), so recordings can't be saved."
-      : (recorderSupport() ?? (!rolling ? 'Roll timecode first; recording follows the session clock.' : null));
+      : (recorderSupport() ??
+        (!rolling ? 'Roll timecode first; recording follows the session clock.' : null));
 
   const markerSecs = useMemo(
     () =>
@@ -178,7 +224,14 @@ export function TransportStrip({
 
   const controls: Ctl[] = [
     player.isPlaying
-      ? { id: 'btn-ctl-1', icon: 'pause', label: 'Pause audio', enabled: true, active: true, onClick: () => void player.toggle() }
+      ? {
+          id: 'btn-ctl-1',
+          icon: 'pause',
+          label: 'Pause audio',
+          enabled: true,
+          active: true,
+          onClick: () => void player.toggle(),
+        }
       : {
           id: 'btn-ctl-1',
           icon: 'play',
@@ -228,7 +281,11 @@ export function TransportStrip({
       reason: live ? 'Marker jumps are off while live.' : 'No earlier marker.',
       dot: prev?.color,
       dotSide: 'left',
-      onClick: () => prev && (onSeek(prev.sec), onRevealEvent(prev.id)),
+      onClick: () => {
+        if (!prev) return;
+        onSeek(prev.sec);
+        onRevealEvent(prev.id);
+      },
     },
     {
       id: 'btn-marker-next',
@@ -238,7 +295,11 @@ export function TransportStrip({
       reason: live ? 'Marker jumps are off while live.' : 'No later marker.',
       dot: next?.color,
       dotSide: 'right',
-      onClick: () => next && (onSeek(next.sec), onRevealEvent(next.id)),
+      onClick: () => {
+        if (!next) return;
+        onSeek(next.sec);
+        onRevealEvent(next.id);
+      },
     },
   ];
 
@@ -252,11 +313,19 @@ export function TransportStrip({
       className="mx-3 box-border w-[calc(100%-1.5rem)] min-w-0 overflow-visible rounded-card border border-si-line bg-si-panel p-3 md:mx-4 md:w-[calc(100%-2rem)] md:px-3.5 md:py-3"
     >
       <div className="flex w-full min-w-0 flex-col gap-4 md:flex-row md:items-end md:gap-5">
-        <aside className="flex w-full min-w-0 flex-col items-stretch gap-2.5 self-stretch md:w-[min(100%,19.25rem)] md:shrink-0 md:justify-center" aria-label="Session info and transport">
+        <aside
+          className="flex w-full min-w-0 flex-col items-stretch gap-2.5 self-stretch md:w-[min(100%,19.25rem)] md:shrink-0 md:justify-center"
+          aria-label="Session info and transport"
+        >
           <div className="flex min-w-0 flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-            <Tooltip content={`Date ${fmtDate(session.episodeDate ?? session.createdAt)}${session.episode ? ` · Episode ${session.episode}` : ''}`} side="right" align="start">
+            <Tooltip
+              content={`Date ${fmtDate(session.episodeDate ?? session.createdAt)}${session.episode ? ` · Episode ${session.episode}` : ''}`}
+              side="right"
+              align="start"
+            >
               <p
                 id="session-deck-title"
+                // biome-ignore lint/a11y/noNoninteractiveTabindex: focusable so keyboard users get the date/episode tooltip
                 tabIndex={0}
                 className="m-0 flex min-w-0 flex-1 cursor-default flex-row items-baseline gap-x-1.5 overflow-hidden rounded-[4px] font-ui text-[0.8125rem] leading-tight text-si-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
               >
@@ -271,20 +340,41 @@ export function TransportStrip({
                 )}
               </p>
             </Tooltip>
-            <h2 className="m-0 flex min-w-0 shrink-0 flex-row items-center gap-2 font-ui text-[0.75rem] leading-none" aria-live="polite">
+            <h2
+              className="m-0 flex min-w-0 shrink-0 flex-row items-center gap-2 font-ui text-[0.75rem] leading-none"
+              aria-live="polite"
+            >
               <span className="sr-only">Status:</span>
               <Badge variant="transport">
-                {tint === 'recording' && <span data-slot="live-dot" className="size-1.5 shrink-0 rounded-full bg-current" aria-hidden="true" />}
+                {tint === 'recording' && (
+                  <span
+                    data-slot="live-dot"
+                    className="size-1.5 shrink-0 rounded-full bg-current"
+                    aria-hidden="true"
+                  />
+                )}
                 <span>{TRANSPORT_LABEL[tint]}</span>
               </Badge>
               {recording && (
                 <>
-                  <span id="top-bar-mic-level" className="items-center" aria-hidden="true" title="Microphone level">
+                  <span
+                    id="top-bar-mic-level"
+                    className="items-center"
+                    aria-hidden="true"
+                    title="Microphone level"
+                  >
                     <span className="block h-2 w-12 overflow-hidden rounded-[3px] border border-si-line bg-si-bg">
-                      <span className="block h-full origin-left bg-si-accent transition-[width] duration-75 ease-linear" style={{ width: `${Math.round(recorder.level * 100)}%` }} />
+                      <span
+                        className="block h-full origin-left bg-si-accent transition-[width] duration-75 ease-linear"
+                        style={{ width: `${Math.round(recorder.level * 100)}%` }}
+                      />
                     </span>
                   </span>
-                  <span id="top-bar-recording-dur" className="font-tc text-[0.75rem] font-medium tabular-nums text-si-fg" aria-hidden="true">
+                  <span
+                    id="top-bar-recording-dur"
+                    className="font-tc text-[0.75rem] font-medium tabular-nums text-si-fg"
+                    aria-hidden="true"
+                  >
                     {recDur}
                   </span>
                 </>
@@ -293,9 +383,19 @@ export function TransportStrip({
           </div>
 
           <div className="flex min-w-0 items-center" aria-live="off">
-            <span className={cn('flex min-w-0 items-center gap-2.5 whitespace-nowrap', live ? 'text-si-fg' : 'text-si-muted')}>
+            <span
+              className={cn(
+                'flex min-w-0 items-center gap-2.5 whitespace-nowrap',
+                live ? 'text-si-fg' : 'text-si-muted',
+              )}
+            >
               <span className="inline-flex shrink-0 items-center gap-1" aria-hidden="true">
-                <span className={cn('inline-flex', recording ? 'text-(--si-rec)' : rolling ? 'text-si-fg' : 'text-si-dim')}>
+                <span
+                  className={cn(
+                    'inline-flex',
+                    recording ? 'text-(--si-rec)' : rolling ? 'text-si-fg' : 'text-si-dim',
+                  )}
+                >
                   <Glyph icon="mic" size={16} />
                 </span>
                 <span className={cn('inline-flex', live ? 'text-(--si-rec)' : 'text-si-dim')}>
@@ -316,11 +416,19 @@ export function TransportStrip({
               >
                 {clock.timecode}
               </span>
-              {session.take > 1 && <span className="font-label text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-si-dim">Take {session.take}</span>}
+              {session.take > 1 && (
+                <span className="font-label text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-si-dim">
+                  Take {session.take}
+                </span>
+              )}
             </span>
           </div>
 
-          <div className="flex w-full min-w-0 flex-row flex-wrap items-center gap-1.5 md:flex-nowrap" role="toolbar" aria-label="Session transport controls">
+          <div
+            className="flex w-full min-w-0 flex-row flex-wrap items-center gap-1.5 md:flex-nowrap"
+            role="toolbar"
+            aria-label="Session transport controls"
+          >
             {controls.map((c) => (
               <CtlButton key={c.id} c={c} />
             ))}
@@ -349,7 +457,13 @@ export function TransportStrip({
               </Tooltip>
             )}
             <Tooltip content="Keyboard shortcuts (?)">
-              <Button variant="transport" size="icon" className="max-md:hidden md:w-auto md:min-w-(--h-ctl) md:flex-1" aria-label="Keyboard shortcuts" onClick={() => shortcutsOpen.set(true)}>
+              <Button
+                variant="transport"
+                size="icon"
+                className="max-md:hidden md:w-auto md:min-w-(--h-ctl) md:flex-1"
+                aria-label="Keyboard shortcuts"
+                onClick={() => shortcutsOpen.set(true)}
+              >
                 <KeyboardIcon aria-hidden="true" />
               </Button>
             </Tooltip>
@@ -358,9 +472,14 @@ export function TransportStrip({
 
         <div className="flex min-w-0 flex-1 flex-col justify-end gap-2.5">
           {live ? (
-            <div id="cat-strip-live-slot" className="box-border flex min-h-(--v4-cat-btn-h) w-full min-w-0 items-center">
+            <div
+              id="cat-strip-live-slot"
+              className="box-border flex min-h-(--v4-cat-btn-h) w-full min-w-0 items-center"
+            >
               {categoriesError ? (
-                <p className="m-0 text-[0.85rem] text-si-danger">Couldn't load the event buttons. {categoriesError}</p>
+                <p className="m-0 text-[0.85rem] text-si-danger">
+                  Couldn't load the event buttons. {categoriesError}
+                </p>
               ) : (
                 <CategoryStrip
                   session={session}

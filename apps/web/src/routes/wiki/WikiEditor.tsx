@@ -34,7 +34,8 @@ export function WikiEditor({ draft, onChange, showAliases, resolve }: Props) {
     const next = alias.trim();
     if (!next) return;
     const lower = next.toLocaleLowerCase();
-    if (!draft.aliases.some((a) => a.toLocaleLowerCase() === lower)) onChange({ ...draft, aliases: [...draft.aliases, next] });
+    if (!draft.aliases.some((a) => a.toLocaleLowerCase() === lower))
+      onChange({ ...draft, aliases: [...draft.aliases, next] });
     setAlias('');
   };
 
@@ -65,7 +66,9 @@ export function WikiEditor({ draft, onChange, showAliases, resolve }: Props) {
                       size="icon-xs"
                       aria-label={`Remove alias ${a}`}
                       className="size-auto rounded-sm border-0 text-si-dim not-disabled:hover:bg-transparent not-disabled:hover:text-si-fg"
-                      onClick={() => onChange({ ...draft, aliases: draft.aliases.filter((x) => x !== a) })}
+                      onClick={() =>
+                        onChange({ ...draft, aliases: draft.aliases.filter((x) => x !== a) })
+                      }
                     >
                       <XIcon aria-hidden="true" className="size-3" />
                     </Button>

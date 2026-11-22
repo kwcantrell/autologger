@@ -13,7 +13,10 @@ type PageRow = typeof pages.$inferSelect;
 export const normTitle = (t: string) => t.trim().toLowerCase().replace(/\s+/g, ' ');
 
 async function summaries(ctx: Ctx, rows: PageRow[]): Promise<WikiPageSummary[]> {
-  const users = await userRefs(ctx.db, rows.map((r) => r.updatedBy));
+  const users = await userRefs(
+    ctx.db,
+    rows.map((r) => r.updatedBy),
+  );
   return rows.map((r) => ({
     id: r.id,
     showId: r.showId,
@@ -37,7 +40,16 @@ async function fullPage(ctx: Ctx, row: PageRow): Promise<WikiPage> {
   const backlinks = await ctx.db
     .select({ id: pages.id, title: pages.title, kind: pages.kind })
     .from(pages)
-    .where(and(eq(pages.showId, row.showId), sql`${pages.id} <> ${row.id}`, sql`${pages.bodyMd} ilike any(array[${sql.join(names.map((n) => sql`${n}`), sql`, `)}]::text[])`))
+    .where(
+      and(
+        eq(pages.showId, row.showId),
+        sql`${pages.id} <> ${row.id}`,
+        sql`${pages.bodyMd} ilike any(array[${sql.join(
+          names.map((n) => sql`${n}`),
+          sql`, `,
+        )}]::text[])`,
+      ),
+    )
     .orderBy(asc(pages.title));
   return { ...summary!, bodyMd: row.bodyMd, backlinks };
 }
@@ -95,7 +107,8 @@ defineOp({
 
 defineOp({
   name: 'wiki.get',
-  description: 'Read a wiki page by pageId, or by showId + title (aliases match too). Includes backlinks.',
+  description:
+    'Read a wiki page by pageId, or by showId + title (aliases match too). Includes backlinks.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { pageId, showId, title }) {
@@ -116,15 +129,21 @@ defineOp({
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
     await requireShow(ctx, input.showId, 'write');
-    if (input.kind === 'session' && !input.sessionId) throw badRequest('Session pages need a sessionId.');
+    if (input.kind === 'session' && !input.sessionId)
+      throw badRequest('Session pages need a sessionId.');
     if (input.sessionId) {
       const { session } = await requireSession(ctx, input.sessionId, 'read');
-      if (session.showId !== input.showId) throw badRequest('That session belongs to another show.');
+      if (session.showId !== input.showId)
+        throw badRequest('That session belongs to another show.');
     }
-    const existing = input.pageId ? await loadPage(ctx, input.pageId, 'write') : await findByTitle(ctx, input.showId, input.title);
-    if (existing && existing.showId !== input.showId) throw badRequest('That page belongs to another show.');
+    const existing = input.pageId
+      ? await loadPage(ctx, input.pageId, 'write')
+      : await findByTitle(ctx, input.showId, input.title);
+    if (existing && existing.showId !== input.showId)
+      throw badRequest('That page belongs to another show.');
     const clash = await findByTitle(ctx, input.showId, input.title);
-    if (clash && clash.id !== existing?.id) throw conflict(`A page titled “${clash.title}” already exists.`);
+    if (clash && clash.id !== existing?.id)
+      throw conflict(`A page titled “${clash.title}” already exists.`);
     // Matched by title/alias (no pageId): keep the canonical title; renaming needs an explicit pageId.
     const title = existing && !input.pageId ? existing.title : input.title;
     const values = {
@@ -139,11 +158,40 @@ defineOp({
     };
     let row: PageRow;
     if (existing) {
-      [row] = (await ctx.db.update(pages).set({ ...values, revision: existing.revision + 1 }).where(eq(pages.id, existing.id)).returning()) as [PageRow];
-      await ctx.record({ entity: 'wiki_page', entityId: row.id, kind: 'update', summary: `Edited wiki page “${row.title}”`, showId: row.showId, sessionId: row.sessionId, before: snapshot(existing), after: snapshot(row) });
+      [row] = (await ctx.db
+        .update(pages)
+        .set({ ...values, revision: existing.revision + 1 })
+        .where(eq(pages.id, existing.id))
+        .returning()) as [PageRow];
+      await ctx.record({
+        entity: 'wiki_page',
+        entityId: row.id,
+        kind: 'update',
+        summary: `Edited wiki page “${row.title}”`,
+        showId: row.showId,
+        sessionId: row.sessionId,
+        before: snapshot(existing),
+        after: snapshot(row),
+      });
     } else {
-      [row] = (await ctx.db.insert(pages).values({ id: newId('wiki'), showId: input.showId, ...values, createdBy: ctx.actor.user.id }).returning()) as [PageRow];
-      await ctx.record({ entity: 'wiki_page', entityId: row.id, kind: 'create', summary: `Created wiki page “${row.title}”`, showId: row.showId, sessionId: row.sessionId, after: snapshot(row) });
+      [row] = (await ctx.db
+        .insert(pages)
+        .values({
+          id: newId('wiki'),
+          showId: input.showId,
+          ...values,
+          createdBy: ctx.actor.user.id,
+        })
+        .returning()) as [PageRow];
+      await ctx.record({
+        entity: 'wiki_page',
+        entityId: row.id,
+        kind: 'create',
+        summary: `Created wiki page “${row.title}”`,
+        showId: row.showId,
+        sessionId: row.sessionId,
+        after: snapshot(row),
+      });
     }
     await addRevision(ctx, row);
     return fullPage(ctx, row);
@@ -157,7 +205,15 @@ defineOp({
   surfaces: ['web', 'mcp'],
   async run(ctx, { pageId }) {
     const row = await loadPage(ctx, pageId, 'write');
-    await ctx.record({ entity: 'wiki_page', entityId: row.id, kind: 'delete', summary: `Deleted wiki page “${row.title}”`, showId: row.showId, sessionId: row.sessionId, before: snapshot(row) });
+    await ctx.record({
+      entity: 'wiki_page',
+      entityId: row.id,
+      kind: 'delete',
+      summary: `Deleted wiki page “${row.title}”`,
+      showId: row.showId,
+      sessionId: row.sessionId,
+      before: snapshot(row),
+    });
     await ctx.db.delete(pages).where(eq(pages.id, pageId));
     return { deleted: true };
   },
@@ -170,8 +226,15 @@ defineOp({
   surfaces: ['web', 'mcp'],
   async run(ctx, { pageId }) {
     await loadPage(ctx, pageId, 'read');
-    const rows = await ctx.db.select().from(revisions).where(eq(revisions.pageId, pageId)).orderBy(desc(revisions.revision));
-    const users = await userRefs(ctx.db, rows.map((r) => r.authorId));
+    const rows = await ctx.db
+      .select()
+      .from(revisions)
+      .where(eq(revisions.pageId, pageId))
+      .orderBy(desc(revisions.revision));
+    const users = await userRefs(
+      ctx.db,
+      rows.map((r) => r.authorId),
+    );
     return rows.map((r) => ({
       revision: r.revision,
       title: r.title,
@@ -190,15 +253,35 @@ defineOp({
   surfaces: ['web'],
   async run(ctx, { pageId, revision }) {
     const row = await loadPage(ctx, pageId, 'write');
-    const [rev] = await ctx.db.select().from(revisions).where(and(eq(revisions.pageId, pageId), eq(revisions.revision, revision)));
+    const [rev] = await ctx.db
+      .select()
+      .from(revisions)
+      .where(and(eq(revisions.pageId, pageId), eq(revisions.revision, revision)));
     if (!rev) throw notFound('Revision');
     const [after] = (await ctx.db
       .update(pages)
-      .set({ title: rev.title, titleNorm: normTitle(rev.title), bodyMd: rev.bodyMd, aliases: rev.aliases, revision: row.revision + 1, updatedBy: ctx.actor.user.id, updatedAt: new Date() })
+      .set({
+        title: rev.title,
+        titleNorm: normTitle(rev.title),
+        bodyMd: rev.bodyMd,
+        aliases: rev.aliases,
+        revision: row.revision + 1,
+        updatedBy: ctx.actor.user.id,
+        updatedAt: new Date(),
+      })
       .where(eq(pages.id, pageId))
       .returning()) as [PageRow];
     await addRevision(ctx, after);
-    await ctx.record({ entity: 'wiki_page', entityId: pageId, kind: 'update', summary: `Restored “${after.title}” to revision ${revision}`, showId: row.showId, sessionId: row.sessionId, before: snapshot(row), after: snapshot(after) });
+    await ctx.record({
+      entity: 'wiki_page',
+      entityId: pageId,
+      kind: 'update',
+      summary: `Restored “${after.title}” to revision ${revision}`,
+      showId: row.showId,
+      sessionId: row.sessionId,
+      before: snapshot(row),
+      after: snapshot(after),
+    });
     return fullPage(ctx, after);
   },
 });

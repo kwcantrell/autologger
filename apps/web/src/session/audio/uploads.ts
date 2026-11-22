@@ -38,7 +38,12 @@ function remove(key: string) {
 }
 
 /** PUT with progress (XHR: fetch has no upload progress). */
-function put(url: string, blob: Blob, headers: Record<string, string>, onProgress: (f: number) => void): Promise<void> {
+function put(
+  url: string,
+  blob: Blob,
+  headers: Record<string, string>,
+  onProgress: (f: number) => void,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', url);
@@ -46,9 +51,16 @@ function put(url: string, blob: Blob, headers: Record<string, string>, onProgres
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total);
     };
-    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Storage answered ${xhr.status} to the upload.`)));
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300
+        ? resolve()
+        : reject(new Error(`Storage answered ${xhr.status} to the upload.`));
     xhr.onerror = () =>
-      reject(new Error("Couldn't reach the storage server. The upload will be retried; check the connection (or the storage CORS setup)."));
+      reject(
+        new Error(
+          "Couldn't reach the storage server. The upload will be retried; check the connection (or the storage CORS setup).",
+        ),
+      );
     xhr.send(blob);
   });
 }
@@ -73,7 +85,10 @@ async function uploadOne(u: PendingUpload): Promise<void> {
   await put(uploadUrl, u.blob, headers ?? {}, (f) => patch(u.key, { progress: f }));
   await rpc('media.completeUpload', {
     segmentId,
-    durationSec: u.durationSec != null && Number.isFinite(u.durationSec) ? Math.max(0, u.durationSec) : undefined,
+    durationSec:
+      u.durationSec != null && Number.isFinite(u.durationSec)
+        ? Math.max(0, u.durationSec)
+        : undefined,
   });
 }
 
@@ -115,9 +130,14 @@ async function drain() {
   }
 }
 
-export function enqueueUpload(u: Omit<PendingUpload, 'key' | 'attempts' | 'state' | 'error' | 'progress'>) {
+export function enqueueUpload(
+  u: Omit<PendingUpload, 'key' | 'attempts' | 'state' | 'error' | 'progress'>,
+) {
   const key = `up${++seq}`;
-  uploadQueue.set((list) => [...list, { ...u, key, attempts: 0, state: 'queued', error: null, progress: 0 }]);
+  uploadQueue.set((list) => [
+    ...list,
+    { ...u, key, attempts: 0, state: 'queued', error: null, progress: 0 },
+  ]);
   void drain();
   return key;
 }
@@ -134,7 +154,9 @@ export function discardUpload(key: string) {
 export function downloadUpload(u: PendingUpload) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(u.blob);
-  a.download = u.fileName ?? `recording-${u.key}.${u.mimeType.includes('ogg') ? 'ogg' : u.mimeType.includes('mp4') ? 'm4a' : 'webm'}`;
+  a.download =
+    u.fileName ??
+    `recording-${u.key}.${u.mimeType.includes('ogg') ? 'ogg' : u.mimeType.includes('mp4') ? 'm4a' : 'webm'}`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
 }

@@ -1,6 +1,6 @@
 import { BookOpenIcon, ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
-import { TRANSPORT_LABEL, settingsOpen, transportStatus, useStore } from '@/lib/store';
+import { settingsOpen, TRANSPORT_LABEL, transportStatus, useStore } from '@/lib/store';
 import { SearchPalette } from '@/routes/search/SearchPalette';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
@@ -29,7 +29,8 @@ export function TopBar() {
 
   const leaveSessionIfOtherShow = (showId: string) => {
     // Switching show closes a session from another show (the rail lists the new show's sessions).
-    if (location.startsWith('/sessions/') && status.sessionId && showId !== active.show?.id) navigate('/');
+    if (location.startsWith('/sessions/') && status.sessionId && showId !== active.show?.id)
+      navigate('/');
   };
 
   const label = TRANSPORT_LABEL[status.state];
@@ -48,13 +49,24 @@ export function TopBar() {
     >
       <SidebarTrigger className="size-(--h-ctl) shrink-0" title="Toggle sidebar ( [ )" />
 
-      <nav aria-label="Current team and show" className="flex min-w-0 flex-1 items-center gap-1 max-md:gap-0">
+      <nav
+        aria-label="Current team and show"
+        className="flex min-w-0 flex-1 items-center gap-1 max-md:gap-0"
+      >
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={<Button variant="ghost" className={cn(CRUMB, TEAM_CRUMB)} title={active.team?.name || 'Switch team'} />}
+            render={
+              <Button
+                variant="ghost"
+                className={cn(CRUMB, TEAM_CRUMB)}
+                title={active.team?.name || 'Switch team'}
+              />
+            }
           >
             <span className="sr-only">Switch team: </span>
-            <span className={cn(CRUMB_NAME, 'max-md:max-w-[10ch]')}>{active.team?.name || 'No team'}</span>
+            <span className={cn(CRUMB_NAME, 'max-md:max-w-[10ch]')}>
+              {active.team?.name || 'No team'}
+            </span>
             <ChevronDownIcon data-icon="inline-end" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-[300px] max-w-[calc(100vw-1.5rem)]">
@@ -90,15 +102,25 @@ export function TopBar() {
         <DropdownMenu>
           <DropdownMenuTrigger
             disabled={active.shows.length === 0}
-            render={<Button variant="ghost" className={cn(CRUMB, 'max-md:min-w-[4.5rem]')} title={active.show?.name || 'Switch show'} />}
+            render={
+              <Button
+                variant="ghost"
+                className={cn(CRUMB, 'max-md:min-w-[4.5rem]')}
+                title={active.show?.name || 'Switch show'}
+              />
+            }
           >
             <span className="sr-only">Switch show: </span>
-            <span className={cn(CRUMB_NAME, 'max-md:max-w-[18ch]')}>{active.show?.name || 'No show'}</span>
+            <span className={cn(CRUMB_NAME, 'max-md:max-w-[18ch]')}>
+              {active.show?.name || 'No show'}
+            </span>
             <ChevronDownIcon data-icon="inline-end" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-[300px] max-w-[calc(100vw-1.5rem)]">
             <DropdownMenuGroup>
-              <DropdownMenuLabel className="truncate">Shows in {active.team?.name}</DropdownMenuLabel>
+              <DropdownMenuLabel className="truncate">
+                Shows in {active.team?.name}
+              </DropdownMenuLabel>
               <DropdownMenuRadioGroup
                 value={active.show?.id ?? ''}
                 onValueChange={(id: string) => {
@@ -138,7 +160,9 @@ export function TopBar() {
         ) : (
           <div className="flex shrink-0 items-center gap-2 px-1.5 max-md:pr-0 md:min-w-0 md:shrink">
             {statusBadge}
-            <span className="min-w-0 truncate text-xs text-muted-foreground max-md:sr-only">No session open</span>
+            <span className="min-w-0 truncate text-xs text-muted-foreground max-md:sr-only">
+              No session open
+            </span>
           </div>
         )}
       </nav>

@@ -11,18 +11,29 @@ import { useWikiPage } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { selectShow, useActive } from '@/app/useActive';
 import { PageFrame } from '@/components/RouteState';
+import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription, AlertTitle } from '@/shared/components/ui/alert';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { Spinner } from '@/shared/components/ui/spinner';
-import { showToast } from '@/shared/components/Toast';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { type WikiDraft, WikiEditor } from './WikiEditor';
 import { WikiHistorySheet } from './WikiHistorySheet';
 import { WikiMarkdown } from './WikiMarkdown';
-import { fmtWhen, useWikiDelete, useWikiResolver, useWikiUpsert, WIKI_KIND_LABEL, wikiHref } from './wikiShared';
+import {
+  fmtWhen,
+  useWikiDelete,
+  useWikiResolver,
+  useWikiUpsert,
+  WIKI_KIND_LABEL,
+  wikiHref,
+} from './wikiShared';
 
-const draftOf = (p: WikiPage): WikiDraft => ({ title: p.title, body: p.bodyMd, aliases: p.aliases });
+const draftOf = (p: WikiPage): WikiDraft => ({
+  title: p.title,
+  body: p.bodyMd,
+  aliases: p.aliases,
+});
 
 function Frame({ children }: { children: ReactNode }) {
   return (
@@ -57,7 +68,9 @@ export function WikiPageView({ pageId }: { pageId: string }) {
       <Frame>
         <div role="alert" className="flex flex-col items-start gap-3 py-6 text-sm text-si-fg">
           <p className="m-0">
-            {missing ? 'Page not found. It may be in a show you can’t open.' : errorMessage(error) || 'The page could not be loaded.'}
+            {missing
+              ? 'Page not found. It may be in a show you can’t open.'
+              : errorMessage(error) || 'The page could not be loaded.'}
           </p>
           {!missing && (
             <Button variant="outline" onClick={() => void refetch()}>
@@ -87,7 +100,9 @@ function PageBody({ page }: { page: WikiPage }) {
   const [history, setHistory] = useState(false);
   // `?edit=1` (a page just created) opens straight in edit mode.
   const [edit, setEdit] = useState<{ draft: WikiDraft; error: string | null } | null>(() =>
-    new URLSearchParams(search).get('edit') === '1' && canWrite ? { draft: draftOf(page), error: null } : null,
+    new URLSearchParams(search).get('edit') === '1' && canWrite
+      ? { draft: draftOf(page), error: null }
+      : null,
   );
 
   const readOnlyWhy = !pageShow
@@ -118,7 +133,8 @@ function PageBody({ page }: { page: WikiPage }) {
       },
       {
         onSuccess: () => leaveEdit(),
-        onError: (e) => setEdit((s) => s && { ...s, error: errorMessage(e) || 'The page was not saved.' }),
+        onError: (e) =>
+          setEdit((s) => s && { ...s, error: errorMessage(e) || 'The page was not saved.' }),
       },
     );
   };
@@ -176,12 +192,15 @@ function PageBody({ page }: { page: WikiPage }) {
           </ul>
         )}
         <p className="m-0 text-xs text-si-dim">
-          Last changed by <span className="text-si-muted">{page.updatedBy?.name ?? 'someone'}</span>,{' '}
-          <time dateTime={page.updatedAt}>{fmtWhen(page.updatedAt)}</time> · r{page.revision}
+          Last changed by <span className="text-si-muted">{page.updatedBy?.name ?? 'someone'}</span>
+          , <time dateTime={page.updatedAt}>{fmtWhen(page.updatedAt)}</time> · r{page.revision}
           {page.sessionId && (
             <>
               {' · '}
-              <Link href={`/sessions/${encodeURIComponent(page.sessionId)}`} className="text-si-muted underline underline-offset-2 hover:text-si-fg">
+              <Link
+                href={`/sessions/${encodeURIComponent(page.sessionId)}`}
+                className="text-si-muted underline underline-offset-2 hover:text-si-fg"
+              >
                 Open session
               </Link>
             </>
@@ -192,13 +211,23 @@ function PageBody({ page }: { page: WikiPage }) {
       {!edit && (
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" disabled={!canWrite} onClick={() => setEdit({ draft: draftOf(page), error: null })}>
+            <Button
+              size="sm"
+              disabled={!canWrite}
+              onClick={() => setEdit({ draft: draftOf(page), error: null })}
+            >
               <PencilIcon aria-hidden="true" /> Edit
             </Button>
             <Button size="sm" variant="outline" onClick={() => setHistory(true)}>
               <HistoryIcon aria-hidden="true" /> History
             </Button>
-            <Button size="sm" variant="ghost" className="text-si-danger" disabled={!canWrite || del.isPending} onClick={() => void onDelete()}>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-si-danger"
+              disabled={!canWrite || del.isPending}
+              onClick={() => void onDelete()}
+            >
               <Trash2Icon aria-hidden="true" /> Delete
             </Button>
           </div>
@@ -236,14 +265,23 @@ function PageBody({ page }: { page: WikiPage }) {
       )}
 
       {!edit && page.backlinks.length > 0 && (
-        <section aria-labelledby="wiki-backlinks" className="flex flex-col gap-1 border-t border-si-line pt-4">
-          <h2 id="wiki-backlinks" className="m-0 text-xs font-semibold tracking-wide text-si-dim uppercase">
+        <section
+          aria-labelledby="wiki-backlinks"
+          className="flex flex-col gap-1 border-t border-si-line pt-4"
+        >
+          <h2
+            id="wiki-backlinks"
+            className="m-0 text-xs font-semibold tracking-wide text-si-dim uppercase"
+          >
             Linked from
           </h2>
           <ul className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0">
             {page.backlinks.map((b) => (
               <li key={b.id} className="flex items-baseline gap-1.5 text-sm">
-                <Link href={wikiHref(b.id)} className="text-si-fg underline decoration-(--si-line-strong) underline-offset-2 hover:text-si-accent">
+                <Link
+                  href={wikiHref(b.id)}
+                  className="text-si-fg underline decoration-(--si-line-strong) underline-offset-2 hover:text-si-accent"
+                >
                   {b.title}
                 </Link>
                 <span className="text-xs text-si-dim">{WIKI_KIND_LABEL[b.kind]}</span>

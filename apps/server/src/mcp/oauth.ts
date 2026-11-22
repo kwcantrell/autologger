@@ -408,7 +408,7 @@ oauthRoutes.post('/oauth/token', async (c) => {
       return tokenError(c, 'invalid_target', 'resource does not match the authorization request.');
     }
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, code.userId));
-    if (!user || user.status !== 'active')
+    if (user?.status !== 'active')
       return tokenError(c, 'invalid_grant', 'The account is not active.');
     const t = await db.transaction((tx) =>
       issueGrantTokens(tx, {

@@ -10,14 +10,14 @@ Paths below are relative to `web/src/` unless absolute. "COPY" = safe to copy ve
 
 ## 0. Quick map
 
-| Area | Entry file | Notes |
-|---|---|---|
-| Document/head | `app/(index)/layout.page.tsx` | Title "AutoLogger", favicon `/static/logo-autologger-transparent.png`, apple icon `/static/logo-autologger-app.png`, `themeColor #101216`, preloads 3 fonts. Body has `data-v4-transport="rolling"` (legacy attribute; harmless). Port to Vite `index.html`. |
-| Client root | `pages/index/IndexRoot.tsx` | `QueryClientProvider` (retry 1, staleTime 0) → `ThemeProvider` → `TooltipProvider delay=400` → `AppLocationRouter` (wouter) → `RootGate`. |
-| Auth gate | `pages/index/RootGate.tsx` | profile query: loading → `AppLoadingSkeleton` with looping brand video; error → `RouteState frame="gate"` card "Couldn't reach the server…" + full-width 44px "Try again"; logged-out → `LoginPage`; else `AppShell`. |
-| Shell | `pages/index/AppShell.tsx` | SidebarProvider root carrying `data-transport`, TopBar, V6Rail, `<main>` with route switch + overlays. |
-| Routes | `AppShell.tsx` + `shared/utils/loginReturnPath.ts` | See section 3. |
-| Theme | `shared/theme/tailwind.css` + `shadcn-tailwind.css` | See section 1. |
+| Area          | Entry file                                          | Notes                                                                                                                                                                                                                                                        |
+| ------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Document/head | `app/(index)/layout.page.tsx`                       | Title "AutoLogger", favicon `/static/logo-autologger-transparent.png`, apple icon `/static/logo-autologger-app.png`, `themeColor #101216`, preloads 3 fonts. Body has `data-v4-transport="rolling"` (legacy attribute; harmless). Port to Vite `index.html`. |
+| Client root   | `pages/index/IndexRoot.tsx`                         | `QueryClientProvider` (retry 1, staleTime 0) → `ThemeProvider` → `TooltipProvider delay=400` → `AppLocationRouter` (wouter) → `RootGate`.                                                                                                                    |
+| Auth gate     | `pages/index/RootGate.tsx`                          | profile query: loading → `AppLoadingSkeleton` with looping brand video; error → `RouteState frame="gate"` card "Couldn't reach the server…" + full-width 44px "Try again"; logged-out → `LoginPage`; else `AppShell`.                                        |
+| Shell         | `pages/index/AppShell.tsx`                          | SidebarProvider root carrying `data-transport`, TopBar, V6Rail, `<main>` with route switch + overlays.                                                                                                                                                       |
+| Routes        | `AppShell.tsx` + `shared/utils/loginReturnPath.ts`  | See section 3.                                                                                                                                                                                                                                               |
+| Theme         | `shared/theme/tailwind.css` + `shadcn-tailwind.css` | See section 1.                                                                                                                                                                                                                                               |
 
 ---
 
@@ -25,14 +25,14 @@ Paths below are relative to `web/src/` unless absolute. "COPY" = safe to copy ve
 
 ### 1.1 Files
 
-| File | Lines | Copy? | What it holds |
-|---|---|---|---|
-| `shared/theme/tailwind.css` | 1053 | COPY, then prune | Tailwind v4 entry: layer order, imports (`tailwindcss/theme.css`, `preflight.css`, `utilities.css source('../../..')`, `tw-animate-css`, `./shadcn-tailwind.css`), `@theme` animations, `@theme inline` colour/radius utilities, `@theme static` font tokens, `:root` `--si-*` palette, `--tx-*` transport states, shadcn semantic tokens, shell ignition rules, named utilities, `@font-face` block, base layer (focus, selection, scrollbars, body). For Vite: change `source('../../..')` to the new web root (or drop it — Vite's plugin scans from project root); drop the Next/Turbopack commentary. |
-| `shared/theme/shadcn-tailwind.css` | 651 | COPY verbatim | Vendored shadcn 4.23.0 `dist/tailwind.css`: `data-open/closed/checked/...` custom variants matching Base UI's bare `data-*` attrs, accordion keyframes, `no-scrollbar`, `scroll-fade`, shimmer utilities. No colour tokens. Needed by every `components/ui/*` primitive. |
-| `shared/theme/ThemeProvider.tsx` | 24 | Optional | Renders two empty `div.v5-bg-glow` nodes (backgrounds are now `none`). Visually a no-op — can be dropped along with the `.v5-bg-glow` rules. |
-| `shared/theme/*.test.ts` | — | Optional | `contrastTokens`, `deadCss.repo`, `fonts.repo`, `showIgnitionTokens.repo`, `tailwindBuild`, `v5Leftovers.repo` — guardrail tests; `tailwindBuild` runs a Next build (rewrite or drop). |
-| `components.json` (web root) | — | COPY, edit | shadcn config: `style: base-nova`, `iconLibrary: lucide`, `baseColor: neutral`, cssVariables, aliases `@/shared/components`, `@/shared/components/ui`, `@/shared/lib/utils`, `@/shared/hooks`. Set `rsc: false` for Vite. |
-| `shared/lib/utils.ts` | 7 | COPY | `cn()` = `twMerge(clsx(...))`. |
+| File                               | Lines | Copy?            | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------- | ----- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shared/theme/tailwind.css`        | 1053  | COPY, then prune | Tailwind v4 entry: layer order, imports (`tailwindcss/theme.css`, `preflight.css`, `utilities.css source('../../..')`, `tw-animate-css`, `./shadcn-tailwind.css`), `@theme` animations, `@theme inline` colour/radius utilities, `@theme static` font tokens, `:root` `--si-*` palette, `--tx-*` transport states, shadcn semantic tokens, shell ignition rules, named utilities, `@font-face` block, base layer (focus, selection, scrollbars, body). For Vite: change `source('../../..')` to the new web root (or drop it — Vite's plugin scans from project root); drop the Next/Turbopack commentary. |
+| `shared/theme/shadcn-tailwind.css` | 651   | COPY verbatim    | Vendored shadcn 4.23.0 `dist/tailwind.css`: `data-open/closed/checked/...` custom variants matching Base UI's bare `data-*` attrs, accordion keyframes, `no-scrollbar`, `scroll-fade`, shimmer utilities. No colour tokens. Needed by every `components/ui/*` primitive.                                                                                                                                                                                                                                                                                                                                   |
+| `shared/theme/ThemeProvider.tsx`   | 24    | Optional         | Renders two empty `div.v5-bg-glow` nodes (backgrounds are now `none`). Visually a no-op — can be dropped along with the `.v5-bg-glow` rules.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `shared/theme/*.test.ts`           | —     | Optional         | `contrastTokens`, `deadCss.repo`, `fonts.repo`, `showIgnitionTokens.repo`, `tailwindBuild`, `v5Leftovers.repo` — guardrail tests; `tailwindBuild` runs a Next build (rewrite or drop).                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `components.json` (web root)       | —     | COPY, edit       | shadcn config: `style: base-nova`, `iconLibrary: lucide`, `baseColor: neutral`, cssVariables, aliases `@/shared/components`, `@/shared/components/ui`, `@/shared/lib/utils`, `@/shared/hooks`. Set `rsc: false` for Vite.                                                                                                                                                                                                                                                                                                                                                                                  |
+| `shared/lib/utils.ts`              | 7     | COPY             | `cn()` = `twMerge(clsx(...))`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 Dependencies the theme/primitives need: `tailwindcss@4`, `@tailwindcss/vite` (replaces `@tailwindcss/postcss`), `tw-animate-css`, `class-variance-authority`, `clsx`, `tailwind-merge`, `@base-ui/react`, `lucide-react`, `sonner`, `cmdk`.
 
@@ -40,16 +40,16 @@ Dependencies the theme/primitives need: `tailwindcss@4`, `@tailwindcss/vite` (re
 
 Two locations; both must be served.
 
-| Face | Weights | File | Loaded from |
-|---|---|---|---|
-| Barlow (UI/body) | 400 | `web/public/static/fonts/barlow-400-latin.woff2` | `/static/fonts/...` (public, preloaded) |
-| Barlow | 500 | `assets/fonts/barlow-500-latin.woff2` | bundled url() |
-| Barlow | 600 | `web/public/static/fonts/barlow-600-latin.woff2` | public, preloaded |
-| Barlow | 700 | `assets/fonts/barlow-700-latin.woff2` | bundled |
-| Barlow Condensed (labels/tabs/status) | 500/600/700 | `assets/fonts/barlow-condensed-{500,600,700}-latin.woff2` | bundled |
-| JetBrains Mono (timecode/measure) | 500–600 variable | `assets/fonts/jetbrains-mono-latin-var.woff2` | bundled |
-| League Gothic (wordmark only) | 400 | latin: `web/public/static/fonts/league-gothic-latin.woff2` (preloaded); vietnamese/latin-ext subsets: `assets/fonts/qFdC35CBi4tvBz81xy7WG7ep0h{c,Y}ojnA4PLDzOA.woff2` | mixed |
-| Roboto | 500 | `assets/fonts/roboto-500.woff2` | bundled — used only by the Google sign-in button |
+| Face                                  | Weights          | File                                                                                                                                                                  | Loaded from                                      |
+| ------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Barlow (UI/body)                      | 400              | `web/public/static/fonts/barlow-400-latin.woff2`                                                                                                                      | `/static/fonts/...` (public, preloaded)          |
+| Barlow                                | 500              | `assets/fonts/barlow-500-latin.woff2`                                                                                                                                 | bundled url()                                    |
+| Barlow                                | 600              | `web/public/static/fonts/barlow-600-latin.woff2`                                                                                                                      | public, preloaded                                |
+| Barlow                                | 700              | `assets/fonts/barlow-700-latin.woff2`                                                                                                                                 | bundled                                          |
+| Barlow Condensed (labels/tabs/status) | 500/600/700      | `assets/fonts/barlow-condensed-{500,600,700}-latin.woff2`                                                                                                             | bundled                                          |
+| JetBrains Mono (timecode/measure)     | 500–600 variable | `assets/fonts/jetbrains-mono-latin-var.woff2`                                                                                                                         | bundled                                          |
+| League Gothic (wordmark only)         | 400              | latin: `web/public/static/fonts/league-gothic-latin.woff2` (preloaded); vietnamese/latin-ext subsets: `assets/fonts/qFdC35CBi4tvBz81xy7WG7ep0h{c,Y}ojnA4PLDzOA.woff2` | mixed                                            |
+| Roboto                                | 500              | `assets/fonts/roboto-500.woff2`                                                                                                                                       | bundled — used only by the Google sign-in button |
 
 All `@font-face` rules are in `tailwind.css` `@layer base` (around line 812), each with `font-display: swap` and a latin `unicode-range`. Copy `assets/fonts/*` and `public/static/fonts/*` verbatim; keep the three `<link rel=preload as=font type=font/woff2 crossorigin=anonymous>` tags in `index.html`.
 
@@ -58,6 +58,7 @@ Font tokens (`@theme static`): `--font-ui: 'Barlow','Segoe UI',system-ui,sans-se
 Body baseline: Barlow 15px / line-height 1.45, `color: --si-fg`, `background: --si-bg`.
 
 Other assets:
+
 - `assets/video/AutoLogger_Small.webm` — looping brand animation in the boot loader (`.autologger-loading-video__media`, height 3rem, max-width min(40vw,12rem)). `shared/utils/loadingVideo.ts` freezes other instances at frame 0.
 - `assets/logos/logo-autologger-transparent.png`, `public/static/logo-autologger-{app,transparent}.png` — favicon/app icons.
 - `assets/icons/*.png` (`app_title`, `icon_dropdown`, `icon_menu`, `icon_nav_back`, `icon_next_nav`, `icon_pause_white`, `icon_play_white`, `icon_search`, `tab_select_marker`) — legacy V4 PNGs, not referenced by any current TS/CSS; do not copy (all icons are lucide).
@@ -68,26 +69,26 @@ There is no `.dark` class, no `prefers-color-scheme` handling, no theme toggle. 
 
 Base palette (`:root`, tailwind.css ~line 261):
 
-| Token | Value | Role |
-|---|---|---|
-| `--si-bg` | `#101216` | page ground, inputs, scrollbar track |
-| `--si-panel` | `#16181d` | cards, transport card at rest, table headers, log buttons |
-| `--si-panel-2` | `#1c1f25` | raised: secondary buttons, popovers, menus, keycaps |
-| `--si-line` | `#272b33` | hairlines |
-| `--si-line-strong` | `#343944` | input borders, scrollbar thumb |
-| `--si-fg` | `#eceef2` | text |
-| `--si-muted` | `#a6acb7` | secondary text |
-| `--si-dim` | `#858c98` | column heads, crumb separators |
-| `--si-ink` | `#0b0c0f` | text on light pills |
-| `--si-accent` | `#5b7cff` | THE accent |
-| `--si-danger` / `--si-danger-line` | `#ff9b9b` / `#5a2e33` | destructive |
-| `--si-rec` | `#ff6464` | idle record glyph only |
-| `--si-wave-body` | fg 13% | waveform unplayed |
-| `--si-accent-text` | accent 72% → white | accent text (live timecode) |
-| `--si-primary-tint` / `--si-primary-line` | accent 26% into panel-2 / 55% into line | primary button |
-| `--sel-bg` / `--sel-line` | accent 18% / 48% transparent | THE selected state (`background:var(--sel-bg); box-shadow: inset 0 0 0 1px var(--sel-line)`) |
-| `--si-tx-stopped/rolling/recording/playback` | accent 10% / 25% / 25% / 18% into near-black | frame tints |
-| `--r-ctl` 8px, `--r-card` 12px, `--h-ctl` 36px, `--h-sm` 30px, `--topbar-h` 52px | | shape |
+| Token                                                                            | Value                                        | Role                                                                                         |
+| -------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `--si-bg`                                                                        | `#101216`                                    | page ground, inputs, scrollbar track                                                         |
+| `--si-panel`                                                                     | `#16181d`                                    | cards, transport card at rest, table headers, log buttons                                    |
+| `--si-panel-2`                                                                   | `#1c1f25`                                    | raised: secondary buttons, popovers, menus, keycaps                                          |
+| `--si-line`                                                                      | `#272b33`                                    | hairlines                                                                                    |
+| `--si-line-strong`                                                               | `#343944`                                    | input borders, scrollbar thumb                                                               |
+| `--si-fg`                                                                        | `#eceef2`                                    | text                                                                                         |
+| `--si-muted`                                                                     | `#a6acb7`                                    | secondary text                                                                               |
+| `--si-dim`                                                                       | `#858c98`                                    | column heads, crumb separators                                                               |
+| `--si-ink`                                                                       | `#0b0c0f`                                    | text on light pills                                                                          |
+| `--si-accent`                                                                    | `#5b7cff`                                    | THE accent                                                                                   |
+| `--si-danger` / `--si-danger-line`                                               | `#ff9b9b` / `#5a2e33`                        | destructive                                                                                  |
+| `--si-rec`                                                                       | `#ff6464`                                    | idle record glyph only                                                                       |
+| `--si-wave-body`                                                                 | fg 13%                                       | waveform unplayed                                                                            |
+| `--si-accent-text`                                                               | accent 72% → white                           | accent text (live timecode)                                                                  |
+| `--si-primary-tint` / `--si-primary-line`                                        | accent 26% into panel-2 / 55% into line      | primary button                                                                               |
+| `--sel-bg` / `--sel-line`                                                        | accent 18% / 48% transparent                 | THE selected state (`background:var(--sel-bg); box-shadow: inset 0 0 0 1px var(--sel-line)`) |
+| `--si-tx-stopped/rolling/recording/playback`                                     | accent 10% / 25% / 25% / 18% into near-black | frame tints                                                                                  |
+| `--r-ctl` 8px, `--r-card` 12px, `--h-ctl` 36px, `--h-sm` 30px, `--topbar-h` 52px |                                              | shape                                                                                        |
 
 Transport state variables (set by `[data-transport='stopped'|'rolling'|'recording'|'playback']`, `:root` = stopped): `--tx-rail`, `--tx-bar`, `--tx-live`, `--tx-playhead`, `--tx-glow`, `--tx-playhead-glow`, `--tx-wave-progress`, `--tx-pill-bg`, `--tx-pill-fg`, `--tx-pill-line`. Values: see tailwind.css lines 319–366 (copy verbatim). Transition `--tx-dur: 0.6s`, `--tx-ease: cubic-bezier(0.16,1,0.3,1)`.
 
@@ -117,23 +118,23 @@ The transport state comes from `pages/index/coordination/transportStatus.ts` (ti
 
 ### 1.5 Custom utilities / global rules heavily used
 
-| Name | Where defined | Used by |
-|---|---|---|
-| `hover-always:` variant | `@custom-variant hover-always (&:hover)` | toolbar ("glass") buttons and many legacy rows (fires on touch tap). |
-| `cat-strip-scrollbar` | `@utility` | CategoryButtonStrip thin scrollbar. |
-| `pal-slot` | `@utility` | Settings › Event buttons `<input type=color>` swatch (2rem square, 0.4rem radius). |
-| `timeline-hide-scrollbar` | `@utility` | Timeline viewport. |
-| Animations | `@theme` | `animate-tooltip-fade-in`, `animate-popover-fade-in`, `animate-overlay-fade-in`, `animate-content-fade-in`, `animate-wf-label-pulse` (waveform "importing/decoding…"), `animate-yt-import-pulse` (orange `#fb923c`↔`#c2410c`, YouTube import status — the only non-accent hue in chrome), `animate-marker-msg-marquee` (timeline marker message, 15s), `animate-event-row-flash` (22% accent, 2.5s). |
-| `#v4-log-sheet tr.event-row-flash > td` | components layer | Feed row flash when jumping from a timeline marker. |
-| `body[data-hide-internal='1'] .timelineMarker[data-cat='Internal' i]` | components | hides "Internal" category markers when the feed's "show internal" toggle is off. |
-| `body.v4-is-recording #top-bar-recording-dur / #top-bar-mic-level` | components | recording duration + mic meter visible only while THIS client records. |
-| `body.autologger-audio-saving` | components | blocks pointer events except `#autologger-audio-save-overlay` during audio finalize. |
-| `.hidden { display:none !important }` | components | legacy; note it beats `md:block` etc. (V6Rail works around it with `[display:none]`). Drop in rebuild. |
-| Base inputs | components layer | `input[type=text], textarea`: ground bg, line-strong border, `--r-ctl`, padding .55rem .65rem, accent border on focus; placeholder muted; textarea resize vertical min 2.5rem. |
-| Focus | base | `:focus-visible { outline: 2px solid accent; outline-offset: 2px }`; buttons use `ring-[3px] ring-ring/50`. |
-| Selection/caret | base | `::selection` accent 45% into ground; `caret-color: accent`. |
-| Scrollbars | base | 8px, track `--si-bg`, thumb `--si-line-strong` (2px transparent border, radius 8) → accent on hover; Firefox `scrollbar-color`. |
-| Viewport lock | components | desktop: `html,body { height:100dvh; overflow:hidden }`, body flex column; `max-width:767px` unlocks and the page scrolls. Single breakpoint `md = 768px`. |
+| Name                                                                  | Where defined                            | Used by                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hover-always:` variant                                               | `@custom-variant hover-always (&:hover)` | toolbar ("glass") buttons and many legacy rows (fires on touch tap).                                                                                                                                                                                                                                                                                                                                 |
+| `cat-strip-scrollbar`                                                 | `@utility`                               | CategoryButtonStrip thin scrollbar.                                                                                                                                                                                                                                                                                                                                                                  |
+| `pal-slot`                                                            | `@utility`                               | Settings › Event buttons `<input type=color>` swatch (2rem square, 0.4rem radius).                                                                                                                                                                                                                                                                                                                   |
+| `timeline-hide-scrollbar`                                             | `@utility`                               | Timeline viewport.                                                                                                                                                                                                                                                                                                                                                                                   |
+| Animations                                                            | `@theme`                                 | `animate-tooltip-fade-in`, `animate-popover-fade-in`, `animate-overlay-fade-in`, `animate-content-fade-in`, `animate-wf-label-pulse` (waveform "importing/decoding…"), `animate-yt-import-pulse` (orange `#fb923c`↔`#c2410c`, YouTube import status — the only non-accent hue in chrome), `animate-marker-msg-marquee` (timeline marker message, 15s), `animate-event-row-flash` (22% accent, 2.5s). |
+| `#v4-log-sheet tr.event-row-flash > td`                               | components layer                         | Feed row flash when jumping from a timeline marker.                                                                                                                                                                                                                                                                                                                                                  |
+| `body[data-hide-internal='1'] .timelineMarker[data-cat='Internal' i]` | components                               | hides "Internal" category markers when the feed's "show internal" toggle is off.                                                                                                                                                                                                                                                                                                                     |
+| `body.v4-is-recording #top-bar-recording-dur / #top-bar-mic-level`    | components                               | recording duration + mic meter visible only while THIS client records.                                                                                                                                                                                                                                                                                                                               |
+| `body.autologger-audio-saving`                                        | components                               | blocks pointer events except `#autologger-audio-save-overlay` during audio finalize.                                                                                                                                                                                                                                                                                                                 |
+| `.hidden { display:none !important }`                                 | components                               | legacy; note it beats `md:block` etc. (V6Rail works around it with `[display:none]`). Drop in rebuild.                                                                                                                                                                                                                                                                                               |
+| Base inputs                                                           | components layer                         | `input[type=text], textarea`: ground bg, line-strong border, `--r-ctl`, padding .55rem .65rem, accent border on focus; placeholder muted; textarea resize vertical min 2.5rem.                                                                                                                                                                                                                       |
+| Focus                                                                 | base                                     | `:focus-visible { outline: 2px solid accent; outline-offset: 2px }`; buttons use `ring-[3px] ring-ring/50`.                                                                                                                                                                                                                                                                                          |
+| Selection/caret                                                       | base                                     | `::selection` accent 45% into ground; `caret-color: accent`.                                                                                                                                                                                                                                                                                                                                         |
+| Scrollbars                                                            | base                                     | 8px, track `--si-bg`, thumb `--si-line-strong` (2px transparent border, radius 8) → accent on hover; Firefox `scrollbar-color`.                                                                                                                                                                                                                                                                      |
+| Viewport lock                                                         | components                               | desktop: `html,body { height:100dvh; overflow:hidden }`, body flex column; `max-width:767px` unlocks and the page scrolls. Single breakpoint `md = 768px`.                                                                                                                                                                                                                                           |
 
 ### 1.6 Button variants (shared/components/ui/button.tsx — COPY)
 
@@ -173,6 +174,7 @@ SidebarProvider (root, data-transport=<state>)  h-[100dvh] flex-col; phones: blo
 ### 2.1 TopBar (`components/TopBar.tsx`)
 
 Left→right, no wordmark, no field labels:
+
 1. `SidebarTrigger` (36px square; title "Toggle sidebar ( [ )").
 2. `nav[aria-label="Current team and show"]` crumbs:
    - Team crumb: ghost button, name `text-[15px]` (phones `text-sm`), `max-w-[22ch] truncate` (phones 10ch), `ChevronDownIcon`. Dropdown (300px): label "Your teams", radio items with team name + "N shows" (xs muted) + outline `Badge` role (Owner/Admin/Member).
@@ -188,6 +190,7 @@ Switching team/show calls `useSwitchActive` (OLD-INTERNAL: posts active studio/s
 ### 2.2 V6Rail (`components/V6Rail.tsx`)
 
 shadcn `Sidebar` (`shared/components/ui/sidebar.tsx`), `collapsible="icon"`, widths 272px / 68px / mobile 18rem sheet; surface = `--sidebar` = transport tint.
+
 - Header (`px-3 pt-3 gap-3`): if user can create in the active team — 2-col grid: primary "New session" (`Plus`) and outline "Import" (`Upload`); icon strip shows icon-only buttons with right-side tooltips.
 - Search: input with leading `Search` icon, placeholder "Search sessions…", 36px, clear `X` (icon-xs ghost); Escape clears. In the icon strip it collapses to an outline `Search` button that expands the rail and focuses the input. Filters the lists client-side.
 - Content (hidden in icon strip): group label "Recent sessions" (label type) → `RecentSessionsList`; group "Archived" → `ArchivedSessionsList` (only when non-empty).
@@ -202,16 +205,16 @@ Keyboard: `[` toggles the rail (ignored in text inputs and when an overlay other
 
 Router-known paths (`shared/utils/loginReturnPath.ts`, `isShellSegments` / `isRouterKnownPathname`):
 
-| Path | Screen | Notes |
-|---|---|---|
-| `/` | Home (no session): `SessionRoute` with empty id → `HomeRoute` | Rail + top bar always present. |
-| `/sessions/:id` | Session workspace (`SessionRoute` → lazy `SessionWorkspace`) | id is URL-encoded; re-selecting the active id is a no-op. Query `?t=`/moment deep links handled by `MomentDeepLink`. |
-| `/teams` | Home + Settings open on Members | Closing Settings navigates to `/`. |
-| `/search` | `SearchRoute` (full results page; query in `?q=` etc.) | lazy. |
-| `/wiki` | `WikiRoute` (page list for the active show) | lazy. |
-| `/wiki/:pageId` | `WikiPageView` | lazy; keyed on the route so page→page switches re-render in place. |
-| anything else | Next `not-found.page.tsx`: bare "404 — Not Found / This page doesn't exist." (unstyled sans) | In SPA: render a `RouteState` card instead. Trailing slashes 404. |
-| `/admin/users` | REMOVED (2026-10-06 "remove-admin-users-page"). | There is no admin screen anymore; admin-ish controls live in Settings (role-gated). `fixtures/api-responses/adminUsers.json` is a leftover. |
+| Path            | Screen                                                                                       | Notes                                                                                                                                       |
+| --------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`             | Home (no session): `SessionRoute` with empty id → `HomeRoute`                                | Rail + top bar always present.                                                                                                              |
+| `/sessions/:id` | Session workspace (`SessionRoute` → lazy `SessionWorkspace`)                                 | id is URL-encoded; re-selecting the active id is a no-op. Query `?t=`/moment deep links handled by `MomentDeepLink`.                        |
+| `/teams`        | Home + Settings open on Members                                                              | Closing Settings navigates to `/`.                                                                                                          |
+| `/search`       | `SearchRoute` (full results page; query in `?q=` etc.)                                       | lazy.                                                                                                                                       |
+| `/wiki`         | `WikiRoute` (page list for the active show)                                                  | lazy.                                                                                                                                       |
+| `/wiki/:pageId` | `WikiPageView`                                                                               | lazy; keyed on the route so page→page switches re-render in place.                                                                          |
+| anything else   | Next `not-found.page.tsx`: bare "404 — Not Found / This page doesn't exist." (unstyled sans) | In SPA: render a `RouteState` card instead. Trailing slashes 404.                                                                           |
+| `/admin/users`  | REMOVED (2026-10-06 "remove-admin-users-page").                                              | There is no admin screen anymore; admin-ish controls live in Settings (role-gated). `fixtures/api-responses/adminUsers.json` is a leftover. |
 
 Login-return: before redirecting to OAuth, the current router-known path is stashed (`shared/utils/loginReturnStash.ts`, `loginReturnPath.ts` validates same-origin, router-known paths only); `useLoginReturnConsume` navigates there once `auth.logged_in` becomes true.
 
@@ -251,12 +254,12 @@ Navigation goes through `pages/index/navigation.ts` `navigate(path,{replace})`, 
 - **Tagline:** "Sign in to open your sessions, markers, and transcripts." (0.9rem, muted).
 - **Error banner:** shown when `?login_error=` is set. Destructive `Alert` with a danger-line border, followed by an underlined "Try again" link.
 
-  | `login_error` | Message |
-  |---|---|
-  | `state_invalid` | "This sign-in attempt expired." |
-  | `provider_error` | "Sign-in was cancelled or refused." |
-  | `signup_closed` | "This Google account doesn't have access yet. Ask the person who gave you the link to set it up." |
-  | anything else | "Sign-in didn't complete." |
+  | `login_error`    | Message                                                                                           |
+  | ---------------- | ------------------------------------------------------------------------------------------------- |
+  | `state_invalid`  | "This sign-in attempt expired."                                                                   |
+  | `provider_error` | "Sign-in was cancelled or refused."                                                               |
+  | `signup_closed`  | "This Google account doesn't have access yet. Ask the person who gave you the link to set it up." |
+  | anything else    | "Sign-in didn't complete."                                                                        |
 
 - **Google button** (vendor styling, the one non-palette surface):
   - White bg, `border-[#747775]`, h-12, Roboto 500 at 0.9rem, text `#1f1f1f`; hover bg `#f8f9fa`, border `#5f6368`.
@@ -366,14 +369,14 @@ All wiki pages use the Search frame. In markdown, `wiki:<pageId>` is a wiki link
 - **Truncation:** "Showing the first N pages."
 - **Empty copy:**
 
-  | Tab | Copy |
-  |---|---|
-  | People | "No people yet." |
-  | Topics | "No topics yet." |
-  | Running bits | "No running bits yet." |
-  | Sessions | "No session pages yet." |
-  | Deleted | "No deleted pages." |
-  | Filter miss | "No pages match "q"." |
+  | Tab          | Copy                    |
+  | ------------ | ----------------------- |
+  | People       | "No people yet."        |
+  | Topics       | "No topics yet."        |
+  | Running bits | "No running bits yet."  |
+  | Sessions     | "No session pages yet." |
+  | Deleted      | "No deleted pages."     |
+  | Filter miss  | "No pages match "q"."   |
 
 - **Loading / error:** "Loading pages…" with spinner; error message plus "Try again".
 - **Suggestions tab (LEFTOVER/AI):** grouped by page or "New page · Kind". Each item has title, a two-line rationale, a "Stale" badge, a session link and "date · author", and opens `WikiSuggestionSheet`. Empty copy: "No suggestions waiting for review. Use "Update wiki" in a session to get some."
@@ -438,55 +441,55 @@ All wiki pages use the Search frame. In markdown, `wiki:<pageId>` is a wiki link
 
 Every `shared/components/ui/*` file imports only react, `@base-ui/react`, cva/clsx/tailwind-merge (`@/shared/lib/utils`), lucide, cmdk, sonner, or other primitives. None imports from `api/`, `pages/` or Next; some carry a harmless `'use client'`. **COPY all of them verbatim**, plus `shared/lib/utils.ts`, and give the Vite config the alias `@ → src`.
 
-| File | Importers | Notes |
-|---|---|---|
-| `button` | ~58 | Variants: default, destructive, outline/secondary, ghost, link, `transport`, `log`, `glass`/`glass-primary` (30px feed-toolbar buttons; legacy name, flat style), `unstyled`. Sizes: 36 / xs 24 / sm 30 / lg 40 / icon*. Exports `TOUCH_TARGET`. Supports `nativeButton={false}` + `render`. |
-| `badge` | 13 | Condensed 0.7rem uppercase, 5px radius; `transport` variant is the status pill. |
-| `alert` | 17 | |
-| `card` | 15 | |
-| `input` | 25 | |
-| `field` | 18 | |
-| `spinner` | 19 | |
-| `empty` | 12 | |
-| `checkbox` | 9 | |
-| `item` | 6 | Settings lists. |
-| `tabs` | 6 | List variants `line` (workspace, wiki) and `nav` (Settings). |
-| `label` | 5 | |
-| `textarea` | 4 | |
-| `radio-group` | 4 | |
-| `separator` | 4 | |
-| `table` | 4 | Feeds. |
-| `dropdown-menu` | 4 | TopBar, session row, TeamDetails, EventLogSheet. |
-| `sheet` | 4 | Wiki sheets, Settings SidePanel, mobile sidebar. |
-| `sidebar` | 4 | Depends on button, input, separator, sheet, skeleton, tooltip and `shared/ui/breakpoints`. Ctrl/⌘+B; `collapsible="icon"`; state in localStorage. |
-| `toggle-group` | 3 | |
-| `toggle` | 1 | |
-| `kbd` | 3 | |
-| `tooltip` | 3 | |
-| `dialog` | 3 | |
-| `command` | 2 | cmdk. |
-| `avatar` | 2 | |
-| `select` | 2 | App wrapper `pages/index/components/Select.tsx` (+ `LazySelect.tsx`). |
-| `alert-dialog` | 1 | |
-| `drawer` | 1 | |
-| `scroll-area` | 1 | FeedTable. |
-| `skeleton` | 1 | |
-| `sonner` | 1 | |
+| File            | Importers | Notes                                                                                                                                                                                                                                                                                        |
+| --------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `button`        | ~58       | Variants: default, destructive, outline/secondary, ghost, link, `transport`, `log`, `glass`/`glass-primary` (30px feed-toolbar buttons; legacy name, flat style), `unstyled`. Sizes: 36 / xs 24 / sm 30 / lg 40 / icon*. Exports `TOUCH_TARGET`. Supports `nativeButton={false}` + `render`. |
+| `badge`         | 13        | Condensed 0.7rem uppercase, 5px radius; `transport` variant is the status pill.                                                                                                                                                                                                              |
+| `alert`         | 17        |                                                                                                                                                                                                                                                                                              |
+| `card`          | 15        |                                                                                                                                                                                                                                                                                              |
+| `input`         | 25        |                                                                                                                                                                                                                                                                                              |
+| `field`         | 18        |                                                                                                                                                                                                                                                                                              |
+| `spinner`       | 19        |                                                                                                                                                                                                                                                                                              |
+| `empty`         | 12        |                                                                                                                                                                                                                                                                                              |
+| `checkbox`      | 9         |                                                                                                                                                                                                                                                                                              |
+| `item`          | 6         | Settings lists.                                                                                                                                                                                                                                                                              |
+| `tabs`          | 6         | List variants `line` (workspace, wiki) and `nav` (Settings).                                                                                                                                                                                                                                 |
+| `label`         | 5         |                                                                                                                                                                                                                                                                                              |
+| `textarea`      | 4         |                                                                                                                                                                                                                                                                                              |
+| `radio-group`   | 4         |                                                                                                                                                                                                                                                                                              |
+| `separator`     | 4         |                                                                                                                                                                                                                                                                                              |
+| `table`         | 4         | Feeds.                                                                                                                                                                                                                                                                                       |
+| `dropdown-menu` | 4         | TopBar, session row, TeamDetails, EventLogSheet.                                                                                                                                                                                                                                             |
+| `sheet`         | 4         | Wiki sheets, Settings SidePanel, mobile sidebar.                                                                                                                                                                                                                                             |
+| `sidebar`       | 4         | Depends on button, input, separator, sheet, skeleton, tooltip and `shared/ui/breakpoints`. Ctrl/⌘+B; `collapsible="icon"`; state in localStorage.                                                                                                                                            |
+| `toggle-group`  | 3         |                                                                                                                                                                                                                                                                                              |
+| `toggle`        | 1         |                                                                                                                                                                                                                                                                                              |
+| `kbd`           | 3         |                                                                                                                                                                                                                                                                                              |
+| `tooltip`       | 3         |                                                                                                                                                                                                                                                                                              |
+| `dialog`        | 3         |                                                                                                                                                                                                                                                                                              |
+| `command`       | 2         | cmdk.                                                                                                                                                                                                                                                                                        |
+| `avatar`        | 2         |                                                                                                                                                                                                                                                                                              |
+| `select`        | 2         | App wrapper `pages/index/components/Select.tsx` (+ `LazySelect.tsx`).                                                                                                                                                                                                                        |
+| `alert-dialog`  | 1         |                                                                                                                                                                                                                                                                                              |
+| `drawer`        | 1         |                                                                                                                                                                                                                                                                                              |
+| `scroll-area`   | 1         | FeedTable.                                                                                                                                                                                                                                                                                   |
+| `skeleton`      | 1         |                                                                                                                                                                                                                                                                                              |
+| `sonner`        | 1         |                                                                                                                                                                                                                                                                                              |
 
 App-level shared pieces:
 
-| File | Importers | Notes |
-|---|---|---|
-| `shared/components/Toast.tsx` | 14 | sonner, bottom-right. Toast is panel-2, 8px radius, 0.85rem; errors get a danger border and `#ffb4b4` text. API: `showToast(msg, isError, {persistent, action})` and `toast.*`. COPY. |
-| `shared/ui/Dialog.tsx` | 12 | Centered dialog on desktop, bottom Drawer on mobile; also `DialogActions`. COPY. |
-| `shared/ui/ConfirmDialog.tsx` | 19 | `useConfirm()` → `confirm({title,message,confirmLabel,danger})`. COPY. |
-| `shared/ui/PromptDialog.tsx` | 1 | COPY. |
-| `shared/ui/Tooltip.tsx` | 6 | Wrapper. COPY. |
-| `shared/ui/breakpoints.ts` | 3 | COPY. |
-| `shared/ui/overlayOpen.ts` | 7 | COPY. |
-| `shared/ui/AppLoadingSkeleton.tsx` | 2 | COPY. |
-| `shared/hooks/useVersionedSave.tsx` | 5 | **OLD-INTERNAL**: type-imports `VersionGuard` from `api/versionConflict`. Implements the 409 three-way conflict prompt; rebuild for the new API. |
-| `shared/hooks/conflictPromptCopy.tsx` | 3 | Depends only on ConfirmDialog; COPY. |
+| File                                  | Importers | Notes                                                                                                                                                                                 |
+| ------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shared/components/Toast.tsx`         | 14        | sonner, bottom-right. Toast is panel-2, 8px radius, 0.85rem; errors get a danger border and `#ffb4b4` text. API: `showToast(msg, isError, {persistent, action})` and `toast.*`. COPY. |
+| `shared/ui/Dialog.tsx`                | 12        | Centered dialog on desktop, bottom Drawer on mobile; also `DialogActions`. COPY.                                                                                                      |
+| `shared/ui/ConfirmDialog.tsx`         | 19        | `useConfirm()` → `confirm({title,message,confirmLabel,danger})`. COPY.                                                                                                                |
+| `shared/ui/PromptDialog.tsx`          | 1         | COPY.                                                                                                                                                                                 |
+| `shared/ui/Tooltip.tsx`               | 6         | Wrapper. COPY.                                                                                                                                                                        |
+| `shared/ui/breakpoints.ts`            | 3         | COPY.                                                                                                                                                                                 |
+| `shared/ui/overlayOpen.ts`            | 7         | COPY.                                                                                                                                                                                 |
+| `shared/ui/AppLoadingSkeleton.tsx`    | 2         | COPY.                                                                                                                                                                                 |
+| `shared/hooks/useVersionedSave.tsx`   | 5         | **OLD-INTERNAL**: type-imports `VersionGuard` from `api/versionConflict`. Implements the 409 three-way conflict prompt; rebuild for the new API.                                      |
+| `shared/hooks/conflictPromptCopy.tsx` | 3         | Depends only on ConfirmDialog; COPY.                                                                                                                                                  |
 
 Copyable utilities in `shared/utils/`: `timecode.ts`, `timelineSec.ts`, `fmtDateOnly.ts`, `categoryColor.ts`, `waveformSvg.ts` / `waveformMerge.ts` / `waveformDecode.ts` (pure rendering helpers). `audioClips.ts`, `recording.ts` and `workerInterval.ts` are recorder internals.
 
@@ -497,6 +500,7 @@ Copyable utilities in `shared/utils/`: `timecode.ts`, `timelineSec.ts`, `fmtDate
 Source: `web/src/api/types.ts` (1232 lines). `web/src/types/` holds only asset and css-module declarations. Fixtures are in `/home/autologger/autologger-2/fixtures/api-responses/`.
 
 **Profile / teams / shows**
+
 - `ProfilePayload { active_studio_id, active_show_id, active_studio{id,name,categories}, studios[{id,name}], studio_settings, shows: ProfileShow[], new_session_defaults{title_prefix, default_frame_rate}, admin{restart_supported, restart_needs_token}, auth{logged_in, oauth_configured, user} }`
 - `user { id, email, given_name, family_name, picture_url, teams[{id,name,role: owner|admin|member}] }`
 - `ProfileShow { id, studio_id, name, show_code, title_suffix: date|episode, can_access }`
@@ -506,37 +510,44 @@ Source: `web/src/api/types.ts` (1232 lines). `web/src/types/` holds only asset a
 - Team mutations: create `{id, display_name}`, rename, invite `{email}`, role change `{admin|member}`, owner transfer `{user_id}`.
 
 **Sessions**
+
 - `Session { id, title, deck_title, show_id, show_code, show_name, episode, notes, session_status, frame_rate, start_offset_frames, created_at_utc, episode_date, event_count, is_rolling, current_take, rolling_timecode, total_runtime_hms, archived }`. The list response is `{active[], archived[]}`.
 - `SessionStatus { is_rolling, timecode, session_timecode, master_timecode, frame_rate, current_take, audio_recording_lease_alive, audio_recording_lease_holder_id, event_count, logged_event_count, title, deck_title, show_name, show_code, episode, session_created_at_utc, now_utc, notes, show_id, events_stream_revision }`
 - Transport snapshot: `{ is_rolling, current_take, roll_started_at_utc, elapsed_frames, timecode, timecode_total_frames }`
 
 **Events / categories**
+
 - `LogEvent { event_id, category, category_label, category_color, message, timecode, timecode_total_frames, frame_rate, wall_time_utc, metadata, version }`
 - `EventsResponse { events, total, logged_event_count, offset, limit, has_auto_generated }`
 - `Category { id, label, color, type: BUTTON|DROPDOWN|TEXT|ON_OFF, dropdown_options[{label, needs_context}], on_label, off_label }`. `ShowCategory` adds `name` and `auto_instruction?` (LEFTOVER/AI).
 
 **Transcript / topics / audio**
+
 - `TranscriptWord { id, session_time, speaker, word, start_sec, end_sec, ordinal, version }`. Segments are grouped client-side.
 - `SessionTopic { id, session_time, duration_sec, topic_level, summary, ordinal, created_at_utc, version }`
 - Version conflicts return 409 `{detail: 'Version conflict.', current}`.
 - `AudioSegment { id, ordinal, recording_ordinal, started_at_utc, ended_at_utc, mime_type, url, waveform_peaks, waveform_db_floor, duration_ms, media_status, seams[] }`
 
 **Wiki**
+
 - `WikiPage { id, show_id, kind: person|topic|bit|session, title, body_md, aliases, session_id, revision, merged_into, deleted, created_at_utc, created_by_name, updated_at_utc, updated_by_name }`. List items are a subset, and the list response has `truncated`.
 - Revisions: `{revision, title, kind, author_name, at_utc, note}` (+ `body_md, aliases`), paged by `next_before`.
 - Merge and split bodies carry expected revisions.
 - LEFTOVER/AI: `WikiSuggestion { status, page_id, base_revision, kind, title, aliases, rationale, page, stale, created_*, resolved_* }`
 
 **Search**
+
 - `{ q, studios[{id,name}], shows[{id,name,studio_id}], sessions[{id,title,episode,show_id,studio_id,started_at_utc,archived,match,snippet}], moments[{kind: transcript|topic|event, session_id, session_title, show_id, id, speaker, snippet, sec}], moment_sessions[{session_id,total}] }`
 
 **Settings-area entities**
+
 - `CompanionDevice { id, name, created_at, last_used_at, expired }`. Create returns a one-time `token`.
 - `ConnectedApp { grant_id, client_name, redirect_host, scope, created_at, last_used_at }` (OAuth/MCP clients; useful for the "Agents" concept).
 - `CustomDashboardListItem { id, title, scope, revision, updated_at, updated_by_name }`. The list also returns `runtime_origin`; code is `{compiled_js, compiler_version}`.
 - LEFTOVER/AI: Providers (llm/stt credentials), all `Autogenerate*` and `EventsGenerate*` types.
 
 **Old endpoints** (for orientation):
+
 - Core: `profile`, `sessions`, `sessions/:id`.
 - Session sub-paths (`sessions/:id/...`): `status`, `archive`, `restore`, `events`, `topics`, `transcript-words`, `show-categories`, `transport/start|stop`, `audio/segments`, `audio-recording-lease`, `youtube-import`, `custom-dashboards/query`.
 - Shows: `shows`, `shows/:id/wiki/pages`.
@@ -546,24 +557,24 @@ Source: `web/src/api/types.ts` (1232 lines). `web/src/types/` holds only asset a
 
 **Fixtures** (`fixtures/api-responses/`, 86 files; `_mutable.ts` is a helper):
 
-| Group | Files |
-|---|---|
-| Profile | profileAuthenticated, profileLoggedOutOauth |
-| Sessions | sessionsList, sessionsListNoAccess, sessionDetail, sessionStatus, sessionCreate, sessionUpdate |
-| Events | eventsList, eventCreate, eventUpdate, eventUpdateConflict, eventDeleteConflict |
-| Topics | topicsList, topicCreate, topicUpdate, topicUpdateConflict, topicDeleteConflict |
-| Transcript | transcriptWordsList, transcriptWordCreate, transcriptWordUpdate, transcriptWordUpdateConflict, transcriptWordDeleteConflict, transcriptGenerationStatusIdle |
-| Transport | transportStart, transportStop |
-| Shows | showCategories, showCreate, showDetail, showsList, showGrantPut |
-| Teams | teamCreate, teamDetailOwner, teamDetailAdmin, teamDetailMember, teamRename, teamRoleChange, teamOwnerTransfer |
-| Devices & apps | companionDevicesList, companionDeviceCreate, connectedAppsList |
-| Dashboards | customDashboardsList, customDashboardCode |
-| Search | search |
-| Wiki | wikiPage, wikiPageList, wikiPageCreate, wikiPageUpdate, wikiPageUpdateConflict, wikiPageDelete, wikiPageRestore, wikiRevisionList, wikiRevision, wikiMerge, wikiSplit |
-| Audio | audioSegmentsList, audioSegmentCreate, audioUploadCreate, audioUploadStatus, audioUploadComplete, audioRecordingFinalize |
-| Imports | logImportJobCreate, logImportJobStatus, youtubePlaylistEntries |
-| LEFTOVER/AI | autogenerate* (7), providersList, providerSave, providerTest, transcriptGenerationStatusBusy, wikiSuggestion* (8) |
-| Retired admin page | adminUsers.json |
+| Group              | Files                                                                                                                                                                 |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Profile            | profileAuthenticated, profileLoggedOutOauth                                                                                                                           |
+| Sessions           | sessionsList, sessionsListNoAccess, sessionDetail, sessionStatus, sessionCreate, sessionUpdate                                                                        |
+| Events             | eventsList, eventCreate, eventUpdate, eventUpdateConflict, eventDeleteConflict                                                                                        |
+| Topics             | topicsList, topicCreate, topicUpdate, topicUpdateConflict, topicDeleteConflict                                                                                        |
+| Transcript         | transcriptWordsList, transcriptWordCreate, transcriptWordUpdate, transcriptWordUpdateConflict, transcriptWordDeleteConflict, transcriptGenerationStatusIdle           |
+| Transport          | transportStart, transportStop                                                                                                                                         |
+| Shows              | showCategories, showCreate, showDetail, showsList, showGrantPut                                                                                                       |
+| Teams              | teamCreate, teamDetailOwner, teamDetailAdmin, teamDetailMember, teamRename, teamRoleChange, teamOwnerTransfer                                                         |
+| Devices & apps     | companionDevicesList, companionDeviceCreate, connectedAppsList                                                                                                        |
+| Dashboards         | customDashboardsList, customDashboardCode                                                                                                                             |
+| Search             | search                                                                                                                                                                |
+| Wiki               | wikiPage, wikiPageList, wikiPageCreate, wikiPageUpdate, wikiPageUpdateConflict, wikiPageDelete, wikiPageRestore, wikiRevisionList, wikiRevision, wikiMerge, wikiSplit |
+| Audio              | audioSegmentsList, audioSegmentCreate, audioUploadCreate, audioUploadStatus, audioUploadComplete, audioRecordingFinalize                                              |
+| Imports            | logImportJobCreate, logImportJobStatus, youtubePlaylistEntries                                                                                                        |
+| LEFTOVER/AI        | autogenerate* (7), providersList, providerSave, providerTest, transcriptGenerationStatusBusy, wikiSuggestion* (8)                                                     |
+| Retired admin page | adminUsers.json                                                                                                                                                       |
 
 ---
 
@@ -589,6 +600,7 @@ Paths are relative to `pages/index/components/`.
 ### 9.2 `SessionWorkspace.tsx` (layout root)
 
 **Outer structure:**
+
 - `section#v3-session-active.relative flex min-h-0 w-full flex-1 flex-col [isolation:isolate]`, min-height `calc(100dvh - var(--topbar-h) - 2.2rem)` on desktop; block flow below `md`.
 - `section#v4-log-session.flex flex-col gap-5` stacks:
   1. **Transport card** `MaximizeLogStrip` (always mounted).
@@ -598,19 +610,20 @@ Paths are relative to `pages/index/components/`.
 
 **Tabs (id → label, in order):**
 
-| # | id | Label | Notes |
-|---|---|---|---|
-| 1 | `events` | Event Feed | default |
-| 2 | `transcript` | Transcript | |
-| 3 | `topics` | Topics | |
-| 4 | `dashboards` | Dashboards | Only when the custom-dashboards list loads or fails with a non-404 (404 = feature off). If it disappears while selected → back to `events`. |
-| 5 | `export` | Export | |
+| #   | id           | Label      | Notes                                                                                                                                       |
+| --- | ------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `events`     | Event Feed | default                                                                                                                                     |
+| 2   | `transcript` | Transcript |                                                                                                                                             |
+| 3   | `topics`     | Topics     |                                                                                                                                             |
+| 4   | `dashboards` | Dashboards | Only when the custom-dashboards list loads or fails with a non-404 (404 = feature off). If it disappears while selected → back to `events`. |
+| 5   | `export`     | Export     |                                                                                                                                             |
 
 - **No Assistant tab exists today.** A code comment says the "Assistant chat and AI v2 editor are gone". **Add the new "Agents" activity tab to this row** (`FEED_TABS`).
 - Panels stay mounted (`keepMounted` + `hidden`).
 - Transcript words are fetched lazily, once Transcript, Topics or Export is first opened (`TranscriptWordsGateProvider`, OLD-INTERNAL).
 
 **Transport state:**
+
 - Precedence: `recording` (`status.audio_recording_lease_alive`) > `rolling` (`status.is_rolling`) > `playback` (local `isPlaying`) > `stopped`.
 - Published to the shell for the tint and the top-bar pill, together with sessionId and title.
 - `liveDock`: when rolling or recording, the timeline lane in the card is **replaced by the category button strip**.
@@ -618,6 +631,7 @@ Paths are relative to `pages/index/components/`.
 **Keyboard:** `?` opens ShortcutsDialog (ignored in inputs and when an overlay is open).
 
 **Other behavior:**
+
 - **Marker click → feed reveal:** switches to Event Feed, scrolls to the row, and flashes it (`animate-event-row-flash`: 22% accent fill, held 1.25s, faded 1.25s).
 - **Headless children:** `AudioRecorder`, `AudioPlayer`, `AudioSaveOverlay`, `ChunkRescueBanner`, `MomentDeepLink`, `ShortcutsDialog`.
 - **Orphan-recording recovery:** `ConfirmDialog` with "Add synthetic stop" / "Cancel".
@@ -634,40 +648,43 @@ Paths are relative to `pages/index/components/`.
 
 `shared/ui/Dialog` with title "Keyboard shortcuts" and description "Shortcuts stay out of the way while you type in any field." Rows, verbatim:
 
-| Keys | Description |
-|---|---|
-| `1–9` | Log the 1st–9th category button (while the live log is shown) |
-| `Space` | Play / pause recorded audio |
+| Keys    | Description                                                             |
+| ------- | ----------------------------------------------------------------------- |
+| `1–9`   | Log the 1st–9th category button (while the live log is shown)           |
+| `Space` | Play / pause recorded audio                                             |
 | `←` `→` | Scrub the timeline 1s when the playhead is focused (hold Shift for 10s) |
-| `+` `−` | Zoom the timeline in / out |
-| `Esc` | Close dialogs, cancel batch edit, close the drawer |
-| `?` | Open this shortcut reference |
+| `+` `−` | Zoom the timeline in / out                                              |
+| `Esc`   | Close dialogs, cancel batch edit, close the drawer                      |
+| `?`     | Open this shortcut reference                                            |
 
 - **Layout:** rows `flex justify-between gap-4`, descriptions 0.85rem; key caps mono `min-w-[1.7rem] rounded-[0.4rem] border px-[0.4rem] text-[0.72rem] font-semibold`.
 - **Guard:** `isTypingTarget(el)` (INPUT/TEXTAREA/SELECT/contentEditable) is exported and used by every single-key handler, together with `isOverlayOpen`.
 - **Other keys** (defined elsewhere, not in the dialog):
 
-  | Key | Action | Where |
-  |---|---|---|
-  | `[` | toggle sidebar | AppShell |
-  | Ctrl/⌘+B | toggle sidebar | sidebar primitive |
-  | Ctrl/⌘+K | search palette | SearchPalette |
-  | `Equal` / `NumpadAdd`, `Minus` / `NumpadSubtract` (`ev.code`) | zoom | `hooks/useZoomRail.ts` |
-  | Mouse wheel over the timeline | zoom | `hooks/useZoomRail.ts` |
-  | Enter / Escape | apply / revert | timeline zoom % input |
+  | Key                                                           | Action         | Where                  |
+  | ------------------------------------------------------------- | -------------- | ---------------------- |
+  | `[`                                                           | toggle sidebar | AppShell               |
+  | Ctrl/⌘+B                                                      | toggle sidebar | sidebar primitive      |
+  | Ctrl/⌘+K                                                      | search palette | SearchPalette          |
+  | `Equal` / `NumpadAdd`, `Minus` / `NumpadSubtract` (`ev.code`) | zoom           | `hooks/useZoomRail.ts` |
+  | Mouse wheel over the timeline                                 | zoom           | `hooks/useZoomRail.ts` |
+  | Enter / Escape                                                | apply / revert | timeline zoom % input  |
 
 ### 9.4 `MaximizeLogStrip.tsx` (transport card, signature surface)
 
 **Card:**
+
 - `section#v5-maximize-log-strip rounded-card border border-si-line bg-si-panel`.
 - Phone `mx-3 mt-3 mb-5 p-3`; md `mx-4 mb-0 px-3.5 py-3`.
 - Ignites via CSS (section 1.4).
 
 **Composition:** `<Timeline stripOnly stripTrailing={aside} stripLaneSlot={liveDock ? categoryButtons : undefined}/>`.
+
 - Desktop row: aside left `md:w-[min(100%,19.25rem)]`, lane right `flex-1 md:items-end gap-2.5`.
 - Phones stack the two.
 
 **Aside, top to bottom:**
+
 1. **Meta line `#session-deck-title`:**
    - `font-ui text-[0.8125rem]`: `ShowName` (semibold, truncate) `·` (`text-si-dim`) `SessionTitle` (`text-si-muted`).
    - Fallbacks: show_name → show_code → title → "—".
@@ -693,12 +710,12 @@ Paths are relative to `pages/index/components/`.
   - The idle Roll glyph is red (`--si-rec` #ff6464).
 - Tooltip = aria-label.
 
-| State | Btn 1 | Btn 2 | Btn 3 | Btn 4 |
-|---|---|---|---|---|
-| stop | Play (enabled) "Play or pause audio" | Roll (enabled, red glyph) "Roll timecode" | Mic (disabled) "Record audio" | Stop (disabled) "Stop timecode" |
-| play | Pause (active) "Pause audio" | Roll (disabled) | Mic (disabled) | Stop (disabled) |
-| rolling | Play (disabled) | Roll (active) "Timecode rolling" | Mic (enabled) "Record audio" | Stop (enabled) |
-| audio-recording | Play (disabled) | Roll (active) | Mic (active) "Stop recording audio" | Stop (enabled) |
+| State           | Btn 1                                | Btn 2                                     | Btn 3                               | Btn 4                           |
+| --------------- | ------------------------------------ | ----------------------------------------- | ----------------------------------- | ------------------------------- |
+| stop            | Play (enabled) "Play or pause audio" | Roll (enabled, red glyph) "Roll timecode" | Mic (disabled) "Record audio"       | Stop (disabled) "Stop timecode" |
+| play            | Pause (active) "Pause audio"         | Roll (disabled)                           | Mic (disabled)                      | Stop (disabled)                 |
+| rolling         | Play (disabled)                      | Roll (active) "Timecode rolling"          | Mic (enabled) "Record audio"        | Stop (enabled)                  |
+| audio-recording | Play (disabled)                      | Roll (active)                             | Mic (active) "Stop recording audio" | Stop (enabled)                  |
 
 - **Locks:**
   - Remote: another client holds the recording lease (`audio_recording_lease_holder_id` ≠ this client) → all disabled.
@@ -706,12 +723,12 @@ Paths are relative to `pages/index/components/`.
   - Phones (compact): disabled buttons are hidden.
 - **Actions:**
 
-  | Button | Does |
-  |---|---|
-  | Roll | `POST transport/start` |
-  | Stop | stop recording if active, then `POST transport/stop` |
-  | Play | toggle audio player |
-  | Mic | toggle recorder |
+  | Button | Does                                                 |
+  | ------ | ---------------------------------------------------- |
+  | Roll   | `POST transport/start`                               |
+  | Stop   | stop recording if active, then `POST transport/stop` |
+  | Play   | toggle audio player                                  |
+  | Mic    | toggle recorder                                      |
 
   Roll and Stop refresh events afterwards; a `busy` flag disables buttons while a request is in flight.
 
@@ -732,6 +749,7 @@ Paths are relative to `pages/index/components/`.
 ### 9.8 `CategoryButtonStrip.tsx` (log buttons)
 
 **Placement and look:**
+
 - Lives in the timeline lane `#cat-strip-live-slot` (min-height `--v4-cat-btn-h` 6.665rem), only while live.
 - Strip: `flex flex-wrap gap-1.5 cat-strip-scrollbar`.
 - Button: `Button variant="log"` + `min-h-(--h-ctl) gap-2 whitespace-normal py-1.5 pr-3 pl-2 text-left`, inline `--cat: <color>`.
@@ -739,6 +757,7 @@ Paths are relative to `pages/index/components/`.
   - Hover edge 55% cat; latched/pressed = full cat edge + 22% tint + 1px nudge. `data-latched=on|off` for ON_OFF.
 
 **Per `category.type`:**
+
 - **BUTTON:** logs `{category: id, message: label}` immediately; toast "Logged.".
 - **ON_OFF:** logs `on_label`/`off_label` (fallback `label`) for the current phase, then flips. The phase is client-only (`onOffState` map) and the label follows it.
 - **DROPDOWN:** captures `marked_at_utc=now` → Dialog "Choose option" (full-width outline button per option).
@@ -756,6 +775,7 @@ Paths are relative to `pages/index/components/`.
 ### 9.9 `Timeline.tsx` + `timeline/*` (scrub lane when not live)
 
 **Lane stack, top to bottom:**
+
 1. **Current-marker chip** (1.7rem, `rounded-t-[6px]`):
    - Background: cat colour 14% into panel-2; left bar 0.25rem in cat colour.
    - Contents: category in label type (Barlow Condensed 0.6875rem uppercase 0.12em), dim separator, message.
@@ -784,6 +804,7 @@ Paths are relative to `pages/index/components/`.
 **OLD-INTERNAL:** `hooks/useZoomRail.ts` (863 lines, imperative DOM), `useWaveforms`, `waveformMerge`, `waveformDecode` — rewrite declaratively.
 
 **Data:**
+
 - Audio segments `{id, ordinal, recording_ordinal, started_at_utc, ended_at_utc, url, mime_type, waveform_peaks[], waveform_db_floor, duration_ms, media_status, seams[]}`.
 - Events.
 - Status `timecode`, `frame_rate`.
@@ -791,21 +812,25 @@ Paths are relative to `pages/index/components/`.
 ### 9.10 Feed chrome: `FeedShell.tsx`, `FeedTable.tsx`, `JumpToTimeButton.tsx`, `feedToolbarCaption.tsx`
 
 **FeedShell card:**
+
 - `bg-si-panel border rounded-card mx-4` (phones `mx-3`), `px-6 pt-3 pb-6` (phones `px-3 pb-3`).
 - Header: left `h2` count label ("12 events", "2000+ events"; Barlow 1.25rem semibold tabular, `role=status`); right toolbar `flex flex-wrap gap-2`.
 - `feedCountLabel(n, noun, {capped})` pluralises and adds "+".
 
 **Toolbar buttons:**
+
 - `Button variant="glass" | "glass-primary"` with `FeedToolbarCaption`: label on desktop with icon hidden; icon-only on phones (label sr-only).
 - lucide 18px icons: `Sparkles`, `Plus`, `Pencil`, `Check`, `X`, `Clock`, `Filter`, `Download`.
 
 **FeedTable:**
+
 - Virtualised (`@tanstack/react-virtual`, ~31px rows, overscan 10) in a scroll area.
 - Headers: label type, dim, sticky; sort buttons with accent ↑/↓ suffix and `aria-sort`.
 - States (full-width cell): "Loading…"; empty-message box `px-4 py-[1.35rem] text-center text-[0.85rem] muted border rounded-card bg-black/22`.
 - Cell face `FEED_CELL`: `px-[0.4rem] py-[0.1rem] text-[0.78rem]`, bottom border white 4%. Timecode cells `font-tc` tabular. Inline inputs flat, borderless, transparent.
 
 **JumpToTimeButton:**
+
 - Leading column in every feed (header sr-only "Jump to time", `w-8`).
 - 24px ghost square `h-6 w-6 rounded-[0.35rem]` with lucide `Play` (`size-3`, filled); hover = selected tint + accent text.
 - Hidden when no time resolves.
@@ -816,17 +841,18 @@ Paths are relative to `pages/index/components/`.
 
 **Columns:**
 
-| Column | Content |
-|---|---|
-| Jump | — |
-| Time (w 6.5rem) | "Session Time" (`HH:MM:SS` from timecode) or "World Clock" (`YY-MM-DD HH:MM:SS` UTC) |
-| Event (w-32) | category label, semibold, nowrap, coloured with the category colour (legacy exception to the category-channel rule) |
-| Message | max `min(28rem,38vw)`; `--color-text`, or the category colour for internal rows |
+| Column          | Content                                                                                                             |
+| --------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Jump            | —                                                                                                                   |
+| Time (w 6.5rem) | "Session Time" (`HH:MM:SS` from timecode) or "World Clock" (`YY-MM-DD HH:MM:SS` UTC)                                |
+| Event (w-32)    | category label, semibold, nowrap, coloured with the category colour (legacy exception to the category-channel rule) |
+| Message         | max `min(28rem,38vw)`; `--color-text`, or the category colour for internal rows                                     |
 
 - Phones: Event folds under the time (0.68rem semibold, cat colour).
 - Default sort: timecode ascending; all columns sortable.
 
 **Toolbar (left → right):**
+
 1. **[LEFTOVER/AI] "Auto generate" dropdown** (Sparkles): "Generate All" / "Regenerate All", "Custom" (→ `EventGenerateCustomModal`).
    - Disabled reasons: "Add a language model in Settings → Advanced to generate events. Manual logging still works." / "No event buttons carry auto-generate instructions yet…".
    - Regenerate confirm "Regenerate all auto events" / "Delete and regenerate".
@@ -841,6 +867,7 @@ Paths are relative to `pages/index/components/`.
 4. **"Filter"** (Filter): checkbox per category label + "Internal" (also hides internal timeline markers).
 
 **Editing:**
+
 - While rolling, inline edit is on for non-automatic rows, saved on blur:
   - Time cell stacks a UTC input (placeholder `YY-MM-DD HH:MM:SS`) and a Timecode input.
   - Category `Select`; message input.
@@ -849,6 +876,7 @@ Paths are relative to `pages/index/components/`.
 - Automatic rows are never editable: messages `Recording N Started|Stopped`, `Log Audio Recording Started|Stopped`, `Take N Session Started|Ended`.
 
 **Row delete:**
+
 - Hover/focus 24px trash button (lucide `Trash2` `size-3`, red-tinted hover), "Delete row".
 - Single delete confirms: "Delete log row" / "Delete this log row? This cannot be undone."
 - Batch: pending-delete row red `bg-[#8d4545]`, struck through, outline xs "UNDELETE" ("Restore row").
@@ -858,10 +886,12 @@ Paths are relative to `pages/index/components/`.
 **Conflicts:** optimistic `version`; a 409 opens a theirs-vs-yours dialog (Category, Message, Timecode, UTC) via `useVersionedSave` / `conflictPromptCopy`.
 
 **Empty / toasts:**
+
 - Empty: "— No logged items yet."; filtered: "No events logged."; no-LLM variant mentioning Settings → Advanced is [LEFTOVER/AI].
 - Toasts: "Stop timecode and recording to use batch edit.", "Update failed.", "Delete failed.", "Save failed."
 
 **Data:**
+
 - `LogEvent {event_id, category(id), category_label, category_color, message, timecode (SMPTE|null), timecode_total_frames, frame_rate, wall_time_utc, metadata{auto_generated?}, version}`.
 - List limit 2000 → `{events,total,logged_event_count,offset,limit,has_auto_generated}`.
 - Create body `{category, message, metadata?, marked_at_utc?}`.
@@ -871,6 +901,7 @@ Paths are relative to `pages/index/components/`.
 ### 9.12 Transcript, Topics, Dashboards, Export tabs
 
 **Transcript (`TranscribeFeed.tsx`, `TranscribeRow.tsx`):**
+
 - Count "N words".
 - Columns: Jump | "Session Time" (w-6.5rem, inline timecode input) | "Speaker" (w-32, inline "Person N") | "Word(s)" (inline input, ellipsis, title = full word).
   - Speaker number is offset so the lowest speaker is Person 1 (`utils/speakerOffset.ts`).
@@ -882,6 +913,7 @@ Paths are relative to `pages/index/components/`.
 - Data: `TranscriptWord {id, session_time, speaker, word, start_sec, end_sec, ordinal, version}`.
 
 **Topics (`TopicsFeed.tsx`, `TopicsRow.tsx`):**
+
 - Count "N topics".
 - Columns: Jump | "Session Time" | "Duration (s)" (w-24 numeric) | "Level" (w-16 numeric) | "Summary" (min-w-56, auto-growing textarea).
   - Phones fold Duration/Level under the time: "Duration 30s · Level 1".
@@ -891,6 +923,7 @@ Paths are relative to `pages/index/components/`.
 - Data: `SessionTopic {id, session_time, duration_sec, topic_level, summary, ordinal, created_at_utc, version}`.
 
 **Dashboards (`customDashboards/*`):**
+
 - **`CustomDashboardsSection`:** `section mx-4 mb-3 flex flex-col gap-2 max-h-[70%] overflow-y-auto`, heading "Custom dashboards" (0.85rem semibold).
   - Error: destructive Alert `TriangleAlertIcon` "Could not load the custom dashboards."
   - Empty: "No custom dashboards for this session yet. Owners and admins make them through Claude." (already agent-model friendly).
@@ -903,15 +936,16 @@ Paths are relative to `pages/index/components/`.
 - Data: list `{dashboards[{id,title,scope,revision,updated_at,updated_by_name}], runtime_origin}`; code `{id,title,revision,compiled_js,compiler_version}`; 404 = feature off.
 
 **Export (`ExportFeed.tsx`):**
+
 - FeedShell, label "Export", no toolbar; line "Download a CSV for each feed individually."
 - `max-w-md flex-col gap-2` stack of primary buttons with Download icon:
 
-  | Button | Source |
-  |---|---|
-  | "Event feed CSV" | link `sessions/{id}/export.csv` |
-  | "Transcript CSV (N)" | client-built: Session Time, Speaker, Word(s) |
-  | "Topics CSV (N)" | client-built: Session Time, Duration (s), Level, Summary |
-  | outline "Event feed JSONL" | link `export.jsonl` |
+  | Button                     | Source                                                   |
+  | -------------------------- | -------------------------------------------------------- |
+  | "Event feed CSV"           | link `sessions/{id}/export.csv`                          |
+  | "Transcript CSV (N)"       | client-built: Session Time, Speaker, Word(s)             |
+  | "Topics CSV (N)"           | client-built: Session Time, Duration (s), Level, Summary |
+  | outline "Event feed JSONL" | link `export.jsonl`                                      |
 
 - Transcript/Topics buttons disabled while loading or empty.
 
@@ -929,6 +963,7 @@ Paths are relative to `pages/index/components/`.
 ### 9.14 Audio
 
 **`AudioRecorder.tsx` (1102 lines, headless; handle `toggle()`, `isRecording()`, `isUploading()`):**
+
 - Phases: scanning → idle → claiming → recording → stopping → uploading (+ drain_blocked).
 - Start: claim the recording lease (`client_id`) → `getUserMedia` → chunked `MediaRecorder` with periodic rollover → each chunk persisted locally and multipart-uploaded.
 - **Visible effects:**
@@ -941,15 +976,18 @@ Paths are relative to `pages/index/components/`.
 - **OLD-INTERNAL, do not copy:** `utils/chunkUploadQueue.ts` (1335 lines), `utils/chunkStore/*` (OPFS/IndexedDB/memory + worker), `recorderLocks` (Web Locks), `micReacquire`, `wakeLock`, `workerInterval`, `uploadBackoff`, `chunkLeaveWarning`. The rebuild needs equivalent recovery semantics, but the design is free.
 
 **`AudioPlayer.tsx`:**
+
 - `<audio>` over the session's segments mapped to timeline seconds; handle `toggle()`, `seekToTimelineSec()`, `seekToTimelineSecAndPlay()`.
 - **Space** toggles play/pause (not in typing targets, not with modifiers, not with an overlay open, not when a focused button would handle the key).
 - Reports `isPlaying` (→ PLAY state) and the playback second (→ playhead).
 
 **`AudioSaveOverlay.tsx`:**
+
 - While the last chunk uploads: fixed full-screen `bg-[rgba(8,10,14,0.88)]` with the looping logo video (`w-[min(220px,55vw)]`) and "Saving Audio...".
 - Persistent toast "Saving Audio..."; fades out over 0.35s.
 
 **`ChunkRescueBanner.tsx`:**
+
 - Fixed top-centred Alert for failed or crash-recovered audio chunks.
 - Header actions: "Retry all", destructive "Discard all".
 - Per chunk (`rounded-ctl border px-3 py-2`): name, red status label ("Failed permanently", "Signed out", …), detail; Download / Retry / Discard.
@@ -986,17 +1024,20 @@ Paths are relative to `pages/index/components/`. Design rules: `web/DESIGN.md` �
 **Structure:** `Tabs orientation="vertical"` (ui/tabs `variant="nav"`), `flex-row` → `max-md:flex-col`.
 
 **Nav column:** `w-[250px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-(--si-line) px-3 pt-4 pb-5`.
+
 - Back: ghost sm button + `ChevronLeftIcon`.
 - `<h2>` "Settings": `mx-2 font-ui text-[1.375rem] leading-tight font-semibold`.
-- Group heading: scope **name** semibold `text-[0.8125rem]` + scope word muted `text-xs` (e.g. "Morning Desk  Show"); the "You" group reads just "You"; later groups `mt-4`.
+- Group heading: scope **name** semibold `text-[0.8125rem]` + scope word muted `text-xs` (e.g. "Morning Desk Show"); the "You" group reads just "You"; later groups `mt-4`.
 - Triggers: sentence-case Barlow 0.875rem, muted until hover; selected = `--sel-bg` + inset `--sel-line`.
 - Phones: one horizontal scrolling row of bordered chips (`max-md:flex-row gap-1.5 overflow-x-auto`; triggers `max-md:border px-3 py-1.5`), group headings hidden.
 
 **Content column:** `min-w-0 flex-1 overflow-y-auto`.
+
 - Each `TabsContent` is `keepMounted` + `hidden`: `flex max-w-[860px] flex-col gap-[18px] px-8 pt-6 pb-10` (phones `px-4 pt-[18px] pb-7`).
 - A section mounts on first visit and stays mounted, so drafts survive switching.
 
 **Building blocks (`settings/settingsParts.tsx`, COPY):**
+
 - **`SettingsSectionHeader`:** `<h3>` `font-ui text-2xl font-semibold leading-tight` + description `text-sm text-muted-foreground`. No eyebrow.
 - **`SettingRow`:** horizontal `Field`.
   - Label + description left; control column `sm:w-[260px]` right-aligned (`flex items-center justify-end gap-2`), stacked below `sm`.
@@ -1014,6 +1055,7 @@ Paths are relative to `pages/index/components/`. Design rules: `web/DESIGN.md` �
 - **`YOU_ARE`:** "You're the owner" / "You're an admin" / "You're a member".
 
 **SidePanel sheets (`settings/SidePanel.tsx`, `useSidePanel.ts`)** — members, shows and event buttons edit here:
+
 - `SheetContent side="right" w-full sm:max-w-[420px] gap-0`.
 - Header `flex-row items-center gap-3 pr-12`: optional media (`Avatar size="lg"` or `Kbd`), truncated title, description.
 - Body `flex-col gap-4 overflow-y-auto px-4 pb-4`.
@@ -1025,18 +1067,18 @@ Paths are relative to `pages/index/components/`. Design rules: `web/DESIGN.md` �
 
 ### 10.3 Section list (`settings/sections.ts`, `settingsScopes.tsx`)
 
-| Group | id | Label | Gating |
-|---|---|---|---|
-| You | `account` | Account | always |
-| You | `companion-devices` | Companion devices | always |
-| You | `connected-apps` | Connected apps | flag-gated: hidden when `GET /api/oauth/connected-apps` 404s |
-| You | `advanced` | Advanced | always — **LEFTOVER/AI, drop** (provider keys) |
-| Team | `members` | Members | editing needs owner/admin |
-| Team | `shows` | Shows | add/edit needs owner/admin |
-| Team | `team-details` | Team details | editing needs owner/admin; owner vs non-owner action card |
-| Team | `batch-autogenerate` | Batch autogenerate | manager-only — **LEFTOVER/AI, drop** |
-| Show | `show-details` | Show details (default) | editing needs owner/admin |
-| Show | `event-buttons` | Event buttons | editing needs owner/admin |
+| Group | id                   | Label                  | Gating                                                       |
+| ----- | -------------------- | ---------------------- | ------------------------------------------------------------ |
+| You   | `account`            | Account                | always                                                       |
+| You   | `companion-devices`  | Companion devices      | always                                                       |
+| You   | `connected-apps`     | Connected apps         | flag-gated: hidden when `GET /api/oauth/connected-apps` 404s |
+| You   | `advanced`           | Advanced               | always — **LEFTOVER/AI, drop** (provider keys)               |
+| Team  | `members`            | Members                | editing needs owner/admin                                    |
+| Team  | `shows`              | Shows                  | add/edit needs owner/admin                                   |
+| Team  | `team-details`       | Team details           | editing needs owner/admin; owner vs non-owner action card    |
+| Team  | `batch-autogenerate` | Batch autogenerate     | manager-only — **LEFTOVER/AI, drop**                         |
+| Show  | `show-details`       | Show details (default) | editing needs owner/admin                                    |
+| Show  | `event-buttons`      | Event buttons          | editing needs owner/admin                                    |
 
 - No nav icons; icons appear only inside sections.
 - **Roles** (`settings/teamRules.ts`): `owner | admin | member`; `isManager` = owner or admin.
@@ -1052,6 +1094,7 @@ Paths are relative to `pages/index/components/`. Design rules: `web/DESIGN.md` �
 ### 10.4 Sections
 
 **Account (`settings/AccountSection.tsx`)** — "Your profile on this AutoLogger server."
+
 - **Card 1** (inline draft + save bar):
   - **First name** (max 200, autocomplete given-name).
   - **Last name** (placeholder "Not set").
@@ -1062,6 +1105,7 @@ Paths are relative to `pages/index/components/`. Design rules: `web/DESIGN.md` �
 - Data: `user.{id, given_name, family_name, email}`.
 
 **Show details (`settings/ShowDetailsSection.tsx`)** — "{show} in {team}".
+
 - **States:**
   - No team: "Join or create a team to set up its shows."
   - `ShowsNotReady`.
@@ -1074,6 +1118,7 @@ Paths are relative to `pages/index/components/`. Design rules: `web/DESIGN.md` �
 - Data: `show.{id, studio_id, name, show_code, title_suffix}`.
 
 **Shows (`settings/ShowsSection.tsx`)** — "{team} · N show(s)".
+
 - **List:** `Card py-2 > CardContent px-2 > ItemGroup` of `Item size="sm"`:
   - name (fallback "Untitled show"), secondary Badge "Current show";
   - "{CODE or 'No code'} · {Date|Episode Number} suffix";
@@ -1093,6 +1138,7 @@ Paths are relative to `pages/index/components/`. Design rules: `web/DESIGN.md` �
   - Save steps: create/update the show, then each grant change ("give X access" / "remove X's access").
 
 **Team details (`settings/TeamDetailsSection.tsx`):**
+
 - **No team:** Card "Create a team" / "You'll be its owner." + `CreateTeamForm`.
 - **Header:** "{team} · You're …"; OrphanedNotice; RoleLockNotice for non-managers.
 - **Settings card:**
@@ -1112,6 +1158,7 @@ Paths are relative to `pages/index/components/`. Design rules: `web/DESIGN.md` �
 - **Extra card "Create a team":** "You'll be its owner. Invite people from Members afterwards."
 
 **Members (`settings/MembersSection.tsx`):**
+
 - No team: "Create a team to invite people to it." + **Go to Team details**.
 - Header "{team} · You're …"; RoleLockNotice variant "…Only owners and admins can invite people or change roles and show access."
 - **Invite card "Invite someone":**
@@ -1136,40 +1183,43 @@ Paths are relative to `pages/index/components/`. Design rules: `web/DESIGN.md` �
 
 **Event buttons (`settings/EventButtonsSection.tsx`, `settings/eventButtonsModel.ts`, `utils/palette9.ts`)** — "The logging strip for the active show."
 
-*Card "Buttons":*
+_Card "Buttons":_
+
 - **Palette row:** ToggleGroup **Custom / Default / Neon / Desert / Aqua** ("The colours every button in this show picks from.").
 - **Colours row:** `grid grid-cols-9 gap-2 md:w-88` of nine native `<input type="color" class="pal-slot">` ("Change one and the palette becomes Custom."); saved via SectionSaveBar.
 - **Preset hexes:**
 
-  | Preset | Hexes |
-  |---|---|
+  | Preset  | Hexes                                                                     |
+  | ------- | ------------------------------------------------------------------------- |
   | default | `#ff7a7a #ffd98a #e7ff95 #83fff3 #50caff #aa57ff #ff87d9 #e1a8ff #d6dfff` |
-  | neon | `#ff2525 #ff9229 #fff725 #7aff25 #25ffec #2567ff #4c25ff #be25ff #ff25b8` |
-  | desert | `#ebe1bd #fad0ba #f18565 #d34c34 #a53f45 #967d62 #a9bb96 #85cb48 #57b4e4` |
-  | aqua | `#a6d5dd #6fa9c2 #038c95 #3ee6e0 #47f39b #7fcba4 #9cde56 #bdee11 #cfe583` |
+  | neon    | `#ff2525 #ff9229 #fff725 #7aff25 #25ffec #2567ff #4c25ff #be25ff #ff25b8` |
+  | desert  | `#ebe1bd #fad0ba #f18565 #d34c34 #a53f45 #967d62 #a9bb96 #85cb48 #57b4e4` |
+  | aqua    | `#a6d5dd #6fa9c2 #038c95 #3ee6e0 #47f39b #7fcba4 #9cde56 #bdee11 #cfe583` |
 
 - **Button list** (`ItemGroup`):
   - `Kbd` hotkey (1–9, "–" after), name (fallback "Untitled button").
   - Summary: type · "N options" / "ON / OFF" · "Auto-generates" (that last part is LEFTOVER/AI).
   - **Edit**; final row **Add button** (outline, `PlusIcon`).
 
-*Card "Copy from another show":*
+_Card "Copy from another show":_
+
 - Row "Copy buttons from": local `Select` ("Choose a show…") + **Copy**.
 - Confirm: "Replace this show's buttons?" / "{show}'s N buttons and colours will be replaced with a copy of {src}'s …" / **Replace buttons**.
 - No other show: "No other shows on this team".
 
-*Button sheet ("New button" / "Edit button"; media = `Kbd`):*
+_Button sheet ("New button" / "Edit button"; media = `Kbd`):_
+
 - **Preview:** real `Button variant="log"` with `--cat` (Kbd + `size-2 rounded-[2px] bg-(--cat)` swatch + label), `aria-hidden` div.
 - **FieldSet "Button":**
   - **Name** ("Event name"; "Shown on the button and as the event's category.").
   - **Type:** outline sm ToggleGroup, help text per type:
 
-    | Type | Help text |
-    |---|---|
-    | Button | "Logs one event with the button's name." |
+    | Type     | Help text                                                                |
+    | -------- | ------------------------------------------------------------------------ |
+    | Button   | "Logs one event with the button's name."                                 |
     | Dropdown | "You pick an option when logging. The option becomes the event message." |
-    | Text | "You type a short message when logging." |
-    | On / Off | "Toggles between two states and logs each change." |
+    | Text     | "You type a short message when logging."                                 |
+    | On / Off | "Toggles between two states and logs each change."                       |
 
   - **Colour:** `RadioGroup grid-cols-9` of palette swatches; "From this show's {Preset} palette."; off-palette: "Its colour (#hex) isn't in this show's palette. Pick one to change it."
 - **Options (Dropdown):** "The chosen option becomes the event message. 'Needs context' asks for a note after it is picked."
@@ -1181,9 +1231,10 @@ Paths are relative to `pages/index/components/`. Design rules: `web/DESIGN.md` �
 - **Delete:** "Events already logged with it stay in their sessions."; two-click destructive "Delete" → "Click again to delete".
 - Each sheet save writes the whole show immediately (`show_updates`).
 
-*Category data:* `{id, name/label, type: BUTTON|DROPDOWN|TEXT|ON_OFF, color, dropdown_options[{label, needs_context, auto_instruction?}], on_label, off_label, auto_instruction}` + show `event_palette[9], event_palette_preset, event_palette_custom[9]`.
+_Category data:_ `{id, name/label, type: BUTTON|DROPDOWN|TEXT|ON_OFF, color, dropdown_options[{label, needs_context, auto_instruction?}], on_label, off_label, auto_instruction}` + show `event_palette[9], event_palette_preset, event_palette_custom[9]`.
 
 **Companion devices (`settings/CompanionDevicesSection.tsx`)** — "Tokens that let a Stream Deck running the AutoLogger Companion module act as you."
+
 - **Add row:** **Device name** ("Name the Stream Deck, so you can tell its token apart later.", placeholder "Booth A") + **Add device** (Spinner).
 - **Pairing flow:**
   1. `POST /api/companion-devices {name}` → `{id, name, created_at, token}` (the only response that carries the token).
@@ -1195,12 +1246,13 @@ Paths are relative to `pages/index/components/`. Design rules: `web/DESIGN.md` �
 - Data: `CompanionDevice {id, name, created_at, last_used_at|null, expired}`.
 
 **Connected apps (`settings/ConnectedAppsSection.tsx`)** — "Claude connections you approved. Revoking one ends its access to your sessions."
+
 - **Rows:** `client_name`; "{redirect_host} · Connected {date} · Last used {date|Never}"; permission lines from scope:
 
-  | Scope | Line |
-  |---|---|
-  | `dashboards` | "Read every session you can open, and manage dashboards" |
-  | `session-data:write` | "Edit events, topics and wiki pages" |
+  | Scope                   | Line                                                       |
+  | ----------------------- | ---------------------------------------------------------- |
+  | `dashboards`            | "Read every session you can open, and manage dashboards"   |
+  | `session-data:write`    | "Edit events, topics and wiki pages"                       |
   | `session-data:generate` | "Start AI runs billed to your own model key" (LEFTOVER/AI) |
 
   **Revoke**, confirm "Revoke {app}? It loses access at once, and has to be connected again to use your sessions."
@@ -1209,11 +1261,13 @@ Paths are relative to `pages/index/components/`. Design rules: `web/DESIGN.md` �
 - **Rebuild:** central to the MCP-agent model; drop the flag gate and link it from the Agents tab.
 
 **Advanced (`settings/AdvancedSection.tsx`) — LEFTOVER/AI, drop:**
+
 - Line tabs **Language model** / **Speech to text**; provider card with "Connected" / "Not set up" badge.
 - Fields: Provider Select (OpenAI-compatible, Anthropic, OpenAI, Google; STT: DeepGram), Base URL, Model, API key (Replace), Test connection (`PlugZapIcon`), Remove, save bar.
 - Keep only if per-user STT keys survive.
 
 **Batch autogenerate (`settings/BatchAutogenerateSection.tsx`) — LEFTOVER/AI, drop:**
+
 - Team Select, Shows checkbox group ("All shows"), AutogenerateOptions (Transcripts / Log events / Topics / Wiki; wiki mode radio).
 - Estimate preview, **Start**, live job card ("Now: {session} · {step}", **Cancel job**), report, "Recent jobs". Hook `api/hooks/useAutogenerateJobs.ts`.
 
@@ -1233,6 +1287,7 @@ Paths are relative to `pages/index/components/`. Design rules: `web/DESIGN.md` �
 All use `shared/ui/Dialog.tsx` (centered `DialogContent` on desktop, bottom-sheet `Drawer` on phones) with `DialogActions` and a 44px `TOUCH_TARGET` floor on phones. Each is lazy-mounted from AppShell behind an open flag.
 
 **New Session (`NewSessionModal.tsx`):**
+
 - **Header:** lucide `Plus` (size-5) + `h2` "NEW SESSION" (`text-[1rem] font-semibold tracking-[0.06em] uppercase`) + close icon. The Dialog title is sr-only.
 - Desktop offset for the rail: `md:translate(calc(-50% + 8.125rem), -50%)`.
 - **Fields:**
@@ -1249,12 +1304,14 @@ All use `shared/ui/Dialog.tsx` (centered `DialogContent` on desktop, bottom-shee
 - **On success:** navigate to `/sessions/:id`; with a URL, AppShell starts the YouTube import (failure → toast + error modal).
 
 **YouTube import failed (`YouTubeImportErrorModal.tsx`):**
+
 - Body: "Could not download audio from the YouTube link. What would you like to do?"
 - **Try a different link** → Input ("Link to YouTube video") + **Import** (Enter submits).
 - **Continue without audio** (outline).
 - **Don't create session** → archive + delete ("Deleting…"), go home.
 
 **Batch Import (`BatchImportModal.tsx`, `PlaylistPicker.tsx`, logic in `pages/index/batchImport/*`):**
+
 - **Header:** `Upload` + "BATCH IMPORT"; Show Select.
 - **Import Audio** (outline):
   - Hidden `<input type=file multiple webkitdirectory>`; folder name shown below.
@@ -1273,6 +1330,7 @@ All use `shared/ui/Dialog.tsx` (centered `DialogContent` on desktop, bottom-shee
 - **Progress:** ProgressBar + completed / skipped / failed lines (`aria-live`); abort supported.
 
 **Other modals:**
+
 - **`EventGenerateCustomModal.tsx` — LEFTOVER/AI, drop:** "Custom event generation", a checkbox per instruction-bearing button/option, Cancel / Generate.
 - **`TranscribeModal.tsx` — dead code:** imported only by its test ("Transcribing… this may take a few minutes." → Download CSV). Do not port.
 - **`autogenerate/AutogenerateOptions.tsx`, `autogenerateModel.ts` — LEFTOVER/AI, drop:** steps, wiki mode, `BLOCKED_TEXT`, "The work runs on your own provider accounts."
@@ -1305,23 +1363,23 @@ All use `shared/ui/Dialog.tsx` (centered `DialogContent` on desktop, bottom-shee
 
 In the rebuild, AI generation is removed from the app: external agents do that work via MCP. The Assistant tab becomes an "Agents" activity tab.
 
-| Piece | Files | Action |
-|---|---|---|
-| Events "Auto generate" dropdown (Generate All / Regenerate All / Custom) | `EventLogSheet.tsx`, `GenerateToolbar.tsx` (generate half), `EventGenerateCustomModal.tsx` | Remove. Keep Edit, Time display and Filter. |
-| Transcript "Auto generate" (Deepgram), lock banner, "Generating transcript…" copy | `TranscribeFeed.tsx`, `TranscriptGenerationLockBanner.tsx`, `api/hooks/useTranscriptGenerationStatus.ts` | Remove. Keep Insert and inline edit. Rewrite the empty-state copy ("Agents add transcripts…"). |
-| Topics "Auto generate" | `TopicsFeed.tsx` | Remove. Keep Insert. Rewrite the empty-state copy. |
-| AI gating hooks | `hooks/useGatedGenerate.ts`, `hooks/useClearOnLanguageModelSave.tsx` | Remove. |
-| Provider keys (LLM / STT) | `settings/AdvancedSection.tsx`, `api/hooks/useProviders.ts`, `providers*` fixtures | Remove the section. Keep STT keys only if server-side transcription stays per-user. |
-| Batch autogenerate | `settings/BatchAutogenerateSection.tsx`, `autogenerate/*`, `api/hooks/useAutogenerateJobs.ts`, `batchImport/autogenerateAfterImport.ts`, `autogenerate*` fixtures | Remove. |
-| Per-button `auto_instruction` and per-option instructions | `settings/EventButtonsSection.tsx`, `eventButtonsModel.ts` | Drop from the UI. Optionally keep as an "Agent hint" field if agents should read it via MCP. |
-| Wiki "Update wiki" and the suggestion review flow | `wiki/UpdateWikiButton.tsx`, `wiki/WikiSuggestionSheet.tsx`, Suggestions tab in `WikiRoute.tsx`, the pending-suggestion alert in `WikiPageView.tsx`, `api/hooks/useWikiSuggestions.ts`, `wikiSuggestion*` fixtures | Remove the generate button. If agents should propose rather than write, the suggestion sheet and diff can be repurposed as an "agent proposals" review. Otherwise drop it. |
-| "auto" chip on events (`metadata.auto_generated`) | `EventLogRow.tsx` | Repurpose as an "agent" chip showing the authoring agent or client name. |
-| Connected-app scope `session-data:generate` | `ConnectedAppsSection.tsx` | Drop that permission line. |
-| Assistant chat tab | already deleted (a comment in `SessionWorkspace.tsx`) | Add the new **Agents** tab to the workspace tab row. Use the FeedShell / FeedTable chrome: a count label like "N agent actions", rows with time, agent (connected-app `client_name`), action, target (event/topic/word/wiki page/dashboard) and a jump button. It pairs with Settings › Connected apps. |
-| `TranscribeModal.tsx` | dead (test-only import) | Don't port. |
-| `/admin/users` page | removed 2026-10-06; `fixtures/api-responses/adminUsers.json` remains | Don't port. |
-| Legacy theme aliases | `--v5-*`, `--v4-*`, `--legacy-*`, `.v5-bg-glow`, `ThemeProvider`, `.hidden !important`, `assets/icons/*.png`, `glass` button variant name | Optional cleanup. The look is the same with `--si-*` only. |
-| Next-specific | `app/**/*.page.tsx`, `IndexIsland`, `next.config.ts`, `pageExtensions`, `force-dynamic`, `source('../../..')` in tailwind.css | Replace with Vite `index.html` and `main.tsx`. |
+| Piece                                                                             | Files                                                                                                                                                                                                              | Action                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Events "Auto generate" dropdown (Generate All / Regenerate All / Custom)          | `EventLogSheet.tsx`, `GenerateToolbar.tsx` (generate half), `EventGenerateCustomModal.tsx`                                                                                                                         | Remove. Keep Edit, Time display and Filter.                                                                                                                                                                                                                                                             |
+| Transcript "Auto generate" (Deepgram), lock banner, "Generating transcript…" copy | `TranscribeFeed.tsx`, `TranscriptGenerationLockBanner.tsx`, `api/hooks/useTranscriptGenerationStatus.ts`                                                                                                           | Remove. Keep Insert and inline edit. Rewrite the empty-state copy ("Agents add transcripts…").                                                                                                                                                                                                          |
+| Topics "Auto generate"                                                            | `TopicsFeed.tsx`                                                                                                                                                                                                   | Remove. Keep Insert. Rewrite the empty-state copy.                                                                                                                                                                                                                                                      |
+| AI gating hooks                                                                   | `hooks/useGatedGenerate.ts`, `hooks/useClearOnLanguageModelSave.tsx`                                                                                                                                               | Remove.                                                                                                                                                                                                                                                                                                 |
+| Provider keys (LLM / STT)                                                         | `settings/AdvancedSection.tsx`, `api/hooks/useProviders.ts`, `providers*` fixtures                                                                                                                                 | Remove the section. Keep STT keys only if server-side transcription stays per-user.                                                                                                                                                                                                                     |
+| Batch autogenerate                                                                | `settings/BatchAutogenerateSection.tsx`, `autogenerate/*`, `api/hooks/useAutogenerateJobs.ts`, `batchImport/autogenerateAfterImport.ts`, `autogenerate*` fixtures                                                  | Remove.                                                                                                                                                                                                                                                                                                 |
+| Per-button `auto_instruction` and per-option instructions                         | `settings/EventButtonsSection.tsx`, `eventButtonsModel.ts`                                                                                                                                                         | Drop from the UI. Optionally keep as an "Agent hint" field if agents should read it via MCP.                                                                                                                                                                                                            |
+| Wiki "Update wiki" and the suggestion review flow                                 | `wiki/UpdateWikiButton.tsx`, `wiki/WikiSuggestionSheet.tsx`, Suggestions tab in `WikiRoute.tsx`, the pending-suggestion alert in `WikiPageView.tsx`, `api/hooks/useWikiSuggestions.ts`, `wikiSuggestion*` fixtures | Remove the generate button. If agents should propose rather than write, the suggestion sheet and diff can be repurposed as an "agent proposals" review. Otherwise drop it.                                                                                                                              |
+| "auto" chip on events (`metadata.auto_generated`)                                 | `EventLogRow.tsx`                                                                                                                                                                                                  | Repurpose as an "agent" chip showing the authoring agent or client name.                                                                                                                                                                                                                                |
+| Connected-app scope `session-data:generate`                                       | `ConnectedAppsSection.tsx`                                                                                                                                                                                         | Drop that permission line.                                                                                                                                                                                                                                                                              |
+| Assistant chat tab                                                                | already deleted (a comment in `SessionWorkspace.tsx`)                                                                                                                                                              | Add the new **Agents** tab to the workspace tab row. Use the FeedShell / FeedTable chrome: a count label like "N agent actions", rows with time, agent (connected-app `client_name`), action, target (event/topic/word/wiki page/dashboard) and a jump button. It pairs with Settings › Connected apps. |
+| `TranscribeModal.tsx`                                                             | dead (test-only import)                                                                                                                                                                                            | Don't port.                                                                                                                                                                                                                                                                                             |
+| `/admin/users` page                                                               | removed 2026-10-06; `fixtures/api-responses/adminUsers.json` remains                                                                                                                                               | Don't port.                                                                                                                                                                                                                                                                                             |
+| Legacy theme aliases                                                              | `--v5-*`, `--v4-*`, `--legacy-*`, `.v5-bg-glow`, `ThemeProvider`, `.hidden !important`, `assets/icons/*.png`, `glass` button variant name                                                                          | Optional cleanup. The look is the same with `--si-*` only.                                                                                                                                                                                                                                              |
+| Next-specific                                                                     | `app/**/*.page.tsx`, `IndexIsland`, `next.config.ts`, `pageExtensions`, `force-dynamic`, `source('../../..')` in tailwind.css                                                                                      | Replace with Vite `index.html` and `main.tsx`.                                                                                                                                                                                                                                                          |
 
 ---
 

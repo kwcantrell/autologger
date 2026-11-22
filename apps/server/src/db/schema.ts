@@ -27,7 +27,9 @@ export const users = pgTable('users', {
   googleSub: text('google_sub').unique(),
   name: text('name').notNull().default(''),
   pictureUrl: text('picture_url'),
-  status: text('status', { enum: ['pending', 'active', 'disabled'] }).notNull().default('pending'),
+  status: text('status', { enum: ['pending', 'active', 'disabled'] })
+    .notNull()
+    .default('pending'),
   isSuperadmin: boolean('is_superadmin').notNull().default(false),
   createdAt: created(),
   lastLoginAt: ts('last_login_at'),

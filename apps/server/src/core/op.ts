@@ -9,8 +9,7 @@ import {
   opInputs,
   type Via,
 } from '@autologger/contract';
-import { db, type Tx } from '../db/client.ts';
-import { schema } from '../db/client.ts';
+import { db, schema, type Tx } from '../db/client.ts';
 import { type BusMessage, publish, type Topic } from './bus.ts';
 import { AppError, forbidden } from './errors.ts';
 import { newId } from './ids.ts';
@@ -99,7 +98,7 @@ export async function executeOp<N extends OpName>(
   surface: Surface,
 ): Promise<OpOutputs[N]> {
   const op = registry.get(name) as OpDef<N> | undefined;
-  if (!op || !op.surfaces.includes(surface)) throw new AppError('not_found', `Unknown op ${name}.`);
+  if (!op?.surfaces.includes(surface)) throw new AppError('not_found', `Unknown op ${name}.`);
   if (actor.user.status === 'disabled') throw forbidden('This account is disabled.');
   if (actor.user.status === 'pending' && !op.allowPending) {
     throw forbidden('This account is waiting for approval by an administrator.');
@@ -132,7 +131,8 @@ export async function executeOp<N extends OpName>(
           after: c.after ?? null,
           revertOf: c.revertOf ?? null,
         });
-        if (c.sessionId) outbox.push([`session:${c.sessionId}`, { type: 'invalidate', entity: 'change' }]);
+        if (c.sessionId)
+          outbox.push([`session:${c.sessionId}`, { type: 'invalidate', entity: 'change' }]);
         return id;
       },
     };

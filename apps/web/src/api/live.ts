@@ -26,14 +26,19 @@ export type LiveStatus =
 
 type WithId = { id: string };
 
-function upsertList<T extends WithId>(list: T[] | undefined, item: T, sort?: (a: T, b: T) => number): T[] | undefined {
+function upsertList<T extends WithId>(
+  list: T[] | undefined,
+  item: T,
+  sort?: (a: T, b: T) => number,
+): T[] | undefined {
   if (!list) return list;
   const i = list.findIndex((x) => x.id === item.id);
   const next = i === -1 ? [...list, item] : list.map((x) => (x.id === item.id ? item : x));
   return sort ? next.sort(sort) : next;
 }
 
-const removeFromList = <T extends WithId>(list: T[] | undefined, id: string) => list?.filter((x) => x.id !== id);
+const removeFromList = <T extends WithId>(list: T[] | undefined, id: string) =>
+  list?.filter((x) => x.id !== id);
 
 export const byEventTime = (a: SessionEvent, b: SessionEvent) =>
   (a.timecodeFrames ?? Number.MAX_SAFE_INTEGER) - (b.timecodeFrames ?? Number.MAX_SAFE_INTEGER) ||
@@ -203,7 +208,8 @@ export function useLiveSession(sessionId: string | undefined): LiveStatus {
         if (terminal || ev.code === 4403 || ev.code === 4404) return;
         attempt += 1;
         setStatus({ state: 'reconnecting', attempt });
-        const delay = Math.min(MAX_BACKOFF_MS, 500 * 2 ** Math.min(attempt, 5)) * (0.75 + Math.random() * 0.5);
+        const delay =
+          Math.min(MAX_BACKOFF_MS, 500 * 2 ** Math.min(attempt, 5)) * (0.75 + Math.random() * 0.5);
         retryTimer = setTimeout(connect, delay);
       };
     };

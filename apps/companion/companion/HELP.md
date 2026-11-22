@@ -21,8 +21,8 @@ session page). Check `$(autologger:session_title)` on your keys before you press
 
 - **Transport: roll / stop / toggle** — each roll starts a new take.
 - **Log event (choose button)** — pick one of the show's event buttons (or type a free label).
-  *Option / value*: for dropdown buttons the option to log, for toggle buttons `on`, `off` or
-  `toggle` (empty = toggle). *Message* is free text; both accept variables.
+  _Option / value_: for dropdown buttons the option to log, for toggle buttons `on`, `off` or
+  `toggle` (empty = toggle). _Message_ is free text; both accept variables.
 - **Log event by hotkey slot (1–9)** — same as the app's number keys; follows the show's button
   order, so pages keep working when buttons are renamed.
 - **Refresh state from server**.

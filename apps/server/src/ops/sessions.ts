@@ -1,6 +1,11 @@
 import { parseTimecode, type Session, transportElapsed } from '@autologger/contract';
 import { and, desc, eq, isNull, type SQL, sql } from 'drizzle-orm';
-import { readableShowCondition, requireSession, requireShow, showAccessMap } from '../core/authz.ts';
+import {
+  readableShowCondition,
+  requireSession,
+  requireShow,
+  showAccessMap,
+} from '../core/authz.ts';
 import { changeMessage } from '../core/bus.ts';
 import { badRequest, conflict } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
@@ -18,14 +23,22 @@ const aggregates = {
   segFailed: sql<number>`(select count(*)::int from audio_segments a where a.session_id = ${sessions.id} and a.status = 'failed')`,
 };
 
-function transcriptStatus(total: number, done: number, failed: number): Session['transcriptStatus'] {
+function transcriptStatus(
+  total: number,
+  done: number,
+  failed: number,
+): Session['transcriptStatus'] {
   if (total === 0) return 'none';
   if (done === total) return 'done';
   if (failed > 0 && done + failed === total) return done > 0 ? 'partial' : 'failed';
   return done > 0 ? 'partial' : 'pending';
 }
 
-export async function loadSessions(ctx: Ctx, where: SQL | undefined, limit = 500): Promise<Session[]> {
+export async function loadSessions(
+  ctx: Ctx,
+  where: SQL | undefined,
+  limit = 500,
+): Promise<Session[]> {
   const rows = await ctx.db
     .select({ s: sessions, show: shows, ...aggregates })
     .from(sessions)
@@ -33,8 +46,13 @@ export async function loadSessions(ctx: Ctx, where: SQL | undefined, limit = 500
     .where(and(readableShowCondition(ctx, sessions.showId), where))
     .orderBy(desc(sessions.createdAt))
     .limit(limit);
-  const access = await showAccessMap(ctx, [...new Map(rows.map((r) => [r.show.id, r.show])).values()]);
-  const users = await userRefs(ctx.db, rows.map((r) => r.s.createdBy));
+  const access = await showAccessMap(ctx, [
+    ...new Map(rows.map((r) => [r.show.id, r.show])).values(),
+  ]);
+  const users = await userRefs(
+    ctx.db,
+    rows.map((r) => r.s.createdBy),
+  );
   return rows
     .filter((r) => access.has(r.show.id))
     .map(({ s, show, eventCount, audioSeconds, segTotal, segDone, segFailed }) => ({
@@ -86,14 +104,18 @@ function defaultTitle(show: typeof shows.$inferSelect, episode: string, date: st
 
 defineOp({
   name: 'sessions.list',
-  description: 'Sessions you can access, newest first. Filter by show; archived sessions are excluded unless asked for.',
+  description:
+    'Sessions you can access, newest first. Filter by show; archived sessions are excluded unless asked for.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId, includeArchived, limit }) {
     if (showId) await requireShow(ctx, showId, 'read');
     return loadSessions(
       ctx,
-      and(showId ? eq(sessions.showId, showId) : undefined, includeArchived ? undefined : isNull(sessions.archivedAt)),
+      and(
+        showId ? eq(sessions.showId, showId) : undefined,
+        includeArchived ? undefined : isNull(sessions.archivedAt),
+      ),
       limit,
     );
   },
@@ -101,7 +123,8 @@ defineOp({
 
 defineOp({
   name: 'sessions.get',
-  description: 'One session: metadata, transport state, frame rate, event count and transcript status.',
+  description:
+    'One session: metadata, transport state, frame rate, event count and transcript status.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId }) {
@@ -112,7 +135,8 @@ defineOp({
 
 defineOp({
   name: 'sessions.create',
-  description: 'Create a session in a show. Title defaults from the show code and date or episode number.',
+  description:
+    'Create a session in a show. Title defaults from the show code and date or episode number.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
@@ -138,7 +162,11 @@ defineOp({
       startOffsetFrames,
       createdBy: ctx.actor.user.id,
     });
-    if (!input.episode) await ctx.db.update(shows).set({ nextEpisode: show.nextEpisode + 1 }).where(eq(shows.id, show.id));
+    if (!input.episode)
+      await ctx.db
+        .update(shows)
+        .set({ nextEpisode: show.nextEpisode + 1 })
+        .where(eq(shows.id, show.id));
     ctx.publish(`show:${show.id}`, { type: 'show_changed', showId: show.id, entity: 'show' });
     return getSession(ctx, id);
   },
@@ -146,7 +174,8 @@ defineOp({
 
 defineOp({
   name: 'sessions.update',
-  description: 'Edit session metadata. Frame rate and start timecode can only change while the transport is stopped.',
+  description:
+    'Edit session metadata. Frame rate and start timecode can only change while the transport is stopped.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, startTimecode, ...patch }) {
@@ -162,7 +191,10 @@ defineOp({
       if (f === null) throw badRequest('Start timecode is not valid for this frame rate.');
       set.startOffsetFrames = f;
     }
-    await ctx.db.update(sessions).set({ ...set, updatedAt: new Date() }).where(eq(sessions.id, sessionId));
+    await ctx.db
+      .update(sessions)
+      .set({ ...set, updatedAt: new Date() })
+      .where(eq(sessions.id, sessionId));
     return publishSession(ctx, sessionId);
   },
 });
@@ -175,7 +207,10 @@ defineOp({
   async run(ctx, { sessionId, archived }) {
     const { session } = await requireSession(ctx, sessionId, 'write');
     if (archived && session.isRolling) throw conflict('Stop the transport before archiving.');
-    await ctx.db.update(sessions).set({ archivedAt: archived ? new Date() : null }).where(eq(sessions.id, sessionId));
+    await ctx.db
+      .update(sessions)
+      .set({ archivedAt: archived ? new Date() : null })
+      .where(eq(sessions.id, sessionId));
     return publishSession(ctx, sessionId);
   },
 });
@@ -206,7 +241,12 @@ defineOp({
     if (!session.isRolling) {
       await ctx.db
         .update(sessions)
-        .set({ isRolling: true, rollStartedAt: new Date(), take: session.take + 1, updatedAt: new Date() })
+        .set({
+          isRolling: true,
+          rollStartedAt: new Date(),
+          take: session.take + 1,
+          updatedAt: new Date(),
+        })
         .where(and(eq(sessions.id, sessionId), eq(sessions.isRolling, false)));
     }
     return publishSession(ctx, sessionId);
@@ -231,7 +271,12 @@ defineOp({
       });
       await ctx.db
         .update(sessions)
-        .set({ isRolling: false, rollStartedAt: null, elapsedFrames: elapsed, updatedAt: new Date() })
+        .set({
+          isRolling: false,
+          rollStartedAt: null,
+          elapsedFrames: elapsed,
+          updatedAt: new Date(),
+        })
         .where(eq(sessions.id, sessionId));
     }
     return publishSession(ctx, sessionId);
@@ -246,7 +291,10 @@ defineOp({
   async run(ctx, { sessionId }) {
     const { session } = await requireSession(ctx, sessionId, 'write');
     if (session.isRolling) throw conflict('Stop the transport before resetting it.');
-    await ctx.db.update(sessions).set({ elapsedFrames: 0, updatedAt: new Date() }).where(eq(sessions.id, sessionId));
+    await ctx.db
+      .update(sessions)
+      .set({ elapsedFrames: 0, updatedAt: new Date() })
+      .where(eq(sessions.id, sessionId));
     return publishSession(ctx, sessionId);
   },
 });

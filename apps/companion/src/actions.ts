@@ -1,6 +1,12 @@
 import type { CompanionActionDefinitions, DropdownChoice } from '@companion-module/base';
 import { OpError } from './connection.js';
-import { type Category, type CompanionOp, type CompanionState, categoryAtSlot, SLOTS } from './state.js';
+import {
+  type Category,
+  type CompanionOp,
+  type CompanionState,
+  categoryAtSlot,
+  SLOTS,
+} from './state.js';
 
 export interface ActionHost {
   state(): CompanionState | null;
@@ -13,7 +19,11 @@ export interface ActionHost {
  * The value stored with an event. Toggle buttons accept `on`, `off` or `toggle` (flip the last
  * value this module sent for that button); other kinds pass the text through.
  */
-export function resolveValue(cat: Category | undefined, raw: string, toggles: Map<string, boolean>): string | null {
+export function resolveValue(
+  cat: Category | undefined,
+  raw: string,
+  toggles: Map<string, boolean>,
+): string | null {
   const v = raw.trim();
   if (cat?.kind === 'toggle') {
     let on: boolean;
@@ -103,7 +113,14 @@ export function actionDefinitions(host: ActionHost): CompanionActionDefinitions 
           allowCustom: true,
           tooltip: 'Pick a button of the show, or type a free label',
         },
-        { type: 'textinput', id: 'value', label: 'Option / value', default: '', useVariables: true, tooltip: VALUE_TOOLTIP },
+        {
+          type: 'textinput',
+          id: 'value',
+          label: 'Option / value',
+          default: '',
+          useVariables: true,
+          tooltip: VALUE_TOOLTIP,
+        },
         { type: 'textinput', id: 'message', label: 'Message', default: '', useVariables: true },
       ],
       callback: async (action) => {
@@ -111,7 +128,11 @@ export function actionDefinitions(host: ActionHost): CompanionActionDefinitions 
         if (!category) return host.log('warn', 'log event: choose an event button');
         const value = await host.parseVariablesInString(String(action.options.value ?? ''));
         const message = await host.parseVariablesInString(String(action.options.message ?? ''));
-        await send('log event', 'events.create', eventInput(host.state(), category, value, message, toggles));
+        await send(
+          'log event',
+          'events.create',
+          eventInput(host.state(), category, value, message, toggles),
+        );
       },
     },
     log_slot: {
@@ -124,7 +145,14 @@ export function actionDefinitions(host: ActionHost): CompanionActionDefinitions 
           default: 1,
           choices: SLOTS.map((s) => ({ id: s, label: `Button ${s}` })),
         },
-        { type: 'textinput', id: 'value', label: 'Option / value', default: '', useVariables: true, tooltip: VALUE_TOOLTIP },
+        {
+          type: 'textinput',
+          id: 'value',
+          label: 'Option / value',
+          default: '',
+          useVariables: true,
+          tooltip: VALUE_TOOLTIP,
+        },
         { type: 'textinput', id: 'message', label: 'Message', default: '', useVariables: true },
       ],
       callback: async (action) => {
@@ -133,7 +161,11 @@ export function actionDefinitions(host: ActionHost): CompanionActionDefinitions 
         if (!cat) return host.log('warn', `log event: the show has no button in slot ${slot}`);
         const value = await host.parseVariablesInString(String(action.options.value ?? ''));
         const message = await host.parseVariablesInString(String(action.options.message ?? ''));
-        await send('log event', 'events.create', eventInput(host.state(), cat.id, value, message, toggles));
+        await send(
+          'log event',
+          'events.create',
+          eventInput(host.state(), cat.id, value, message, toggles),
+        );
       },
     },
     refresh: {

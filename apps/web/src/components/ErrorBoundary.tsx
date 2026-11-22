@@ -30,7 +30,11 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
                 Retry
               </Button>
             )}
-            <Button variant={chunk ? 'outline' : 'default'} className="h-11 w-full" onClick={() => location.reload()}>
+            <Button
+              variant={chunk ? 'outline' : 'default'}
+              className="h-11 w-full"
+              onClick={() => location.reload()}
+            >
               Reload page
             </Button>
           </>

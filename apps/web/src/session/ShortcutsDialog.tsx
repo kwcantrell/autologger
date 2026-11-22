@@ -8,7 +8,10 @@ const KEY =
 const ROWS: { keys: string[]; text: string }[] = [
   { keys: ['1–9'], text: 'Log the 1st–9th event button (while timecode is rolling)' },
   { keys: ['Space'], text: 'Play / pause recorded audio' },
-  { keys: ['←', '→'], text: 'Scrub the timeline 1s when the playhead is focused (hold Shift for 10s)' },
+  {
+    keys: ['←', '→'],
+    text: 'Scrub the timeline 1s when the playhead is focused (hold Shift for 10s)',
+  },
   { keys: ['+', '−'], text: 'Zoom the timeline in / out' },
   { keys: ['['], text: 'Show or hide the sidebar' },
   { keys: [MOD_KEY_LABEL, 'K'], text: 'Search sessions, transcripts, topics and events' },

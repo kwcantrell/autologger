@@ -44,8 +44,22 @@ function state(over: Partial<CompanionState['session'] & object> = {}): Companio
     },
     categories: [
       cat({ id: 'c1', position: 0, name: 'Guest', color: '#ffee00' }),
-      cat({ id: 'c2', position: 1, name: 'Ad', color: '#102030', kind: 'dropdown', options: ['A', 'B'] }),
-      cat({ id: 'c3', position: 2, name: 'Live', kind: 'toggle', onLabel: 'LIVE', offLabel: 'OFF AIR' }),
+      cat({
+        id: 'c2',
+        position: 1,
+        name: 'Ad',
+        color: '#102030',
+        kind: 'dropdown',
+        options: ['A', 'B'],
+      }),
+      cat({
+        id: 'c3',
+        position: 2,
+        name: 'Live',
+        kind: 'toggle',
+        onLabel: 'LIVE',
+        offLabel: 'OFF AIR',
+      }),
     ],
     lastEvent: { id: 'evt_1', category: 'Guest', message: 'arrives', timecodeFrames: 25 * 61 + 3 },
   };
@@ -85,7 +99,9 @@ describe('state → variables', () => {
   it('last event without message shows only the category', () => {
     const s = state();
     s.lastEvent = { id: 'e', category: 'Ad', message: '', timecodeFrames: 0 };
-    expect(toVariableValues(liveState(s, new Date(T0).toISOString(), T0), T0).last_event).toBe('Ad');
+    expect(toVariableValues(liveState(s, new Date(T0).toISOString(), T0), T0).last_event).toBe(
+      'Ad',
+    );
   });
 });
 
@@ -141,7 +157,11 @@ describe('colors and events', () => {
 
   it('builds event input by id or free label', () => {
     const s = state();
-    expect(eventInput(s, 'c2', 'A', 'msg', new Map())).toEqual({ categoryId: 'c2', value: 'A', message: 'msg' });
+    expect(eventInput(s, 'c2', 'A', 'msg', new Map())).toEqual({
+      categoryId: 'c2',
+      value: 'A',
+      message: 'msg',
+    });
     expect(eventInput(s, 'Note', '', '', new Map())).toEqual({ category: 'Note' });
   });
 });

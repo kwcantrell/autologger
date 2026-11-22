@@ -2,7 +2,11 @@ import type { SelectHTMLAttributes } from 'react';
 import { cn } from '@/shared/lib/utils';
 
 /** A native <select> wearing the app's Select trigger face (robust on phones and in forms). */
-export function NativeSelect({ className, children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+export function NativeSelect({
+  className,
+  children,
+  ...props
+}: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
       className={cn(

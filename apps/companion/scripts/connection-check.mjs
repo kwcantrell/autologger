@@ -22,7 +22,10 @@ await rpc('/auth/dev-login', { email: 'owner@example.com' });
 const team = await rpc('/api/rpc/teams.create', { name: `Conn check ${Date.now()}` });
 const show = await rpc('/api/rpc/shows.create', { teamId: team.id, name: 'Conn show' });
 await rpc('/api/rpc/sessions.create', { showId: show.id, title: 'Conn session' });
-const { device, token } = await rpc('/api/rpc/companion.create', { showId: show.id, name: 'Module' });
+const { device, token } = await rpc('/api/rpc/companion.create', {
+  showId: show.id,
+  name: 'Module',
+});
 
 const statuses = [];
 let latest = null;

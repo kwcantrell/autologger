@@ -11,7 +11,18 @@ import { Spinner } from '@/shared/components/ui/spinner';
 import { cn } from '@/shared/lib/utils';
 import { useTextPrompt } from '@/shared/ui/PromptDialog';
 import { useWorkspace } from '../context';
-import { FEED_CELL, FEED_CELL_LABEL, FEED_CELL_TEXT, FEED_ROW, FEED_TC, FEED_TEXTAREA, FeedShell, FeedTable, JUMP_COLUMN, JumpButton } from '../feed';
+import {
+  FEED_CELL,
+  FEED_CELL_LABEL,
+  FEED_CELL_TEXT,
+  FEED_ROW,
+  FEED_TC,
+  FEED_TEXTAREA,
+  FeedShell,
+  FeedTable,
+  JUMP_COLUMN,
+  JumpButton,
+} from '../feed';
 
 const STATUS: Record<Session['transcriptStatus'], string> = {
   none: 'No transcript',
@@ -21,15 +32,25 @@ const STATUS: Record<Session['transcriptStatus'], string> = {
   failed: 'Transcription failed',
 };
 
-export function TranscriptTab({ session, playheadSec }: { session: Session; playheadSec: number | null }) {
+export function TranscriptTab({
+  session,
+  playheadSec,
+}: {
+  session: Session;
+  playheadSec: number | null;
+}) {
   const { canWrite, seek } = useWorkspace();
   const caps = useCapabilities().data;
   const q = useTranscript(session.id);
   const jobs = useJobs(session.id);
   const { requestText, promptElement } = useTextPrompt();
   const segs = q.data ?? [];
-  const running = (jobs.data ?? []).filter((j) => j.kind.includes('transcri') && (j.status === 'queued' || j.status === 'running'));
-  const failed = (jobs.data ?? []).find((j) => j.kind.includes('transcri') && j.status === 'failed');
+  const running = (jobs.data ?? []).filter(
+    (j) => j.kind.includes('transcri') && (j.status === 'queued' || j.status === 'running'),
+  );
+  const failed = (jobs.data ?? []).find(
+    (j) => j.kind.includes('transcri') && j.status === 'failed',
+  );
 
   const activeId = useMemo(() => {
     if (playheadSec == null) return null;
@@ -46,14 +67,21 @@ export function TranscriptTab({ session, playheadSec }: { session: Session; play
     });
     if (!to || to.trim() === from) return;
     try {
-      const r = await rpc('transcript.renameSpeaker', { sessionId: session.id, from, to: to.trim() });
+      const r = await rpc('transcript.renameSpeaker', {
+        sessionId: session.id,
+        from,
+        to: to.trim(),
+      });
       showToast(`Renamed in ${r.updated} segment${r.updated === 1 ? '' : 's'}.`);
     } catch (e) {
       showToast(errorMessage(e), true);
     }
   };
 
-  const words = segs.reduce((n, s) => n + (s.words.length || s.text.split(/\s+/).filter(Boolean).length), 0);
+  const words = segs.reduce(
+    (n, s) => n + (s.words.length || s.text.split(/\s+/).filter(Boolean).length),
+    0,
+  );
 
   const empty =
     caps && !caps.transcription
@@ -81,9 +109,15 @@ export function TranscriptTab({ session, playheadSec }: { session: Session; play
         </span>
       }
     >
-      {failed && session.transcriptStatus === 'failed' && <p className="m-0 mb-2 text-[0.85rem] text-si-danger">Last transcription failed: {failed.error ?? 'unknown error'}.</p>}
+      {failed && session.transcriptStatus === 'failed' && (
+        <p className="m-0 mb-2 text-[0.85rem] text-si-danger">
+          Last transcription failed: {failed.error ?? 'unknown error'}.
+        </p>
+      )}
       {q.isError ? (
-        <p className="m-0 text-sm text-si-danger">Couldn't load the transcript. {errorMessage(q.error)}</p>
+        <p className="m-0 text-sm text-si-danger">
+          Couldn't load the transcript. {errorMessage(q.error)}
+        </p>
       ) : (
         <FeedTable
           columns={[
@@ -156,12 +190,22 @@ const SegmentRow = memo(function SegmentRow({
   return (
     <tr ref={rowRef} className={cn(FEED_ROW, 'group', active && 'bg-(--sel-bg)')}>
       <td className={cn(FEED_CELL, 'align-top pt-1')}>
-        <JumpButton sec={s.startSec} label={fmtSec(s.startSec)} onJump={onSeek} unavailable={rolling ? 'Playback is off while timecode rolls.' : null} />
+        <JumpButton
+          sec={s.startSec}
+          label={fmtSec(s.startSec)}
+          onJump={onSeek}
+          unavailable={rolling ? 'Playback is off while timecode rolls.' : null}
+        />
       </td>
       <td className={cn(FEED_CELL, FEED_TC, 'align-top pt-1.5')}>{fmtSec(s.startSec)}</td>
       <td className={cn(FEED_CELL, FEED_CELL_LABEL, 'align-top pt-1.5')}>
         {canWrite ? (
-          <button type="button" className="text-left hover:underline" title="Rename this speaker everywhere" onClick={onRenameSpeaker}>
+          <button
+            type="button"
+            className="text-left hover:underline"
+            title="Rename this speaker everywhere"
+            onClick={onRenameSpeaker}
+          >
             {s.speaker || 'Unknown'}
           </button>
         ) : (
@@ -171,7 +215,11 @@ const SegmentRow = memo(function SegmentRow({
       <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top py-1 leading-[1.5]')}>
         {editing ? (
           <textarea
-            className={cn(FEED_TEXTAREA, 'w-full rounded-[3px] border border-[color-mix(in_oklab,var(--si-accent)_55%,transparent)] bg-[color-mix(in_oklab,var(--si-accent)_8%,transparent)] px-1 py-0.5 text-inherit outline-none')}
+            className={cn(
+              FEED_TEXTAREA,
+              'w-full rounded-[3px] border border-[color-mix(in_oklab,var(--si-accent)_55%,transparent)] bg-[color-mix(in_oklab,var(--si-accent)_8%,transparent)] px-1 py-0.5 text-inherit outline-none',
+            )}
+            // biome-ignore lint/a11y/noAutofocus: the user just chose Edit; focus moves into the field
             autoFocus
             aria-label="Segment text"
             value={text}
@@ -192,13 +240,16 @@ const SegmentRow = memo(function SegmentRow({
           <span className="flex items-start gap-1">
             <span className="min-w-0 flex-1">
               {useWords
-                ? s.words.map((w, i) => {
+                ? s.words.map((w) => {
                     const cur = playheadSec != null && playheadSec >= w.s && playheadSec < w.e;
                     return (
-                      <span key={i}>
+                      <span key={`${w.s}:${w.w}`}>
                         <button
                           type="button"
-                          className={cn('cursor-pointer rounded-[2px] px-[1px] hover:bg-[rgba(255,255,255,0.06)]', cur && 'bg-si-accent/35 text-si-fg')}
+                          className={cn(
+                            'cursor-pointer rounded-[2px] px-[1px] hover:bg-[rgba(255,255,255,0.06)]',
+                            cur && 'bg-si-accent/35 text-si-fg',
+                          )}
                           onClick={() => !rolling && onSeek(w.s)}
                           title={fmtSec(w.s)}
                         >
@@ -211,7 +262,13 @@ const SegmentRow = memo(function SegmentRow({
               {s.edited && <span className="ml-1 text-[0.65rem] text-si-dim">(edited)</span>}
             </span>
             {canWrite && (
-              <Button variant="ghost" size="icon-xs" className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100" aria-label="Edit segment" onClick={() => setEditing(true)}>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100"
+                aria-label="Edit segment"
+                onClick={() => setEditing(true)}
+              >
                 <PencilIcon aria-hidden="true" />
               </Button>
             )}

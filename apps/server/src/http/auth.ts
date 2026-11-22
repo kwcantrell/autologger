@@ -1,6 +1,6 @@
 // Human sign-in: Google OAuth (or dev email login) → DB-backed session cookie.
 
-import { decodeIdToken, generateCodeVerifier, generateState, Google } from 'arctic';
+import { decodeIdToken, Google, generateCodeVerifier, generateState } from 'arctic';
 import { and, count, eq, gt } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
@@ -15,7 +15,11 @@ export const SESSION_COOKIE = 'al_session';
 const SESSION_DAYS = 30;
 
 const google = googleConfigured
-  ? new Google(env.google.clientId!, env.google.clientSecret!, `${env.publicUrl}/auth/google/callback`)
+  ? new Google(
+      env.google.clientId!,
+      env.google.clientSecret!,
+      `${env.publicUrl}/auth/google/callback`,
+    )
   : null;
 
 const cookieOpts = (maxAgeSec: number) => ({
@@ -28,7 +32,7 @@ const cookieOpts = (maxAgeSec: number) => ({
 
 /** Only same-site relative paths are allowed as post-login destinations. */
 export function safeReturn(path: string | undefined | null): string {
-  return path && path.startsWith('/') && !path.startsWith('//') ? path : '/';
+  return path?.startsWith('/') && !path.startsWith('//') ? path : '/';
 }
 
 /**
@@ -36,7 +40,12 @@ export function safeReturn(path: string | undefined | null): string {
  * the first account ever, and SUPERADMIN_EMAILS, become active superadmins; a pending team
  * invite approves the account and joins the team; everyone else waits for approval.
  */
-export async function upsertUser(p: { email: string; name: string; pictureUrl?: string | null; googleSub?: string }) {
+export async function upsertUser(p: {
+  email: string;
+  name: string;
+  pictureUrl?: string | null;
+  googleSub?: string;
+}) {
   const email = p.email.trim().toLowerCase();
   return db.transaction(async (tx) => {
     let [user] = await tx.select().from(users).where(eq(users.email, email));
@@ -62,18 +71,29 @@ export async function upsertUser(p: { email: string; name: string; pictureUrl?: 
           lastLoginAt: new Date(),
           ...(p.googleSub && !user.googleSub ? { googleSub: p.googleSub } : {}),
           ...(p.pictureUrl ? { pictureUrl: p.pictureUrl } : {}),
-          ...(env.superadminEmails.includes(email) ? { isSuperadmin: true, status: 'active' as const } : {}),
+          ...(env.superadminEmails.includes(email)
+            ? { isSuperadmin: true, status: 'active' as const }
+            : {}),
         })
         .where(eq(users.id, user.id))
         .returning();
     }
     const invites = await tx.select().from(teamInvites).where(eq(teamInvites.email, email));
     for (const inv of invites) {
-      await tx.insert(teamMembers).values({ teamId: inv.teamId, userId: user!.id, role: inv.role }).onConflictDoNothing();
-      await tx.delete(teamInvites).where(and(eq(teamInvites.teamId, inv.teamId), eq(teamInvites.email, email)));
+      await tx
+        .insert(teamMembers)
+        .values({ teamId: inv.teamId, userId: user!.id, role: inv.role })
+        .onConflictDoNothing();
+      await tx
+        .delete(teamInvites)
+        .where(and(eq(teamInvites.teamId, inv.teamId), eq(teamInvites.email, email)));
     }
     if (invites.length && user!.status === 'pending') {
-      [user] = await tx.update(users).set({ status: 'active' }).where(eq(users.id, user!.id)).returning();
+      [user] = await tx
+        .update(users)
+        .set({ status: 'active' })
+        .where(eq(users.id, user!.id))
+        .returning();
     }
     return user!;
   });
@@ -101,7 +121,13 @@ export async function actorFromSessionToken(token: string | undefined): Promise<
   if (!row || row.user.status === 'disabled') return null;
   const u = row.user;
   return {
-    user: { id: u.id, email: u.email, name: u.name || u.email, isSuperadmin: u.isSuperadmin, status: u.status },
+    user: {
+      id: u.id,
+      email: u.email,
+      name: u.name || u.email,
+      isSuperadmin: u.isSuperadmin,
+      status: u.status,
+    },
     via: 'web',
     clientName: null,
     tokenId: null,
@@ -151,12 +177,18 @@ authRoutes.get('/auth/google/callback', async (c) => {
       picture?: string;
     };
     if (!claims.email || claims.email_verified === false) return c.redirect('/login?error=email');
-    const user = await upsertUser({ email: claims.email, name: claims.name ?? '', pictureUrl: claims.picture, googleSub: claims.sub });
+    const user = await upsertUser({
+      email: claims.email,
+      name: claims.name ?? '',
+      pictureUrl: claims.picture,
+      googleSub: claims.sub,
+    });
     if (user.status === 'disabled') return c.redirect('/login?error=disabled');
     const token = await createAuthSession(user.id, c.req.header('user-agent'));
     setCookie(c, SESSION_COOKIE, token, cookieOpts(SESSION_DAYS * 86400));
     const ret = safeReturn(getCookie(c, 'al_return'));
-    for (const k of ['al_oauth_state', 'al_oauth_verifier', 'al_return']) deleteCookie(c, k, { path: '/' });
+    for (const k of ['al_oauth_state', 'al_oauth_verifier', 'al_return'])
+      deleteCookie(c, k, { path: '/' });
     return c.redirect(ret);
   } catch (e) {
     console.error('google callback failed', e);
@@ -165,13 +197,21 @@ authRoutes.get('/auth/google/callback', async (c) => {
 });
 
 authRoutes.post('/auth/dev-login', async (c) => {
-  if (!env.devLogin || isProd) return c.json({ ok: false, error: { code: 'not_found', message: 'Not found.' } }, 404);
+  if (!env.devLogin || isProd)
+    return c.json({ ok: false, error: { code: 'not_found', message: 'Not found.' } }, 404);
   const body = (await c.req.json().catch(() => ({}))) as { email?: string; name?: string };
   if (!body.email || !/^[^@\s]+@[^@\s]+$/.test(body.email)) {
-    return c.json({ ok: false, error: { code: 'bad_request', message: 'Enter an email address.' } }, 400);
+    return c.json(
+      { ok: false, error: { code: 'bad_request', message: 'Enter an email address.' } },
+      400,
+    );
   }
   const user = await upsertUser({ email: body.email, name: body.name ?? '' });
-  if (user.status === 'disabled') return c.json({ ok: false, error: { code: 'forbidden', message: 'This account is disabled.' } }, 403);
+  if (user.status === 'disabled')
+    return c.json(
+      { ok: false, error: { code: 'forbidden', message: 'This account is disabled.' } },
+      403,
+    );
   const token = await createAuthSession(user.id, c.req.header('user-agent'));
   setCookie(c, SESSION_COOKIE, token, cookieOpts(SESSION_DAYS * 86400));
   return c.json({ ok: true, data: { userId: user.id } });

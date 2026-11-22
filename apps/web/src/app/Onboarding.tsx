@@ -23,7 +23,10 @@ export function CreateTeamForm({ onCreated }: { onCreated?: (teamId: string) => 
     setError(null);
     try {
       const team = await rpc('teams.create', { name: name.trim() });
-      await Promise.all([qc.invalidateQueries({ queryKey: qk.me }), qc.invalidateQueries({ queryKey: qk.teams })]);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.me }),
+        qc.invalidateQueries({ queryKey: qk.teams }),
+      ]);
       setName('');
       onCreated?.(team.id);
     } catch (err) {
@@ -69,8 +72,9 @@ export function Onboarding() {
           Create your first team
         </h1>
         <p className="mx-auto mt-3 mb-6 max-w-[24rem] text-[0.9rem] leading-[1.5] text-si-muted">
-          Teams hold shows, and shows hold sessions. You'll be the owner and can invite people afterwards. If someone
-          invited you, their team appears here once you sign in with the invited email.
+          Teams hold shows, and shows hold sessions. You'll be the owner and can invite people
+          afterwards. If someone invited you, their team appears here once you sign in with the
+          invited email.
         </p>
         <CreateTeamForm />
         <Button

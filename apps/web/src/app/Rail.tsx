@@ -6,9 +6,8 @@ import { useLocation } from 'wouter';
 import { qk, useOpMutation, useSessions } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { LoadingVideo } from '@/components/RouteState';
-import { formatFrames } from '@/lib/timecode';
 import { newSessionOpen, settingsOpen } from '@/lib/store';
-import { useTransportClock } from '@/lib/timecode';
+import { formatFrames, useTransportClock } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
@@ -82,10 +81,16 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
   const recent = all.filter((s) => !s.archivedAt);
   const archived = all.filter((s) => s.archivedAt);
   const q = query.trim().toLowerCase();
-  const match = (s: Session) => !q || s.title.toLowerCase().includes(q) || s.episode.toLowerCase().includes(q);
+  const match = (s: Session) =>
+    !q || s.title.toLowerCase().includes(q) || s.episode.toLowerCase().includes(q);
 
   return (
-    <Sidebar collapsible="icon" id="v6-rail" aria-label="Navigation" className="top-(--topbar-h) h-[calc(100svh-var(--topbar-h))]">
+    <Sidebar
+      collapsible="icon"
+      id="v6-rail"
+      aria-label="Navigation"
+      className="top-(--topbar-h) h-[calc(100svh-var(--topbar-h))]"
+    >
       <SidebarHeader className="gap-3 px-3 pt-3 group-data-[collapsible=icon]:px-2">
         {active.canWriteShow && (
           <div className="grid grid-cols-2 gap-1.5 group-data-[collapsible=icon]:grid-cols-1">
@@ -121,7 +126,12 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
 
         <div className="[display:none] group-data-[collapsible=icon]:block">
           <StripTooltip label="Search sessions">
-            <Button variant="outline" className="w-full" aria-label="Search sessions" onClick={expandAndFocusSearch}>
+            <Button
+              variant="outline"
+              className="w-full"
+              aria-label="Search sessions"
+              onClick={expandAndFocusSearch}
+            >
               <Search aria-hidden="true" />
             </Button>
           </StripTooltip>
@@ -244,7 +254,10 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        <p className="m-0 truncate text-center font-tc text-[0.625rem] text-muted-foreground select-none" title={`AutoLogger ${APP_VERSION}`}>
+        <p
+          className="m-0 truncate text-center font-tc text-[0.625rem] text-muted-foreground select-none"
+          title={`AutoLogger ${APP_VERSION}`}
+        >
           v{APP_VERSION}
         </p>
       </SidebarFooter>
@@ -271,9 +284,13 @@ function MetaRow({ session: s }: { session: Session }) {
   const runtime = formatFrames(s.elapsedFrames, s.frameRate).replace(/[:;]\d{2}$/, '');
   return (
     <div className={META_ROW}>
-      <span className={CARD_META}>{`${fmtDateOnly(s.episodeDate ?? s.createdAt)} · ${s.eventCount} events`}</span>
+      <span
+        className={CARD_META}
+      >{`${fmtDateOnly(s.episodeDate ?? s.createdAt)} · ${s.eventCount} events`}</span>
       <SimpleTooltip content={live ? 'Current timecode' : 'Total runtime'}>
-        <span className={cn(RUNTIME, live && 'text-foreground!')}>{live ? clock.timecode.replace(/[:;]\d{2}$/, '') : runtime}</span>
+        <span className={cn(RUNTIME, live && 'text-foreground!')}>
+          {live ? clock.timecode.replace(/[:;]\d{2}$/, '') : runtime}
+        </span>
       </SimpleTooltip>
     </div>
   );
@@ -293,8 +310,16 @@ function useSessionActions(s: Session) {
     async archive(archived: boolean) {
       const ok = await confirm(
         archived
-          ? { title: 'Archive session', message: `Archive “${s.title}”? You can restore it later from Archived sessions.`, confirmLabel: 'Archive' }
-          : { title: 'Restore session', message: `Restore “${s.title}” to Recent sessions?`, confirmLabel: 'Restore' },
+          ? {
+              title: 'Archive session',
+              message: `Archive “${s.title}”? You can restore it later from Archived sessions.`,
+              confirmLabel: 'Archive',
+            }
+          : {
+              title: 'Restore session',
+              message: `Restore “${s.title}” to Recent sessions?`,
+              confirmLabel: 'Restore',
+            },
       );
       if (!ok) return;
       archive.mutate(
@@ -330,27 +355,55 @@ function useSessionActions(s: Session) {
   };
 }
 
-function CardMenu({ open, onOpenChange, children }: { open: boolean; onOpenChange: (o: boolean) => void; children: React.ReactNode }) {
+function CardMenu({
+  open,
+  onOpenChange,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  children: React.ReactNode;
+}) {
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange} modal={false}>
       <DropdownMenuTrigger render={<SidebarMenuAction showOnHover aria-label="Session options" />}>
         <MoreVertical aria-hidden="true" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="right" align="start" sideOffset={6} onClick={stop} onKeyDown={stop}>
+      <DropdownMenuContent
+        side="right"
+        align="start"
+        sideOffset={6}
+        onClick={stop}
+        onKeyDown={stop}
+      >
         <DropdownMenuGroup>{children}</DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-function SessionCard({ session: s, isActive, onSelect, onClose }: { session: Session; isActive: boolean; onSelect: () => void; onClose: () => void }) {
+function SessionCard({
+  session: s,
+  isActive,
+  onSelect,
+  onClose,
+}: {
+  session: Session;
+  isActive: boolean;
+  onSelect: () => void;
+  onClose: () => void;
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const actions = useSessionActions(s);
   const canWrite = s.access !== 'read';
   return (
-    <SidebarMenuItem data-session-id={s.id} data-live={s.isRolling || undefined} data-menu-open={menuOpen || undefined}>
+    <SidebarMenuItem
+      data-session-id={s.id}
+      data-live={s.isRolling || undefined}
+      data-menu-open={menuOpen || undefined}
+    >
       <SidebarMenuButton
         size="lg"
         isActive={isActive}
@@ -370,13 +423,17 @@ function SessionCard({ session: s, isActive, onSelect, onClose }: { session: Ses
       <CardMenu open={menuOpen} onOpenChange={setMenuOpen}>
         {isActive && <DropdownMenuItem onClick={onClose}>Close session</DropdownMenuItem>}
         {canWrite && <DropdownMenuItem onClick={() => setRenaming(true)}>Rename</DropdownMenuItem>}
-        {canWrite && <DropdownMenuItem onClick={() => void actions.archive(true)}>Archive</DropdownMenuItem>}
+        {canWrite && (
+          <DropdownMenuItem onClick={() => void actions.archive(true)}>Archive</DropdownMenuItem>
+        )}
         {canWrite && (
           <DropdownMenuItem variant="destructive" onClick={() => void actions.remove()}>
             Delete
           </DropdownMenuItem>
         )}
-        {!canWrite && !isActive && <DropdownMenuItem disabled>Read-only: you can view this show</DropdownMenuItem>}
+        {!canWrite && !isActive && (
+          <DropdownMenuItem disabled>Read-only: you can view this show</DropdownMenuItem>
+        )}
       </CardMenu>
       {renaming && (
         <RenameDialog

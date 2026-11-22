@@ -60,7 +60,13 @@ export const Widget = z.discriminatedUnion('type', [
     horizontal: z.boolean().default(false),
   }),
   z.object({ ...Base, type: z.literal('line'), ...DataSource, x: z.string(), y: z.string() }),
-  z.object({ ...Base, type: z.literal('pie'), ...DataSource, label: z.string(), value: z.string() }),
+  z.object({
+    ...Base,
+    type: z.literal('pie'),
+    ...DataSource,
+    label: z.string(),
+    value: z.string(),
+  }),
   z.object({
     ...Base,
     type: z.literal('table'),

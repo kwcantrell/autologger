@@ -12,7 +12,13 @@ import { useActive } from '@/app/useActive';
 import { PageFrame } from '@/components/RouteState';
 import { Button } from '@/shared/components/ui/button';
 import { Input } from '@/shared/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/shared/components/ui/select';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { SearchSnippet } from './SearchSnippet';
 import {
@@ -41,7 +47,15 @@ function ResultLink({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
-function ResultGroup({ title, children, list = true }: { title: string; children: ReactNode; list?: boolean }) {
+function ResultGroup({
+  title,
+  children,
+  list = true,
+}: {
+  title: string;
+  children: ReactNode;
+  list?: boolean;
+}) {
   const id = useId();
   return (
     <section aria-labelledby={id} className="flex flex-col gap-1">
@@ -66,16 +80,30 @@ function MomentItem({ h }: { h: MomentHit }) {
   );
 }
 
-function SessionMoments({ sessionId, title, moments }: { sessionId: string; title: string; moments: MomentHit[] }) {
+function SessionMoments({
+  sessionId,
+  title,
+  moments,
+}: {
+  sessionId: string;
+  title: string;
+  moments: MomentHit[];
+}) {
   const id = useId();
   const [expanded, setExpanded] = useState(false);
   const shown = expanded ? moments : moments.slice(0, PER_SESSION);
   const more = moments.length - shown.length;
   return (
     <section aria-labelledby={id} className="flex flex-col gap-0.5">
-      <h3 id={id} className="m-0 flex min-w-0 items-baseline gap-2 px-3 pt-1 text-sm font-medium text-si-fg">
+      <h3
+        id={id}
+        className="m-0 flex min-w-0 items-baseline gap-2 px-3 pt-1 text-sm font-medium text-si-fg"
+      >
         <span className="truncate">{untitled(title)}</span>
-        <Link href={sessionHref(sessionId)} className="shrink-0 text-xs font-normal text-si-dim underline-offset-2 hover:text-si-fg hover:underline">
+        <Link
+          href={sessionHref(sessionId)}
+          className="shrink-0 text-xs font-normal text-si-dim underline-offset-2 hover:text-si-fg hover:underline"
+        >
           Open session
         </Link>
       </h3>
@@ -85,7 +113,12 @@ function SessionMoments({ sessionId, title, moments }: { sessionId: string; titl
         ))}
       </ul>
       {more > 0 && (
-        <Button variant="link" size="xs" className="self-start px-3" onClick={() => setExpanded(true)}>
+        <Button
+          variant="link"
+          size="xs"
+          className="self-start px-3"
+          onClick={() => setExpanded(true)}
+        >
           Show {more} more in this session
         </Button>
       )}
@@ -102,12 +135,21 @@ function MomentsBySession({ moments }: { moments: MomentHit[] }) {
       if (list) list.push(m);
       else by.set(k, [m]);
     }
-    return [...by].map(([sessionId, list]) => ({ sessionId, list, title: list[0]?.sessionTitle ?? '' }));
+    return [...by].map(([sessionId, list]) => ({
+      sessionId,
+      list,
+      title: list[0]?.sessionTitle ?? '',
+    }));
   }, [moments]);
   return (
     <div className="flex flex-col gap-3">
       {groups.map((g) => (
-        <SessionMoments key={g.sessionId} sessionId={g.sessionId} title={g.title} moments={g.list} />
+        <SessionMoments
+          key={g.sessionId}
+          sessionId={g.sessionId}
+          title={g.title}
+          moments={g.list}
+        />
       ))}
     </div>
   );
@@ -148,7 +190,10 @@ export function SearchRoute() {
   const multiTeam = teams.length > 1;
   const showItems = [
     { value: ALL, label: 'All shows' },
-    ...allShows.map((s) => ({ value: s.id, label: multiTeam ? `${s.name} · ${s.teamName}` : s.name })),
+    ...allShows.map((s) => ({
+      value: s.id,
+      label: multiTeam ? `${s.name} · ${s.teamName}` : s.name,
+    })),
   ];
 
   const searchable = isSearchable(q);
@@ -173,12 +218,17 @@ export function SearchRoute() {
     );
   } else if (!groups || waiting) {
     body = (
-      <div role="status" className="flex items-center justify-center gap-2 py-10 text-sm text-si-muted">
+      <div
+        role="status"
+        className="flex items-center justify-center gap-2 py-10 text-sm text-si-muted"
+      >
         <Spinner role="presentation" aria-hidden="true" className="size-4" /> Searching…
       </div>
     );
   } else if (!groups.sessions.length && !groups.moments.length && !groups.wiki.length) {
-    body = <p className="m-0 py-10 text-center text-sm text-si-muted">No results for “{q.trim()}”.</p>;
+    body = (
+      <p className="m-0 py-10 text-center text-sm text-si-muted">No results for “{q.trim()}”.</p>
+    );
   } else {
     body = (
       <div className="flex flex-col gap-6">
@@ -208,7 +258,10 @@ export function SearchRoute() {
               <li key={h.id}>
                 <ResultLink href={hitHref(h)}>
                   <span className="flex w-full min-w-0 items-baseline gap-2">
-                    <BookOpenIcon aria-hidden="true" className="size-3.5 shrink-0 self-center text-si-dim" />
+                    <BookOpenIcon
+                      aria-hidden="true"
+                      className="size-3.5 shrink-0 self-center text-si-dim"
+                    />
                     <span className="truncate font-medium text-si-fg">{h.title}</span>
                     <span className="ml-auto shrink-0 text-xs text-si-dim">{h.showName}</span>
                   </span>

@@ -3,7 +3,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-const [base = 'http://localhost:8080', token] = process.argv.slice(2);
+const [base = 'http://localhost:18081', token] = process.argv.slice(2);
 const transport = new StreamableHTTPClientTransport(new URL(`${base.replace(/\/$/, '')}/mcp`), {
   requestInit: { headers: { authorization: `Bearer ${token}` } },
 });

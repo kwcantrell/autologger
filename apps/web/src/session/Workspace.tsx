@@ -6,7 +6,7 @@ import type { LiveStatus } from '@/api/live';
 import { useCapabilities, useCategories, useEvents, useMedia } from '@/api/queries';
 import { errorMessage, rpc } from '@/api/rpc';
 import { isTypingTarget } from '@/lib/keys';
-import { transportStatus, type TransportTint } from '@/lib/store';
+import { type TransportTint, transportStatus } from '@/lib/store';
 import { eventSec, useTransportClock } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
@@ -17,14 +17,16 @@ import { isOverlayOpen } from '@/shared/ui/overlayOpen';
 import { AudioMenu, UploadBanner } from './AudioMenu';
 import { usePlayer } from './audio/usePlayer';
 import { useRecorder } from './audio/useRecorder';
-import { type Workspace as WorkspaceCtx, WorkspaceContext, type WorkspaceTab } from './context';
+import { WorkspaceContext, type Workspace as WorkspaceCtx, type WorkspaceTab } from './context';
+import { TransportStrip } from './TransportStrip';
 import { EventsTab } from './tabs/EventsTab';
 import { ExportTab } from './tabs/ExportTab';
 import { TopicsTab } from './tabs/TopicsTab';
 import { TranscriptTab } from './tabs/TranscriptTab';
-import { TransportStrip } from './TransportStrip';
 
-const DashboardsTab = lazy(() => import('./tabs/DashboardsTab').then((m) => ({ default: m.DashboardsTab })));
+const DashboardsTab = lazy(() =>
+  import('./tabs/DashboardsTab').then((m) => ({ default: m.DashboardsTab })),
+);
 const AgentsTab = lazy(() => import('./tabs/AgentsTab').then((m) => ({ default: m.AgentsTab })));
 
 const TABS: { id: WorkspaceTab; label: string }[] = [
@@ -56,13 +58,22 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
   const recorder = useRecorder(sessionId, () => clockRef.current.elapsedSec);
   const recording = recorder.state === 'recording' || recorder.state === 'starting';
 
-  const tint: TransportTint = recording ? 'recording' : session.isRolling ? 'rolling' : player.isPlaying ? 'playback' : 'stopped';
+  const tint: TransportTint = recording
+    ? 'recording'
+    : session.isRolling
+      ? 'rolling'
+      : player.isPlaying
+        ? 'playback'
+        : 'stopped';
 
   // Publish the shell tint + top-bar pill.
   useEffect(() => {
     transportStatus.set({ state: tint, sessionId, title: session.title });
   }, [tint, sessionId, session.title]);
-  useEffect(() => () => transportStatus.set({ state: 'stopped', sessionId: null, title: null }), []);
+  useEffect(
+    () => () => transportStatus.set({ state: 'stopped', sessionId: null, title: null }),
+    [],
+  );
 
   const switchTab = useCallback((t: WorkspaceTab) => {
     setTab(t);
@@ -123,9 +134,11 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
   // Space: play / pause (not while typing, with an overlay, or on a focused button).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code !== 'Space' || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (e.code !== 'Space' || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey)
+        return;
       if (isTypingTarget(e.target) || isOverlayOpen()) return;
-      if (e.target instanceof HTMLElement && e.target.closest('button,a,[role=slider],[role=tab]')) return;
+      if (e.target instanceof HTMLElement && e.target.closest('button,a,[role=slider],[role=tab]'))
+        return;
       if (session.isRolling) return;
       e.preventDefault();
       void player.toggle();
@@ -156,7 +169,16 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
     else if (topic) switchTab('topics');
     if (t && Number.isFinite(Number(t)) && !session.isRolling) void player.seek(Number(t), false);
     navigate(location.pathname, { replace: true });
-  }, [events.data, media.data, caps?.storage, revealEvent, switchTab, player, session.isRolling, navigate]);
+  }, [
+    events.data,
+    media.data,
+    caps?.storage,
+    revealEvent,
+    switchTab,
+    player,
+    session.isRolling,
+    navigate,
+  ]);
 
   const ctx: WorkspaceCtx = useMemo(
     () => ({ session, caps, canWrite, seek, setTab: switchTab, revealEvent }),
@@ -164,10 +186,15 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
   );
 
   const eventsList = events.data ?? [];
-  const lastEventSec = eventsList.reduce((m, e) => Math.max(m, eventSec(e.timecodeFrames, session) ?? 0), 0);
+  const lastEventSec = eventsList.reduce(
+    (m, e) => Math.max(m, eventSec(e.timecodeFrames, session) ?? 0),
+    0,
+  );
   const audioEnd = player.segments.reduce((m, p) => Math.max(m, p.end), 0);
   const totalSec = Math.max(60, clock.elapsedSec, audioEnd, lastEventSec + 5);
-  const playheadSec = session.isRolling ? clock.elapsedSec : (player.positionSec ?? clock.elapsedSec);
+  const playheadSec = session.isRolling
+    ? clock.elapsedSec
+    : (player.positionSec ?? clock.elapsedSec);
 
   return (
     <WorkspaceContext.Provider value={ctx}>
@@ -175,13 +202,17 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
         id="v3-session-active"
         className="relative flex min-h-[calc(100dvh-var(--topbar-h)-2.2rem)] flex-1 flex-col [overflow-x:clip] max-md:block max-md:min-h-0"
       >
-        <section id="v4-log-session" aria-label="Log session" className="flex w-full min-w-0 flex-1 flex-col gap-5 pt-3 pb-6 [overflow-x:clip] max-md:block">
+        <section
+          id="v4-log-session"
+          aria-label="Log session"
+          className="flex w-full min-w-0 flex-1 flex-col gap-5 pt-3 pb-6 [overflow-x:clip] max-md:block"
+        >
           {live.state === 'reconnecting' && (
             <Alert className="mx-4 w-auto max-md:mx-3" role="status">
               <WifiOffIcon />
               <AlertDescription>
-                Live updates paused — reconnecting to the server (attempt {live.attempt}). Changes from other people and
-                agents will appear once it's back.
+                Live updates paused — reconnecting to the server (attempt {live.attempt}). Changes
+                from other people and agents will appear once it's back.
               </AlertDescription>
             </Alert>
           )}
@@ -205,7 +236,11 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
             onRevealEvent={revealEvent}
           />
 
-          <Tabs value={tab} onValueChange={(v) => switchTab(v as WorkspaceTab)} className="min-h-0 flex-[1_1_0] gap-0">
+          <Tabs
+            value={tab}
+            onValueChange={(v) => switchTab(v as WorkspaceTab)}
+            className="min-h-0 flex-[1_1_0] gap-0"
+          >
             <div className="relative z-0 mx-4 mb-3 flex shrink-0 items-end gap-2 pt-[0.3rem] max-md:mx-3 max-md:overflow-x-auto max-md:overflow-y-hidden max-md:[scrollbar-width:none]">
               <TabsList variant="line" aria-label="Feed tabs" className="max-md:flex-none">
                 {TABS.map((t) => (
@@ -215,7 +250,13 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
                 ))}
               </TabsList>
               <div className="ml-auto flex shrink-0 items-center gap-1">
-                <AudioMenu session={session} caps={caps} canWrite={canWrite} segments={media.data} mediaError={media.error} />
+                <AudioMenu
+                  session={session}
+                  caps={caps}
+                  canWrite={canWrite}
+                  segments={media.data}
+                  mediaError={media.error}
+                />
                 <SessionWikiButton session={session} />
               </div>
             </div>
@@ -228,7 +269,13 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
                 className="relative z-[1] flex min-h-0 flex-1 flex-col"
               >
                 {visited.has(t.id) && (
-                  <Suspense fallback={<div className="flex justify-center py-8"><Spinner /></div>}>
+                  <Suspense
+                    fallback={
+                      <div className="flex justify-center py-8">
+                        <Spinner />
+                      </div>
+                    }
+                  >
                     {t.id === 'events' && (
                       <EventsTab
                         session={session}
@@ -238,7 +285,12 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
                         playheadSec={playheadSec}
                       />
                     )}
-                    {t.id === 'transcript' && <TranscriptTab session={session} playheadSec={player.isPlaying ? player.positionSec : null} />}
+                    {t.id === 'transcript' && (
+                      <TranscriptTab
+                        session={session}
+                        playheadSec={player.isPlaying ? player.positionSec : null}
+                      />
+                    )}
                     {t.id === 'topics' && <TopicsTab session={session} />}
                     {t.id === 'dashboards' && <DashboardsTab session={session} />}
                     {t.id === 'agents' && <AgentsTab session={session} />}
@@ -268,7 +320,10 @@ function SessionWikiButton({ session }: { session: Session }) {
         return;
       }
       if (session.access === 'read') {
-        showToast("This session has no wiki page yet, and you can't create one with read-only access.", true);
+        showToast(
+          "This session has no wiki page yet, and you can't create one with read-only access.",
+          true,
+        );
         return;
       }
       const page = await rpc('wiki.upsert', {
@@ -286,7 +341,13 @@ function SessionWikiButton({ session }: { session: Session }) {
     }
   };
   return (
-    <Button variant="ghost" size="sm" className="text-si-muted hover:text-si-fg" disabled={busy} onClick={() => void open()}>
+    <Button
+      variant="ghost"
+      size="sm"
+      className="text-si-muted hover:text-si-fg"
+      disabled={busy}
+      onClick={() => void open()}
+    >
       {busy ? <Spinner /> : <BookOpenIcon aria-hidden="true" />}
       <span className="max-md:sr-only">Wiki page</span>
     </Button>

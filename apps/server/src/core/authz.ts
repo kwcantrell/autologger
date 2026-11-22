@@ -72,7 +72,11 @@ export async function requireShow(
   const access = await showAccess(ctx, show);
   if (!access) throw notFound('Show');
   if (ACCESS_RANK[access] < ACCESS_RANK[need]) {
-    throw forbidden(need === 'manage' ? 'Only team owners and admins can do this.' : 'You have read-only access to this show.');
+    throw forbidden(
+      need === 'manage'
+        ? 'Only team owners and admins can do this.'
+        : 'You have read-only access to this show.',
+    );
   }
   return { show, access };
 }
@@ -97,7 +101,10 @@ export async function requireSession(
  * SQL condition selecting the shows the actor can read; pass the show id column to filter on.
  * Used by list and search queries.
  */
-export function readableShowCondition(ctx: Ctx, showIdCol: SQL.Aliased | typeof shows.id | typeof sessions.showId | SQL): SQL {
+export function readableShowCondition(
+  ctx: Ctx,
+  showIdCol: SQL.Aliased | typeof shows.id | typeof sessions.showId | SQL,
+): SQL {
   if (ctx.actor.device) return sql`${showIdCol} = ${ctx.actor.device.showId}`;
   if (ctx.actor.user.isSuperadmin) return sql`true`;
   const uid = ctx.actor.user.id;
@@ -113,7 +120,10 @@ export function readableShowCondition(ctx: Ctx, showIdCol: SQL.Aliased | typeof 
 }
 
 /** Access level for many shows at once (for list ops). */
-export async function showAccessMap(ctx: Ctx, showRows: ShowRow[]): Promise<Map<string, ShowAccess>> {
+export async function showAccessMap(
+  ctx: Ctx,
+  showRows: ShowRow[],
+): Promise<Map<string, ShowAccess>> {
   const out = new Map<string, ShowAccess>();
   if (showRows.length === 0) return out;
   const teamIds = [...new Set(showRows.map((s) => s.teamId))];
@@ -137,12 +147,14 @@ export async function showAccessMap(ctx: Ctx, showRows: ShowRow[]): Promise<Map<
     let a: ShowAccess | null = null;
     if (ctx.actor.user.isSuperadmin || role === 'owner' || role === 'admin') a = 'manage';
     else if (role && grantByShow.has(s.id)) a = grantByShow.get(s.id) ? 'write' : 'read';
-    if (ctx.actor.device) a = ctx.actor.device.showId === s.id && a ? (a === 'manage' ? 'write' : a) : null;
+    if (ctx.actor.device)
+      a = ctx.actor.device.showId === s.id && a ? (a === 'manage' ? 'write' : a) : null;
     if (a) out.set(s.id, a);
   }
   return out;
 }
 
 export function requireSuperadmin(ctx: Ctx): void {
-  if (!ctx.actor.user.isSuperadmin || ctx.actor.device) throw forbidden('Only instance administrators can do this.');
+  if (!ctx.actor.user.isSuperadmin || ctx.actor.device)
+    throw forbidden('Only instance administrators can do this.');
 }

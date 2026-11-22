@@ -12,7 +12,10 @@ const { topics } = schema;
 type TopicRow = typeof topics.$inferSelect;
 
 async function entities(ctx: Ctx, rows: TopicRow[]): Promise<Topic[]> {
-  const users = await userRefs(ctx.db, rows.map((r) => r.createdBy));
+  const users = await userRefs(
+    ctx.db,
+    rows.map((r) => r.createdBy),
+  );
   return rows.map((r) => toTopic(r, users));
 }
 
@@ -23,9 +26,20 @@ async function loadTopic(ctx: Ctx, topicId: string) {
   return { row, session };
 }
 
-type TopicFields = { startSec: number; durationSec: number; level: number; title: string; summary: string };
+type TopicFields = {
+  startSec: number;
+  durationSec: number;
+  level: number;
+  title: string;
+  summary: string;
+};
 
-async function insertTopic(ctx: Ctx, sessionId: string, showId: string, t: TopicFields): Promise<TopicRow> {
+async function insertTopic(
+  ctx: Ctx,
+  sessionId: string,
+  showId: string,
+  t: TopicFields,
+): Promise<TopicRow> {
   const [row] = await ctx.db
     .insert(topics)
     .values({ id: newId('top'), sessionId, ...t, via: ctx.actor.via, createdBy: ctx.actor.user.id })
@@ -44,19 +58,25 @@ async function insertTopic(ctx: Ctx, sessionId: string, showId: string, t: Topic
 
 defineOp({
   name: 'topics.list',
-  description: 'Topics (chapters) of a session in time order. Level 1 = major segment, 2–3 = sub-topics.',
+  description:
+    'Topics (chapters) of a session in time order. Level 1 = major segment, 2–3 = sub-topics.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId }) {
     await requireSession(ctx, sessionId, 'read');
-    const rows = await ctx.db.select().from(topics).where(eq(topics.sessionId, sessionId)).orderBy(asc(topics.startSec), asc(topics.level));
+    const rows = await ctx.db
+      .select()
+      .from(topics)
+      .where(eq(topics.sessionId, sessionId))
+      .orderBy(asc(topics.startSec), asc(topics.level));
     return entities(ctx, rows);
   },
 });
 
 defineOp({
   name: 'topics.create',
-  description: 'Add one topic. startSec/durationSec are seconds from session start (as shown in transcript.text).',
+  description:
+    'Add one topic. startSec/durationSec are seconds from session start (as shown in transcript.text).',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, ...t }) {
@@ -89,7 +109,8 @@ defineOp({
       });
     }
     const rows: TopicRow[] = [];
-    for (const t of [...list].sort((a, b) => a.startSec - b.startSec)) rows.push(await insertTopic(ctx, sessionId, session.showId, t));
+    for (const t of [...list].sort((a, b) => a.startSec - b.startSec))
+      rows.push(await insertTopic(ctx, sessionId, session.showId, t));
     ctx.publish(`session:${sessionId}`, { type: 'invalidate', entity: 'topic' });
     return entities(ctx, rows);
   },
@@ -103,7 +124,11 @@ defineOp({
   async run(ctx, { topicId, ...patch }) {
     const { row, session } = await loadTopic(ctx, topicId);
     const set = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
-    const [after] = await ctx.db.update(topics).set({ ...set, updatedAt: new Date() }).where(eq(topics.id, topicId)).returning();
+    const [after] = await ctx.db
+      .update(topics)
+      .set({ ...set, updatedAt: new Date() })
+      .where(eq(topics.id, topicId))
+      .returning();
     await ctx.record({
       entity: 'topic',
       entityId: topicId,

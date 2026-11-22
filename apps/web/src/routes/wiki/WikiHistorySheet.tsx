@@ -5,11 +5,17 @@ import type { WikiPage } from '@autologger/contract';
 import { useState } from 'react';
 import { useWikiRevisions } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
+import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/shared/components/ui/sheet';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/shared/components/ui/sheet';
 import { Spinner } from '@/shared/components/ui/spinner';
-import { showToast } from '@/shared/components/Toast';
 import { cn } from '@/shared/lib/utils';
 import { DiffFigure } from './wikiDiff';
 import { fmtWhen, useWikiRestore } from './wikiShared';
@@ -61,7 +67,8 @@ export function WikiHistorySheet({ page, open, onOpenChange, canWrite }: Props) 
         <SheetHeader>
           <SheetTitle>History</SheetTitle>
           <SheetDescription>
-            {page.title}, now at r{page.revision}. Choose a revision to compare it with the current page.
+            {page.title}, now at r{page.revision}. Choose a revision to compare it with the current
+            page.
           </SheetDescription>
         </SheetHeader>
 
@@ -90,8 +97,12 @@ export function WikiHistorySheet({ page, open, onOpenChange, canWrite }: Props) 
                     onClick={() => setChosen(r.revision)}
                     className={cn(REVISION_ROW, chosen === r.revision && 'bg-si-panel-2')}
                   >
-                    <span className="shrink-0 font-mono text-xs text-si-dim tabular-nums">r{r.revision}</span>
-                    <span className="min-w-0 flex-1 truncate text-si-fg">{r.author?.name ?? 'Unknown'}</span>
+                    <span className="shrink-0 font-mono text-xs text-si-dim tabular-nums">
+                      r{r.revision}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-si-fg">
+                      {r.author?.name ?? 'Unknown'}
+                    </span>
                     {r.via === 'mcp' && (
                       <Badge variant="outline" className="shrink-0 self-center">
                         agent
@@ -118,9 +129,18 @@ export function WikiHistorySheet({ page, open, onOpenChange, canWrite }: Props) 
                       Title then: <span className="text-si-fg">{rev.title}</span>
                     </p>
                   )}
-                  <DiffFigure from={rev.bodyMd} to={page.bodyMd} label={`Changes from r${rev.revision} to the current page`} />
+                  <DiffFigure
+                    from={rev.bodyMd}
+                    to={page.bodyMd}
+                    label={`Changes from r${rev.revision} to the current page`}
+                  />
                   {canWrite && (
-                    <Button size="sm" className="self-start" disabled={restore.isPending} onClick={() => doRestore(rev.revision)}>
+                    <Button
+                      size="sm"
+                      className="self-start"
+                      disabled={restore.isPending}
+                      onClick={() => doRestore(rev.revision)}
+                    >
                       {restore.isPending && <Spinner role="presentation" aria-hidden="true" />}
                       Restore r{rev.revision}
                     </Button>

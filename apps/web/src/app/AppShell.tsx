@@ -2,22 +2,38 @@ import { lazy, Suspense, useEffect } from 'react';
 import { Route, Switch, useLocation, useRoute } from 'wouter';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { RouteLoadingState, RouteState } from '@/components/RouteState';
-import { newSessionOpen, settingsOpen, shortcutsOpen, transportStatus, useStore } from '@/lib/store';
 import { isTypingTarget } from '@/lib/keys';
-import { Button } from '@/shared/components/ui/button';
-import { SidebarProvider, useSidebar } from '@/shared/components/ui/sidebar';
-import { isOverlayOpen } from '@/shared/ui/overlayOpen';
+import {
+  newSessionOpen,
+  settingsOpen,
+  shortcutsOpen,
+  transportStatus,
+  useStore,
+} from '@/lib/store';
 import { HomeRoute } from '@/routes/HomeRoute';
 import { NewSessionModal } from '@/routes/NewSessionModal';
 import { ShortcutsDialog } from '@/session/ShortcutsDialog';
+import { Button } from '@/shared/components/ui/button';
+import { SidebarProvider, useSidebar } from '@/shared/components/ui/sidebar';
+import { isOverlayOpen } from '@/shared/ui/overlayOpen';
 import { Rail } from './Rail';
 import { TopBar } from './TopBar';
 
-const SessionRoute = lazy(() => import('@/session/SessionRoute').then((m) => ({ default: m.SessionRoute })));
-const SearchRoute = lazy(() => import('@/routes/search/SearchRoute').then((m) => ({ default: m.SearchRoute })));
-const WikiRoute = lazy(() => import('@/routes/wiki/WikiRoute').then((m) => ({ default: m.WikiRoute })));
-const WikiPageView = lazy(() => import('@/routes/wiki/WikiPageView').then((m) => ({ default: m.WikiPageView })));
-const SettingsView = lazy(() => import('@/settings/SettingsView').then((m) => ({ default: m.SettingsView })));
+const SessionRoute = lazy(() =>
+  import('@/session/SessionRoute').then((m) => ({ default: m.SessionRoute })),
+);
+const SearchRoute = lazy(() =>
+  import('@/routes/search/SearchRoute').then((m) => ({ default: m.SearchRoute })),
+);
+const WikiRoute = lazy(() =>
+  import('@/routes/wiki/WikiRoute').then((m) => ({ default: m.WikiRoute })),
+);
+const WikiPageView = lazy(() =>
+  import('@/routes/wiki/WikiPageView').then((m) => ({ default: m.WikiPageView })),
+);
+const SettingsView = lazy(() =>
+  import('@/settings/SettingsView').then((m) => ({ default: m.SettingsView })),
+);
 
 /** `[` toggles the rail (not while typing or with an overlay other than Settings open). */
 function SidebarShortcut() {
@@ -25,7 +41,8 @@ function SidebarShortcut() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== '[' || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (isTypingTarget(e.target) || isOverlayOpen(document, '[data-slot="settings-view"]')) return;
+      if (isTypingTarget(e.target) || isOverlayOpen(document, '[data-slot="settings-view"]'))
+        return;
       e.preventDefault();
       toggleSidebar();
     };
@@ -95,9 +112,15 @@ export function AppShell() {
       <SidebarShortcut />
       <ShortcutsKey />
       <TopBar />
-      <div id="v6-app" className="flex min-h-0 w-full min-w-0 flex-1 flex-row items-stretch overflow-hidden max-md:block max-md:overflow-visible">
+      <div
+        id="v6-app"
+        className="flex min-h-0 w-full min-w-0 flex-1 flex-row items-stretch overflow-hidden max-md:block max-md:overflow-visible"
+      >
         <Rail activeSessionId={activeSessionId} />
-        <main id="v3-main" className="relative m-0 block min-h-0 w-full min-w-0 max-w-none flex-1 [overflow-x:clip] overflow-y-visible md:overflow-y-auto">
+        <main
+          id="v3-main"
+          className="relative m-0 block min-h-0 w-full min-w-0 max-w-none flex-1 [overflow-x:clip] overflow-y-visible md:overflow-y-auto"
+        >
           {showNew && <NewSessionModal onClose={() => newSessionOpen.set(false)} />}
           {settings && (
             <ErrorBoundary>
@@ -118,7 +141,9 @@ export function AppShell() {
                 </Route>
                 <Route path="/search" component={SearchRoute} />
                 <Route path="/wiki" component={WikiRoute} />
-                <Route path="/wiki/:pageId">{(p) => <WikiPageView pageId={decodeURIComponent(p.pageId)} />}</Route>
+                <Route path="/wiki/:pageId">
+                  {(p) => <WikiPageView pageId={decodeURIComponent(p.pageId)} />}
+                </Route>
                 <Route component={NotFound} />
               </Switch>
             </Suspense>

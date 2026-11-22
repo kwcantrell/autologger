@@ -46,7 +46,9 @@ const ws = new WebSocket(`${base.replace('http', 'ws')}/ws/companion`, {
 });
 const queue = [];
 ws.on('message', (raw) => queue.push(JSON.parse(String(raw))));
-const closed = new Promise((r) => ws.on('close', (code, reason) => r({ code, reason: String(reason) })));
+const closed = new Promise((r) =>
+  ws.on('close', (code, reason) => r({ code, reason: String(reason) })),
+);
 async function next(pred, label, ms = 3000) {
   const t0 = Date.now();
   for (;;) {
@@ -76,7 +78,10 @@ assert(st.state.session.take === 1, 'state push isRolling take 1');
 
 r = await op('events.create', { categoryId: cats[0].id, message: 'from deck' });
 assert(r.ok && r.data.source === 'companion', 'events.create result (source companion)');
-st = await next((m) => m.type === 'state' && m.state.lastEvent?.id === r.data.id, 'lastEvent state');
+st = await next(
+  (m) => m.type === 'state' && m.state.lastEvent?.id === r.data.id,
+  'lastEvent state',
+);
 assert(st.state.session.eventCount === 1, 'state lastEvent + eventCount');
 
 r = await op('sessions.delete', { sessionId: s1.id });
@@ -87,7 +92,10 @@ st = await next((m) => m.type === 'state' && m.state.session?.id === s1.id, 'ret
 assert(!st.state.session.isRolling, 'setTarget → new state for first session');
 r = await op('transport.start', {});
 assert(r.ok && r.data.id === s1.id, 'ops now default to new target');
-await next((m) => m.type === 'state' && m.state.session?.id === s1.id && m.state.session.isRolling, 'rolling s1');
+await next(
+  (m) => m.type === 'state' && m.state.session?.id === s1.id && m.state.session.isRolling,
+  'rolling s1',
+);
 
 await rpc('companion.revoke', { deviceId: device.id });
 const c = await closed;

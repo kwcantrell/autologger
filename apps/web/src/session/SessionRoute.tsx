@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useLocation } from 'wouter';
-import { qk, useOpMutation, useSession, useShows } from '@/api/queries';
 import { useLiveSession } from '@/api/live';
+import { qk, useOpMutation, useSession, useShows } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { selectShow } from '@/app/useActive';
 import { RouteLoadingState, RouteState } from '@/components/RouteState';
@@ -21,7 +21,9 @@ function BackToSessions() {
 export function SessionRoute({ sessionId }: { sessionId: string }) {
   const q = useSession(sessionId);
   const live = useLiveSession(q.data && !q.data.archivedAt ? sessionId : undefined);
-  const restore = useOpMutation('sessions.archive', { invalidate: () => [qk.sessionsAll, qk.session(sessionId)] });
+  const restore = useOpMutation('sessions.archive', {
+    invalidate: () => [qk.sessionsAll, qk.session(sessionId)],
+  });
   const s = q.data;
   const shows = useShows().data;
 
@@ -33,7 +35,12 @@ export function SessionRoute({ sessionId }: { sessionId: string }) {
 
   if (live.state === 'closed' && live.reason !== 'unauthenticated') {
     return (
-      <RouteState frame="route" role="status" title={live.reason === 'deleted' ? 'Session deleted' : 'Access removed'} actions={<BackToSessions />}>
+      <RouteState
+        frame="route"
+        role="status"
+        title={live.reason === 'deleted' ? 'Session deleted' : 'Access removed'}
+        actions={<BackToSessions />}
+      >
         {live.reason === 'deleted'
           ? 'Someone deleted this session while you had it open.'
           : 'Your access to this show was removed while the session was open. Ask a team owner or admin if that is a mistake.'}
@@ -44,9 +51,14 @@ export function SessionRoute({ sessionId }: { sessionId: string }) {
   if (q.isError) {
     if (q.error.code === 'not_found' || q.error.code === 'forbidden') {
       return (
-        <RouteState frame="route" role="status" title="Session not found" actions={<BackToSessions />}>
-          There's no session at this link that you can open. It may have been removed, the link may be wrong, or it
-          belongs to a show you haven't been given access to.
+        <RouteState
+          frame="route"
+          role="status"
+          title="Session not found"
+          actions={<BackToSessions />}
+        >
+          There's no session at this link that you can open. It may have been removed, the link may
+          be wrong, or it belongs to a show you haven't been given access to.
         </RouteState>
       );
     }
@@ -57,14 +69,19 @@ export function SessionRoute({ sessionId }: { sessionId: string }) {
         title="Couldn't load session"
         actions={
           <>
-            <Button className="h-11 w-full" disabled={q.isFetching} onClick={() => void q.refetch()}>
+            <Button
+              className="h-11 w-full"
+              disabled={q.isFetching}
+              onClick={() => void q.refetch()}
+            >
               {q.isFetching ? 'Retrying…' : 'Try again'}
             </Button>
             <BackToSessions />
           </>
         }
       >
-        Something went wrong loading this session ({errorMessage(q.error)}). Check your connection and try again.
+        Something went wrong loading this session ({errorMessage(q.error)}). Check your connection
+        and try again.
       </RouteState>
     );
   }
@@ -85,7 +102,10 @@ export function SessionRoute({ sessionId }: { sessionId: string }) {
                 onClick={() =>
                   restore.mutate(
                     { sessionId, archived: false },
-                    { onError: (e) => showToast(`Couldn't restore the session. ${errorMessage(e)}`, true) },
+                    {
+                      onError: (e) =>
+                        showToast(`Couldn't restore the session. ${errorMessage(e)}`, true),
+                    },
                   )
                 }
               >
@@ -97,7 +117,9 @@ export function SessionRoute({ sessionId }: { sessionId: string }) {
         }
       >
         This session is archived.{' '}
-        {s.access !== 'read' ? 'Restore it to open the workspace.' : 'Ask someone with write access to the show to restore it.'}
+        {s.access !== 'read'
+          ? 'Restore it to open the workspace.'
+          : 'Ask someone with write access to the show to restore it.'}
       </RouteState>
     );
   }

@@ -31,7 +31,10 @@ const id = z.string().min(1).max(64);
 const name = z.string().trim().min(1).max(200);
 const teamRole = z.enum(['owner', 'admin', 'member']);
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
-const sec = z.number().min(0).max(7 * 24 * 3600);
+const sec = z
+  .number()
+  .min(0)
+  .max(7 * 24 * 3600);
 /** A timecode string `HH:MM:SS[:FF]` in the session's frame rate. */
 const timecode = z.string().regex(/^\d{1,2}:\d{2}:\d{2}(?:[:;.]\d{2})?$/);
 
@@ -77,7 +80,11 @@ export const opInputs = {
   'teams.create': z.object({ name }),
   'teams.rename': z.object({ teamId: id, name }),
   'teams.delete': z.object({ teamId: id }),
-  'teams.invite': z.object({ teamId: id, email: z.email(), role: teamRole.exclude(['owner']).default('member') }),
+  'teams.invite': z.object({
+    teamId: id,
+    email: z.email(),
+    role: teamRole.exclude(['owner']).default('member'),
+  }),
   'teams.revokeInvite': z.object({ teamId: id, email: z.email() }),
   'teams.setRole': z.object({ teamId: id, userId: id, role: teamRole.exclude(['owner']) }),
   'teams.removeMember': z.object({ teamId: id, userId: id }),
@@ -205,7 +212,11 @@ export const opInputs = {
     showId: id,
     kind: z.enum(['person', 'topic', 'bit', 'session']).optional(),
   }),
-  'wiki.get': z.object({ pageId: id.optional(), showId: id.optional(), title: z.string().optional() }),
+  'wiki.get': z.object({
+    pageId: id.optional(),
+    showId: id.optional(),
+    title: z.string().optional(),
+  }),
   'wiki.upsert': z.object({
     showId: id,
     pageId: id.optional(),
@@ -227,7 +238,12 @@ export const opInputs = {
     origin: z.enum(['recorded', 'file']),
     fileName: z.string().max(300).optional(),
     startSec: sec.optional(),
-    sizeBytes: z.number().int().positive().max(5 * 1024 ** 3).optional(),
+    sizeBytes: z
+      .number()
+      .int()
+      .positive()
+      .max(5 * 1024 ** 3)
+      .optional(),
   }),
   'media.completeUpload': z.object({ segmentId: id, durationSec: sec.optional() }),
   'media.playbackUrl': z.object({ segmentId: id }),
@@ -256,7 +272,10 @@ export const opInputs = {
 
   // ── tokens (agents) ───────────────────────────────────────
   'tokens.list': z.object({}),
-  'tokens.createPat': z.object({ name, expiresInDays: z.number().int().min(1).max(3650).optional() }),
+  'tokens.createPat': z.object({
+    name,
+    expiresInDays: z.number().int().min(1).max(3650).optional(),
+  }),
   'tokens.revoke': z.object({ tokenId: id }),
 
   // ── companion devices ─────────────────────────────────────
@@ -282,7 +301,15 @@ export interface CompanionState {
   show: { id: string; name: string } | null;
   session: Pick<
     Session,
-    'id' | 'title' | 'isRolling' | 'rollStartedAt' | 'elapsedFrames' | 'take' | 'frameRate' | 'startOffsetFrames' | 'eventCount'
+    | 'id'
+    | 'title'
+    | 'isRolling'
+    | 'rollStartedAt'
+    | 'elapsedFrames'
+    | 'take'
+    | 'frameRate'
+    | 'startOffsetFrames'
+    | 'eventCount'
   > | null;
   categories: Category[];
   lastEvent: Pick<SessionEvent, 'id' | 'category' | 'message' | 'timecodeFrames'> | null;
@@ -348,7 +375,11 @@ export interface OpOutputs {
   'wiki.revisions': WikiRevision[];
   'wiki.restore': WikiPage;
   'media.list': AudioSegment[];
-  'media.createUpload': { segment: AudioSegment; uploadUrl: string; headers: Record<string, string> };
+  'media.createUpload': {
+    segment: AudioSegment;
+    uploadUrl: string;
+    headers: Record<string, string>;
+  };
   'media.completeUpload': AudioSegment;
   'media.playbackUrl': { url: string; expiresAt: string };
   'media.importYoutube': Job;
@@ -378,7 +409,14 @@ const _check: [_MissingOutputs, _ExtraOutputs] extends [never, never] ? true : n
 void _check;
 
 export interface RpcError {
-  code: 'bad_request' | 'unauthenticated' | 'forbidden' | 'not_found' | 'conflict' | 'unavailable' | 'internal';
+  code:
+    | 'bad_request'
+    | 'unauthenticated'
+    | 'forbidden'
+    | 'not_found'
+    | 'conflict'
+    | 'unavailable'
+    | 'internal';
   message: string;
   issues?: { path: string; message: string }[];
 }

@@ -20,7 +20,7 @@ const LOGIN_ERRORS: Record<string, string> = {
 
 /** Only same-site relative paths are allowed as post-login destinations. */
 export function safeReturn(path: string | null | undefined): string {
-  if (!path || !path.startsWith('/') || path.startsWith('//') || path.startsWith('/login')) return '/';
+  if (!path?.startsWith('/') || path.startsWith('//') || path.startsWith('/login')) return '/';
   return path;
 }
 
@@ -48,10 +48,22 @@ const BTN_CREATE =
 function GoogleGMark() {
   return (
     <svg className="block shrink-0" width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
-      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6C44.98 37.03 48 31.06 48 24c0-1.67-.14-3.29-.41-4.84z" />
-      <path fill="#FBBC05" d="M6.99 29.16c-.65-1.95-1-4.02-1-6.16 0-2.15.35-4.22 1-6.16l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.35L6.99 29.16z" />
-      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.35 0-11.72-4.27-13.59-10.08l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+      <path
+        fill="#EA4335"
+        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+      />
+      <path
+        fill="#4285F4"
+        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6C44.98 37.03 48 31.06 48 24c0-1.67-.14-3.29-.41-4.84z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M6.99 29.16c-.65-1.95-1-4.02-1-6.16 0-2.15.35-4.22 1-6.16l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.35L6.99 29.16z"
+      />
+      <path
+        fill="#34A853"
+        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.35 0-11.72-4.27-13.59-10.08l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+      />
     </svg>
   );
 }
@@ -104,7 +116,10 @@ export function LoginPage() {
           </p>
 
           {errorCode && (
-            <Alert variant="destructive" className="mt-6 block border-(--si-danger-line) text-left *:data-[slot=alert-description]:text-si-danger">
+            <Alert
+              variant="destructive"
+              className="mt-6 block border-(--si-danger-line) text-left *:data-[slot=alert-description]:text-si-danger"
+            >
               <AlertDescription className="m-0 block text-[0.85rem] leading-[1.45]">
                 {LOGIN_ERRORS[errorCode] ?? "Sign-in didn't complete."}
               </AlertDescription>
@@ -141,14 +156,18 @@ export function LoginPage() {
                 Create an account with Google
               </a>
               <p className="mx-auto mt-4 mb-0 max-w-[20rem] text-[0.78rem] leading-[1.5] text-si-dim">
-                Your account is created automatically the first time you sign in with Google. New accounts wait for an
-                administrator's approval unless you were invited to a team.
+                Your account is created automatically the first time you sign in with Google. New
+                accounts wait for an administrator's approval unless you were invited to a team.
               </p>
             </>
           )}
 
           {c?.devLogin && (
-            <form onSubmit={onDevLogin} className="mt-7 flex flex-col gap-2 text-left" aria-label="Development sign-in">
+            <form
+              onSubmit={onDevLogin}
+              className="mt-7 flex flex-col gap-2 text-left"
+              aria-label="Development sign-in"
+            >
               {c.googleAuth && <Separator className="mb-4 bg-si-line" />}
               <p className="m-0 text-[0.625rem] font-semibold uppercase tracking-[0.18em] text-si-muted">
                 Development sign-in
@@ -175,7 +194,8 @@ export function LoginPage() {
                 {busy ? 'Signing in…' : 'Sign in'}
               </Button>
               <p className="m-0 text-[0.78rem] leading-[1.5] text-si-dim">
-                This server has DEV_LOGIN on: anyone can sign in as any email. Never enable it in production.
+                This server has DEV_LOGIN on: anyone can sign in as any email. Never enable it in
+                production.
               </p>
             </form>
           )}
@@ -183,8 +203,8 @@ export function LoginPage() {
           {c && !c.googleAuth && !c.devLogin && (
             <Alert className="mt-6 text-left">
               <AlertDescription>
-                No sign-in method is configured on this server. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (or
-                DEV_LOGIN=1 for local development) and restart it.
+                No sign-in method is configured on this server. Set GOOGLE_CLIENT_ID and
+                GOOGLE_CLIENT_SECRET (or DEV_LOGIN=1 for local development) and restart it.
               </AlertDescription>
             </Alert>
           )}

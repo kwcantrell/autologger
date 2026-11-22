@@ -31,7 +31,11 @@ export function RootGate() {
         role="alert"
         title="AutoLogger"
         actions={
-          <Button className="h-11 w-full" disabled={me.isFetching} onClick={() => void me.refetch()}>
+          <Button
+            className="h-11 w-full"
+            disabled={me.isFetching}
+            onClick={() => void me.refetch()}
+          >
             {me.isFetching ? 'Retrying…' : 'Try again'}
           </Button>
         }
@@ -40,7 +44,8 @@ export function RootGate() {
       </RouteState>
     );
   }
-  if (!me.data) return <Redirect to={`/login?return=${encodeURIComponent(currentPath())}`} replace />;
+  if (!me.data)
+    return <Redirect to={`/login?return=${encodeURIComponent(currentPath())}`} replace />;
 
   if (me.data.status === 'pending') {
     return (
@@ -78,14 +83,16 @@ function PendingApproval({
   return (
     <div className={GATE_PAGE}>
       <Card className={PANEL} role="status">
-        <p className="m-0 text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-si-muted">Waiting for approval</p>
+        <p className="m-0 text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-si-muted">
+          Waiting for approval
+        </p>
         <h1 className="m-0 mt-2 font-league-gothic text-[2.25rem] font-bold uppercase leading-none tracking-[0.02em]">
           AutoLogger
         </h1>
         <p className="mx-auto mt-3 mb-0 max-w-[20rem] text-[0.9rem] leading-[1.5] text-si-muted">
-          You're signed in as <span className="text-si-fg">{email}</span>. An administrator of this AutoLogger server
-          has to approve new accounts before they can open shows. You'll get in as soon as they do; joining a team you
-          were invited to approves you automatically.
+          You're signed in as <span className="text-si-fg">{email}</span>. An administrator of this
+          AutoLogger server has to approve new accounts before they can open shows. You'll get in as
+          soon as they do; joining a team you were invited to approves you automatically.
         </p>
         <div className="mt-6 flex w-full flex-col gap-3">
           <Button className="h-11 w-full" onClick={onRefresh} disabled={refreshing}>

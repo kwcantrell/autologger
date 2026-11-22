@@ -42,7 +42,9 @@ export function TopicsTab({ session }: { session: Session }) {
 
   const insert = async () => {
     try {
-      const at = topics.length ? topics[topics.length - 1]!.startSec + Math.max(1, topics[topics.length - 1]!.durationSec) : 0;
+      const at = topics.length
+        ? topics[topics.length - 1]!.startSec + Math.max(1, topics[topics.length - 1]!.durationSec)
+        : 0;
       await rpc('topics.create', { sessionId: session.id, startSec: at, title: 'New topic' });
     } catch (e) {
       showToast(errorMessage(e), true);
@@ -64,9 +66,9 @@ export function TopicsTab({ session }: { session: Session }) {
         <div className={cn(FEED_EMPTY, 'flex flex-col items-center gap-3')}>
           <BotIcon className="size-6 text-si-dim" aria-hidden="true" />
           <p className="m-0 max-w-[34rem]">
-            No topics yet. AutoLogger doesn't generate topics itself: an agent connected over MCP (Claude Code, claude.ai or
-            Claude Desktop) reads the transcript and events and writes the topics here, as you. You can also insert them by
-            hand.
+            No topics yet. AutoLogger doesn't generate topics itself: an agent connected over MCP
+            (Claude Code, claude.ai or Claude Desktop) reads the transcript and events and writes
+            the topics here, as you. You can also insert them by hand.
           </p>
           <Button variant="outline" size="sm" onClick={() => settingsOpen.set('agents')}>
             Settings → Agents
@@ -88,7 +90,9 @@ export function TopicsTab({ session }: { session: Session }) {
       }
     >
       {q.isError ? (
-        <p className="m-0 text-sm text-si-danger">Couldn't load the topics. {errorMessage(q.error)}</p>
+        <p className="m-0 text-sm text-si-danger">
+          Couldn't load the topics. {errorMessage(q.error)}
+        </p>
       ) : (
         <FeedTable
           columns={[
@@ -109,8 +113,17 @@ export function TopicsTab({ session }: { session: Session }) {
               rolling={session.isRolling}
               onJump={(sec) => seek(sec, true)}
               onDelete={async () => {
-                if (await confirm({ title: 'Delete topic', message: `Delete “${t.title}”? It can be restored from the Agents tab change log.`, confirmLabel: 'Delete', danger: true })) {
-                  rpc('topics.delete', { topicId: t.id }).catch((e) => showToast(errorMessage(e), true));
+                if (
+                  await confirm({
+                    title: 'Delete topic',
+                    message: `Delete “${t.title}”? It can be restored from the Agents tab change log.`,
+                    confirmLabel: 'Delete',
+                    danger: true,
+                  })
+                ) {
+                  rpc('topics.delete', { topicId: t.id }).catch((e) =>
+                    showToast(errorMessage(e), true),
+                  );
                 }
               }}
             />
@@ -122,7 +135,19 @@ export function TopicsTab({ session }: { session: Session }) {
   );
 }
 
-function TopicRow({ t, canWrite, rolling, onJump, onDelete }: { t: Topic; canWrite: boolean; rolling: boolean; onJump: (s: number) => void; onDelete: () => void }) {
+function TopicRow({
+  t,
+  canWrite,
+  rolling,
+  onJump,
+  onDelete,
+}: {
+  t: Topic;
+  canWrite: boolean;
+  rolling: boolean;
+  onJump: (s: number) => void;
+  onDelete: () => void;
+}) {
   const [start, setStart] = useState(fmtSec(t.startSec));
   const [dur, setDur] = useState(String(Math.round(t.durationSec)));
   const [level, setLevel] = useState(String(t.level));
@@ -153,7 +178,12 @@ function TopicRow({ t, canWrite, rolling, onJump, onDelete }: { t: Topic; canWri
   return (
     <tr className={cn(FEED_ROW, 'group')}>
       <td className={cn(FEED_CELL, 'align-top pt-1')}>
-        <JumpButton sec={t.startSec} label={fmtSec(t.startSec)} onJump={onJump} unavailable={rolling ? 'Playback is off while timecode rolls.' : null} />
+        <JumpButton
+          sec={t.startSec}
+          label={fmtSec(t.startSec)}
+          onJump={onJump}
+          unavailable={rolling ? 'Playback is off while timecode rolls.' : null}
+        />
       </td>
       <td className={cn(FEED_CELL, FEED_TC, 'align-top')}>
         <input
@@ -186,7 +216,8 @@ function TopicRow({ t, canWrite, rolling, onJump, onDelete }: { t: Topic; canWri
           onChange={(e) => setDur(e.target.value)}
           onBlur={() => {
             const n = Number(dur);
-            if (Number.isFinite(n) && n >= 0 && Math.round(n) !== Math.round(t.durationSec)) void save({ durationSec: n });
+            if (Number.isFinite(n) && n >= 0 && Math.round(n) !== Math.round(t.durationSec))
+              void save({ durationSec: n });
           }}
         />
       </td>
@@ -221,7 +252,11 @@ function TopicRow({ t, canWrite, rolling, onJump, onDelete }: { t: Topic; canWri
             }}
           />
           {t.via === 'mcp' && (
-            <Badge variant="outline" className="shrink-0 px-1 py-px text-[0.6rem]" title={`Written by an agent${t.createdBy ? ` acting as ${t.createdBy.name}` : ''}`}>
+            <Badge
+              variant="outline"
+              className="shrink-0 px-1 py-px text-[0.6rem]"
+              title={`Written by an agent${t.createdBy ? ` acting as ${t.createdBy.name}` : ''}`}
+            >
               agent
             </Badge>
           )}

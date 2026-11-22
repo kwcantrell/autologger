@@ -41,7 +41,10 @@ export function lineDiff(from: string, to: string): DiffLine[] {
   const lcs = new Uint32Array((n + 1) * w);
   for (let i = n - 1; i >= 0; i--)
     for (let j = m - 1; j >= 0; j--)
-      lcs[i * w + j] = ma[i] === mb[j] ? (lcs[(i + 1) * w + j + 1] ?? 0) + 1 : Math.max(lcs[(i + 1) * w + j] ?? 0, lcs[i * w + j + 1] ?? 0);
+      lcs[i * w + j] =
+        ma[i] === mb[j]
+          ? (lcs[(i + 1) * w + j + 1] ?? 0) + 1
+          : Math.max(lcs[(i + 1) * w + j] ?? 0, lcs[i * w + j + 1] ?? 0);
   let i = 0;
   let j = 0;
   while (i < n && j < m) {
@@ -49,7 +52,8 @@ export function lineDiff(from: string, to: string): DiffLine[] {
       mid.push({ kind: 'same', text: ma[i] ?? '' });
       i++;
       j++;
-    } else if ((lcs[(i + 1) * w + j] ?? 0) >= (lcs[i * w + j + 1] ?? 0)) mid.push({ kind: 'removed', text: ma[i++] ?? '' });
+    } else if ((lcs[(i + 1) * w + j] ?? 0) >= (lcs[i * w + j + 1] ?? 0))
+      mid.push({ kind: 'removed', text: ma[i++] ?? '' });
     else mid.push({ kind: 'added', text: mb[j++] ?? '' });
   }
   while (i < n) mid.push({ kind: 'removed', text: ma[i++] ?? '' });
@@ -79,9 +83,15 @@ export function DiffFigure({ from, to, label }: { from: string; to: string; labe
           // biome-ignore lint/suspicious/noArrayIndexKey: a diff line has no identity but its position
           key={i}
           data-diff={l.kind}
-          className={cn('pr-2 pl-[1.75rem] -indent-[1.25rem] whitespace-pre-wrap break-words', DIFF_LINE[l.kind])}
+          className={cn(
+            'pr-2 pl-[1.75rem] -indent-[1.25rem] whitespace-pre-wrap break-words',
+            DIFF_LINE[l.kind],
+          )}
         >
-          <span aria-hidden="true" className="mr-2 inline-block w-3 indent-0 select-none text-si-dim">
+          <span
+            aria-hidden="true"
+            className="mr-2 inline-block w-3 indent-0 select-none text-si-dim"
+          >
             {DIFF_MARK[l.kind]}
           </span>
           {l.kind !== 'same' && <span className="sr-only">{DIFF_SR[l.kind]}</span>}

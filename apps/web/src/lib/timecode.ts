@@ -11,9 +11,14 @@ import {
 } from '@autologger/contract';
 import { useEffect, useState } from 'react';
 
-export { formatFrames, parseTimecode, FRAME_RATES, secondsToClock } from '@autologger/contract';
+export { FRAME_RATES, formatFrames, parseTimecode, secondsToClock } from '@autologger/contract';
 
-export function transportOf(s: Pick<Session, 'isRolling' | 'rollStartedAt' | 'elapsedFrames' | 'take' | 'frameRate' | 'startOffsetFrames'>): TransportState {
+export function transportOf(
+  s: Pick<
+    Session,
+    'isRolling' | 'rollStartedAt' | 'elapsedFrames' | 'take' | 'frameRate' | 'startOffsetFrames'
+  >,
+): TransportState {
   return {
     isRolling: s.isRolling,
     rollStartedAt: s.rollStartedAt,
@@ -60,8 +65,13 @@ export function useTransportClock(session: Session | undefined | null): Transpor
   const [clock, setClock] = useState<TransportClock>(() =>
     t ? compute(t) : { frames: 0, elapsedSec: 0, timecode: '00:00:00:00' },
   );
-  const key = t ? `${t.isRolling}|${t.rollStartedAt}|${t.elapsedFrames}|${t.frameRate}|${t.startOffsetFrames}` : '';
+  const key = t
+    ? `${t.isRolling}|${t.rollStartedAt}|${t.elapsedFrames}|${t.frameRate}|${t.startOffsetFrames}`
+    : '';
 
+  // `key` captures every transport field `t` is built from; depending on it instead of the `t`
+  // object keeps the animation loop from restarting when an identical session object arrives.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the transport fields above
   useEffect(() => {
     if (!t) return;
     setClock(compute(t));
@@ -84,7 +94,10 @@ export function useTransportClock(session: Session | undefined | null): Transpor
 }
 
 /** Session seconds for an event's stored frames (frames include the start offset). */
-export function eventSec(timecodeFrames: number | null, session: Pick<Session, 'frameRate' | 'startOffsetFrames'>): number | null {
+export function eventSec(
+  timecodeFrames: number | null,
+  session: Pick<Session, 'frameRate' | 'startOffsetFrames'>,
+): number | null {
   if (timecodeFrames == null) return null;
   return Math.max(0, (timecodeFrames - session.startOffsetFrames) / session.frameRate);
 }

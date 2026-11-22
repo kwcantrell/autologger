@@ -17,7 +17,12 @@ async function myTeams(ctx: Ctx): Promise<Team[]> {
     .innerJoin(teams, eq(teams.id, teamMembers.teamId))
     .where(eq(teamMembers.userId, ctx.actor.user.id))
     .orderBy(asc(teams.name));
-  return rows.map((r) => ({ id: r.id, name: r.name, role: r.role, createdAt: r.createdAt.toISOString() }));
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    role: r.role,
+    createdAt: r.createdAt.toISOString(),
+  }));
 }
 
 export async function loadMe(ctx: Ctx): Promise<Me> {
@@ -80,7 +85,9 @@ async function teamDetail(ctx: Ctx, teamId: string): Promise<TeamDetail> {
       pictureUrl: m.pictureUrl,
       role: m.role,
       joinedAt: m.joinedAt.toISOString(),
-      grants: grants.filter((g) => g.userId === m.userId).map((g) => ({ showId: g.showId, canWrite: g.canWrite })),
+      grants: grants
+        .filter((g) => g.userId === m.userId)
+        .map((g) => ({ showId: g.showId, canWrite: g.canWrite })),
     })),
     invites: canSeeEmails
       ? invites.map((i) => ({
@@ -109,7 +116,8 @@ defineOp({
   surfaces: ['web'],
   allowPending: true,
   async run(ctx, input) {
-    if (input.name) await ctx.db.update(users).set({ name: input.name }).where(eq(users.id, ctx.actor.user.id));
+    if (input.name)
+      await ctx.db.update(users).set({ name: input.name }).where(eq(users.id, ctx.actor.user.id));
     return loadMe(ctx);
   },
 });
@@ -138,7 +146,9 @@ defineOp({
   async run(ctx, { name }) {
     const id = newId('team');
     const [t] = await ctx.db.insert(teams).values({ id, name }).returning();
-    await ctx.db.insert(teamMembers).values({ teamId: id, userId: ctx.actor.user.id, role: 'owner' });
+    await ctx.db
+      .insert(teamMembers)
+      .values({ teamId: id, userId: ctx.actor.user.id, role: 'owner' });
     return { id, name, role: 'owner', createdAt: t!.createdAt.toISOString() };
   },
 });
@@ -162,9 +172,13 @@ defineOp({
   surfaces: ['web'],
   async run(ctx, { teamId }) {
     await requireTeamRole(ctx, teamId, 'owner');
-    const members = await ctx.db.select({ userId: teamMembers.userId }).from(teamMembers).where(eq(teamMembers.teamId, teamId));
+    const members = await ctx.db
+      .select({ userId: teamMembers.userId })
+      .from(teamMembers)
+      .where(eq(teamMembers.teamId, teamId));
     await ctx.db.delete(teams).where(eq(teams.id, teamId));
-    for (const m of members) ctx.publish(`user:${m.userId}`, { type: 'access_changed', userId: m.userId });
+    for (const m of members)
+      ctx.publish(`user:${m.userId}`, { type: 'access_changed', userId: m.userId });
     return { deleted: true };
   },
 });
@@ -203,7 +217,9 @@ defineOp({
   surfaces: ['web'],
   async run(ctx, { teamId, email }) {
     await requireTeamRole(ctx, teamId, 'admin');
-    await ctx.db.delete(teamInvites).where(and(eq(teamInvites.teamId, teamId), eq(teamInvites.email, normEmail(email))));
+    await ctx.db
+      .delete(teamInvites)
+      .where(and(eq(teamInvites.teamId, teamId), eq(teamInvites.email, normEmail(email))));
     return teamDetail(ctx, teamId);
   },
 });
@@ -225,11 +241,15 @@ defineOp({
   async run(ctx, { teamId, userId, role }) {
     const mine = await requireTeamRole(ctx, teamId, 'admin');
     const theirs = await memberRole(ctx, teamId, userId);
-    if (theirs === 'owner') throw badRequest('Transfer ownership instead of changing the owner’s role.');
+    if (theirs === 'owner')
+      throw badRequest('Transfer ownership instead of changing the owner’s role.');
     if (mine === 'admin' && theirs === 'admin' && userId !== ctx.actor.user.id) {
       throw forbidden('Only the owner can change another admin.');
     }
-    await ctx.db.update(teamMembers).set({ role }).where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+    await ctx.db
+      .update(teamMembers)
+      .set({ role })
+      .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
     ctx.publish(`user:${userId}`, { type: 'access_changed', userId });
     return teamDetail(ctx, teamId);
   },
@@ -244,16 +264,21 @@ defineOp({
     const mine = await requireTeamRole(ctx, teamId, 'admin');
     const theirs = await memberRole(ctx, teamId, userId);
     if (theirs === 'owner') throw badRequest('The owner cannot be removed.');
-    if (theirs === 'admin' && mine !== 'owner') throw forbidden('Only the owner can remove an admin.');
+    if (theirs === 'admin' && mine !== 'owner')
+      throw forbidden('Only the owner can remove an admin.');
     await removeMembership(ctx, teamId, userId);
     return teamDetail(ctx, teamId);
   },
 });
 
 async function removeMembership(ctx: Ctx, teamId: string, userId: string) {
-  await ctx.db.delete(teamMembers).where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+  await ctx.db
+    .delete(teamMembers)
+    .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
   const teamShows = ctx.db.select({ id: shows.id }).from(shows).where(eq(shows.teamId, teamId));
-  await ctx.db.delete(showGrants).where(and(eq(showGrants.userId, userId), inArray(showGrants.showId, teamShows)));
+  await ctx.db
+    .delete(showGrants)
+    .where(and(eq(showGrants.userId, userId), inArray(showGrants.showId, teamShows)));
   ctx.publish(`user:${userId}`, { type: 'access_changed', userId });
 }
 
@@ -279,8 +304,14 @@ defineOp({
     await requireTeamRole(ctx, teamId, 'owner');
     await memberRole(ctx, teamId, userId);
     if (userId === ctx.actor.user.id) return teamDetail(ctx, teamId);
-    await ctx.db.update(teamMembers).set({ role: 'admin' }).where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.role, 'owner')));
-    await ctx.db.update(teamMembers).set({ role: 'owner' }).where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+    await ctx.db
+      .update(teamMembers)
+      .set({ role: 'admin' })
+      .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.role, 'owner')));
+    await ctx.db
+      .update(teamMembers)
+      .set({ role: 'owner' })
+      .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
     ctx.publish(`user:${userId}`, { type: 'access_changed', userId });
     return teamDetail(ctx, teamId);
   },
@@ -294,21 +325,29 @@ defineOp({
   async run(ctx, { teamId, userId, showId, access }) {
     await requireTeamRole(ctx, teamId, 'admin');
     await memberRole(ctx, teamId, userId);
-    const [show] = await ctx.db.select().from(shows).where(and(eq(shows.id, showId), eq(shows.teamId, teamId)));
+    const [show] = await ctx.db
+      .select()
+      .from(shows)
+      .where(and(eq(shows.id, showId), eq(shows.teamId, teamId)));
     if (!show) throw notFound('Show');
     if (access === 'none') {
-      await ctx.db.delete(showGrants).where(and(eq(showGrants.showId, showId), eq(showGrants.userId, userId)));
+      await ctx.db
+        .delete(showGrants)
+        .where(and(eq(showGrants.showId, showId), eq(showGrants.userId, userId)));
     } else {
       await ctx.db
         .insert(showGrants)
         .values({ showId, userId, canWrite: access === 'write', grantedBy: ctx.actor.user.id })
         .onConflictDoUpdate({
           target: [showGrants.showId, showGrants.userId],
-          set: { canWrite: access === 'write', grantedBy: ctx.actor.user.id, grantedAt: new Date() },
+          set: {
+            canWrite: access === 'write',
+            grantedBy: ctx.actor.user.id,
+            grantedAt: new Date(),
+          },
         });
     }
     ctx.publish(`user:${userId}`, { type: 'access_changed', userId });
     return teamDetail(ctx, teamId);
   },
 });
-

@@ -1,7 +1,14 @@
 // TanStack Query hooks over the ops registry. One key factory, so live updates (live.ts)
 // and mutations write to the same cache entries the screens read.
 
-import type { DashboardQuery, OpInput, OpName, OpOutputs, Via, WikiKind } from '@autologger/contract';
+import type {
+  DashboardQuery,
+  OpInput,
+  OpName,
+  OpOutputs,
+  Via,
+  WikiKind,
+} from '@autologger/contract';
 import {
   type QueryClient,
   type QueryKey,
@@ -28,7 +35,8 @@ export const qk = {
   topics: (sessionId: string) => ['topics', sessionId] as const,
   dashboards: (sessionId: string) => ['dashboards', sessionId] as const,
   dashboardQueryAll: (sessionId: string) => ['dashboard-query', sessionId] as const,
-  dashboardQuery: (sessionId: string, query: DashboardQuery) => ['dashboard-query', sessionId, query] as const,
+  dashboardQuery: (sessionId: string, query: DashboardQuery) =>
+    ['dashboard-query', sessionId, query] as const,
   media: (sessionId: string) => ['media', sessionId] as const,
   jobs: (sessionId: string) => ['jobs', sessionId] as const,
   changesAll: (sessionId: string) => ['changes', sessionId] as const,
@@ -45,7 +53,12 @@ export const qk = {
 type QOpts<T> = Omit<UseQueryOptions<T, RpcError, T, QueryKey>, 'queryKey' | 'queryFn'>;
 
 /** A query bound to one op. */
-export function useOpQuery<N extends OpName>(key: QueryKey, name: N, input: OpInput<N>, opts: QOpts<OpOutputs[N]> = {}) {
+export function useOpQuery<N extends OpName>(
+  key: QueryKey,
+  name: N,
+  input: OpInput<N>,
+  opts: QOpts<OpOutputs[N]> = {},
+) {
   return useQuery<OpOutputs[N], RpcError, OpOutputs[N], QueryKey>({
     queryKey: key,
     queryFn: () => rpc(name, input),
@@ -66,7 +79,8 @@ export function useOpMutation<N extends OpName>(
     mutationFn: (input) => rpc(name, input),
     onSuccess: (data, input) => {
       opts.onSuccess?.(data, input, qc);
-      for (const key of opts.invalidate?.(data, input) ?? []) void qc.invalidateQueries({ queryKey: key });
+      for (const key of opts.invalidate?.(data, input) ?? [])
+        void qc.invalidateQueries({ queryKey: key });
     },
   });
 }
@@ -99,7 +113,12 @@ export const useShows = () => useOpQuery(qk.shows, 'shows.list', {});
 export const useShow = (showId: string | undefined) =>
   useOpQuery(qk.show(showId ?? ''), 'shows.get', { showId: showId ?? '' }, { enabled: !!showId });
 export const useCategories = (showId: string | undefined) =>
-  useOpQuery(qk.categories(showId ?? ''), 'categories.list', { showId: showId ?? '' }, { enabled: !!showId });
+  useOpQuery(
+    qk.categories(showId ?? ''),
+    'categories.list',
+    { showId: showId ?? '' },
+    { enabled: !!showId },
+  );
 export const useSessions = (showId: string | undefined) =>
   useOpQuery(
     qk.sessions(showId),
@@ -108,11 +127,18 @@ export const useSessions = (showId: string | undefined) =>
     { enabled: !!showId },
   );
 export const useSession = (sessionId: string | undefined) =>
-  useOpQuery(qk.session(sessionId ?? ''), 'sessions.get', { sessionId: sessionId ?? '' }, { enabled: !!sessionId });
-export const useEvents = (sessionId: string) => useOpQuery(qk.events(sessionId), 'events.list', { sessionId });
+  useOpQuery(
+    qk.session(sessionId ?? ''),
+    'sessions.get',
+    { sessionId: sessionId ?? '' },
+    { enabled: !!sessionId },
+  );
+export const useEvents = (sessionId: string) =>
+  useOpQuery(qk.events(sessionId), 'events.list', { sessionId });
 export const useTranscript = (sessionId: string) =>
   useOpQuery(qk.transcript(sessionId), 'transcript.get', { sessionId });
-export const useTopics = (sessionId: string) => useOpQuery(qk.topics(sessionId), 'topics.list', { sessionId });
+export const useTopics = (sessionId: string) =>
+  useOpQuery(qk.topics(sessionId), 'topics.list', { sessionId });
 export const useDashboards = (sessionId: string) =>
   useOpQuery(qk.dashboards(sessionId), 'dashboards.list', { sessionId });
 export const useDashboardQuery = (sessionId: string, query: DashboardQuery | undefined) =>
@@ -140,9 +166,19 @@ export const useWikiList = (showId: string | undefined, kind?: WikiKind) =>
     { enabled: !!showId },
   );
 export const useWikiPage = (pageId: string | undefined) =>
-  useOpQuery(qk.wikiPage(pageId ?? ''), 'wiki.get', { pageId }, { enabled: !!pageId, retry: false });
+  useOpQuery(
+    qk.wikiPage(pageId ?? ''),
+    'wiki.get',
+    { pageId },
+    { enabled: !!pageId, retry: false },
+  );
 export const useWikiRevisions = (pageId: string | undefined, enabled = true) =>
-  useOpQuery(qk.wikiRevisions(pageId ?? ''), 'wiki.revisions', { pageId: pageId ?? '' }, { enabled: !!pageId && enabled });
+  useOpQuery(
+    qk.wikiRevisions(pageId ?? ''),
+    'wiki.revisions',
+    { pageId: pageId ?? '' },
+    { enabled: !!pageId && enabled },
+  );
 export const useSearch = (input: OpInput<'search'> | null) =>
   useOpQuery(qk.search(input ?? { query: '' }), 'search', input ?? { query: '' }, {
     enabled: !!input && input.query.trim().length >= 2,
@@ -150,4 +186,5 @@ export const useSearch = (input: OpInput<'search'> | null) =>
   });
 export const useTokens = () => useOpQuery(qk.tokens, 'tokens.list', {});
 export const useCompanionDevices = () => useOpQuery(qk.companion, 'companion.list', {});
-export const useAdminUsers = (enabled: boolean) => useOpQuery(qk.adminUsers, 'admin.users', {}, { enabled });
+export const useAdminUsers = (enabled: boolean) =>
+  useOpQuery(qk.adminUsers, 'admin.users', {}, { enabled });

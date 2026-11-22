@@ -6,17 +6,17 @@ the **worker** (`apps/server/src/worker/main.ts`), a second entrypoint of the se
 
 ### Environment
 
-| Variable | Used by | Purpose |
-|---|---|---|
-| `S3_ENDPOINT` | app, worker | Endpoint for server-side S3 calls (`http://s3:8333` in compose). Omit for AWS. |
-| `S3_PUBLIC_ENDPOINT` | app | Endpoint browsers reach; presigned PUT/GET URLs are signed against it (e.g. `https://media.example.com`). Defaults to `S3_ENDPOINT`. |
-| `S3_REGION` | app, worker | Default `us-east-1`. |
-| `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | app, worker | Required for any media feature; without them media ops answer `unavailable`. |
-| `S3_FORCE_PATH_STYLE` | app, worker | `1` (default) for SeaweedFS/MinIO-style servers; `0` for virtual-hosted AWS buckets. |
-| `DEEPGRAM_API_KEY` | app, worker | Enables transcription (`nova-3`, diarized). Without it uploads still work but are not transcribed and `media.retranscribe` answers `unavailable`. |
-| `YOUTUBE_IMPORT` | app | `1` (default) enables `media.importYoutube`. |
-| `YTDLP_PATH` | worker | yt-dlp binary (default `yt-dlp` on `PATH`). Best audio is downloaded as-is, ffmpeg is not required. |
-| `WORKER_CONCURRENCY` | worker | Jobs run in parallel per worker process (default 2). |
+| Variable                                                | Used by     | Purpose                                                                                                                                           |
+| ------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `S3_ENDPOINT`                                           | app, worker | Endpoint for server-side S3 calls (`http://s3:8333` in compose). Omit for AWS.                                                                    |
+| `S3_PUBLIC_ENDPOINT`                                    | app         | Endpoint browsers reach; presigned PUT/GET URLs are signed against it (e.g. `https://media.example.com`). Defaults to `S3_ENDPOINT`.              |
+| `S3_REGION`                                             | app, worker | Default `us-east-1`.                                                                                                                              |
+| `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | app, worker | Required for any media feature; without them media ops answer `unavailable`.                                                                      |
+| `S3_FORCE_PATH_STYLE`                                   | app, worker | `1` (default) for SeaweedFS/MinIO-style servers; `0` for virtual-hosted AWS buckets.                                                              |
+| `DEEPGRAM_API_KEY`                                      | app, worker | Enables transcription (`nova-3`, diarized). Without it uploads still work but are not transcribed and `media.retranscribe` answers `unavailable`. |
+| `YOUTUBE_IMPORT`                                        | app         | `1` (default) enables `media.importYoutube`.                                                                                                      |
+| `YTDLP_PATH`                                            | worker      | yt-dlp binary (default `yt-dlp` on `PATH`). Best audio is downloaded as-is, ffmpeg is not required.                                               |
+| `WORKER_CONCURRENCY`                                    | worker      | Jobs run in parallel per worker process (default 2).                                                                                              |
 
 The bucket is created on first use (worker start, or the first upload) if the credentials allow it.
 

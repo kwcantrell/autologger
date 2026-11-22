@@ -1,5 +1,5 @@
-import { serve } from '@hono/node-server';
 import type { Server } from 'node:http';
+import { serve } from '@hono/node-server';
 import { listenForRemote } from './core/bus.ts';
 import { loadOps } from './core/op.ts';
 import { runMigrations } from './db/migrate.ts';
