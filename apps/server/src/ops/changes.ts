@@ -10,7 +10,6 @@ import {
   type Column,
   desc,
   eq,
-  exists,
   getTableColumns,
   gt,
   isNull,
@@ -62,18 +61,22 @@ function revive(table: PgTable, snap: Record<string, unknown>): Record<string, u
 type ChangeRow = typeof changes.$inferSelect;
 
 /**
- * True for a `changes` row that is a plain undo of a change newer than `than`: the change and its
- * undo cancel out, so the item is back where it was and the pair does not block undoing an older
- * change. A redo (an undo of an undo) is not ignored — it re-applies the newer change.
+ * True for a `changes` row that undoes a change newer than `than` and leaves the item back where
+ * it was before that newer change, so it does not block undoing an older change. Follows the
+ * `revert_of` chain to its root (the original, non-undo change): an odd number of undos (undo,
+ * undo of a redo, …) puts the item back at the root's `before`; an even number (a redo) re-applies
+ * the root, which still blocks. Every link but the live head is already undone.
  */
-function cancelsNewer(ctx: Ctx, than: SQL | Column): SQL {
-  const orig = alias(changes, 'orig');
-  return exists(
-    ctx.db
-      .select({ one: sql`1` })
-      .from(orig)
-      .where(and(eq(orig.id, changes.revertOf), isNull(orig.revertOf), gt(orig.at, than))),
-  );
+function cancelsNewer(than: SQL | Column): SQL {
+  return sql`exists (
+    with recursive chain(id, revert_of, depth) as (
+      select o.id, o.revert_of, 1 from changes o where o.id = ${changes.revertOf}
+      union all
+      select p.id, p.revert_of, chain.depth + 1 from changes p join chain on p.id = chain.revert_of
+    )
+    select 1 from chain join changes root on root.id = chain.id
+    where chain.revert_of is null and chain.depth % 2 = 1 and root.at > ${than}
+  )`;
 }
 
 async function toChanges(
@@ -195,7 +198,7 @@ defineOp({
           eq(changes.entityId, c.entityId),
           isNull(changes.revertedAt),
           // Compare in SQL: `c.at` as a JS Date has lost its microseconds.
-          not(cancelsNewer(ctx, sql`(select at from changes where id = ${c.id})`)),
+          not(cancelsNewer(sql`(select at from changes where id = ${c.id})`)),
         ),
       )
       .orderBy(desc(changes.at))
@@ -252,7 +255,7 @@ defineOp({
         and(
           isNull(changes.revertedAt),
           or(isNull(changes.groupId), ne(changes.groupId, groupId)),
-          not(cancelsNewer(ctx, own.at)),
+          not(cancelsNewer(own.at)),
         ),
       )
       .limit(1);
