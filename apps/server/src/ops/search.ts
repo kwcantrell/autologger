@@ -6,10 +6,10 @@ import { defineOp } from '../core/op.ts';
 defineOp({
   name: 'search',
   description:
-    'Full-text search across everything you can access: events, transcript lines, topics, wiki pages and sessions. Narrow by show, session or kinds. Hits carry sessionId and atSec so you can jump to the moment (transcript lines and topics also endSec, where they end; null otherwise), plus sessionTitle and sessionDate (episode date, or creation time) to tell sessions apart. Hits come best match first; limit defaults to 30 (max 500), so getting exactly `limit` hits means there may be more — narrow by show, session, kinds or more words, or raise the limit.',
+    'Full-text search across everything you can access: events, transcript lines, topics, wiki pages and sessions. Narrow by show, session or kinds. Hits carry sessionId and atSec so you can jump to the moment (transcript lines and topics also endSec, where they end; null otherwise), plus sessionTitle and sessionDate (episode date, or creation time) to tell sessions apart. Hits come best match first, in a stable order; limit defaults to 30 (max 500), so getting exactly `limit` hits means there may be more — narrow by show, session, kinds or more words, raise the limit, or ask for the next page with offset (the number of hits already read).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { query, showId, sessionId, kinds, limit }) {
+  async run(ctx, { query, showId, sessionId, kinds, limit, offset }) {
     if (showId) await requireShow(ctx, showId, 'read');
     if (sessionId) await requireSession(ctx, sessionId, 'read');
     const want = new Set(kinds ?? ['event', 'transcript', 'topic', 'wiki', 'session']);
@@ -68,8 +68,10 @@ defineOp({
       rank: number;
     }>(
       // Name the columns here: a union takes its names from its first part, which varies with `kinds`.
+      // Ties in rank are common, so kind and id break them: pages taken with offset never overlap.
       sql`select * from (${union}) hits(kind, id, session_id, show_id, session_title, session_date,
-        show_name, title, snippet, at_sec, end_sec, rank) order by rank desc limit ${limit}`,
+        show_name, title, snippet, at_sec, end_sec, rank) order by rank desc, kind, id
+        limit ${limit} offset ${offset}`,
     );
     return rows.map((r) => ({
       kind: r.kind,

@@ -114,4 +114,28 @@ describe('search', () => {
     expect(await call(owner, 'search', { query: 'bombing', kinds: ['event'] })).toHaveLength(30);
     await failsWith(call(owner, 'search', { query: 'bombing', limit: 501 }), 'bad_request');
   });
+
+  it('pages through tied hits with offset, without repeats or gaps', async () => {
+    const { owner, show, session } = await studio();
+    // Identical messages rank the same, so only the tiebreaker keeps the pages apart.
+    await call(owner, 'events.createMany', {
+      sessionId: session.id,
+      events: Array.from({ length: 25 }, (_, i) => ({
+        category: 'Note',
+        message: 'heckle',
+        atSec: i,
+      })),
+    });
+    const input = { query: 'heckle', showId: show.id, kinds: ['event' as const], limit: 10 };
+    const pages = [
+      await call(owner, 'search', input),
+      await call(owner, 'search', { ...input, offset: 10 }),
+      await call(owner, 'search', { ...input, offset: 20 }),
+    ];
+    expect(pages.map((p) => p.length)).toEqual([10, 10, 5]);
+    const ids = pages.flat().map((h) => h.id);
+    expect(new Set(ids).size).toBe(25);
+    const all = await call(owner, 'search', { ...input, limit: 500 });
+    expect(ids).toEqual(all.map((h) => h.id));
+  });
 });

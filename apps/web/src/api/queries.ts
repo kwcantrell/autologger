@@ -14,9 +14,11 @@ import type {
   WikiListItem,
 } from '@autologger/contract';
 import {
+  keepPreviousData,
   type QueryClient,
   type QueryKey,
   type UseQueryOptions,
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -56,6 +58,7 @@ export const qk = {
   wikiRevisions: (pageId: string) => ['wiki-revisions', pageId] as const,
   compilations: (showId: string) => ['compilations', showId] as const,
   search: (input: OpInput<'search'>) => ['search', input] as const,
+  searchPages: (input: OpInput<'search'>) => ['search', 'pages', input] as const,
   tokens: ['tokens'] as const,
   companion: ['companion'] as const,
   adminUsers: ['admin-users'] as const,
@@ -318,6 +321,20 @@ export const useSearch = (input: OpInput<'search'> | null) =>
     enabled: !!input && input.query.trim().length >= 2,
     placeholderData: (prev) => prev,
   });
+/** Search results a page of `input.limit` at a time; fetchNextPage asks for the next page (offset). */
+export const useSearchPages = (input: OpInput<'search'> | null) => {
+  const base = input ?? { query: '' };
+  const pageSize = base.limit ?? 30;
+  return useInfiniteQuery({
+    queryKey: qk.searchPages(base),
+    queryFn: ({ pageParam, signal }) => rpc('search', { ...base, offset: pageParam }, signal),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) =>
+      last.length < pageSize ? undefined : pages.reduce((n, p) => n + p.length, 0),
+    enabled: !!input && input.query.trim().length >= 2,
+    placeholderData: keepPreviousData,
+  });
+};
 export const useTokens = () => useOpQuery(qk.tokens, 'tokens.list', {});
 export const useCompanionDevices = () => useOpQuery(qk.companion, 'companion.list', {});
 export const useAdminUsers = (enabled: boolean) =>
