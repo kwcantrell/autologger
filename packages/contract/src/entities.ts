@@ -77,6 +77,10 @@ export interface Show {
   nextEpisode: number;
   defaultFrameRate: number;
   titleSuffix: 'date' | 'episode' | 'none';
+  /** Transcription: Deepgram smart formatting (numerals, dates, currency…). Default true. */
+  smartFormat: boolean;
+  /** Transcription: key terms the transcriber should favour (Deepgram keyterm prompting). */
+  keyTerms: string[];
   createdAt: string;
   access: ShowAccess;
   sessionCount: number;

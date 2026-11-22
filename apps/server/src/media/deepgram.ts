@@ -1,10 +1,53 @@
 // Deepgram pre-recorded transcription. The mapping from Deepgram's response to transcript rows is
 // pure (no db) so it can be unit-tested with a fixture.
 
-import type { TranscriptWord } from '@autologger/contract';
+import {
+  MAX_KEY_TERM_LENGTH,
+  MAX_KEY_TERMS,
+  MAX_KEY_TERMS_TOTAL_CHARS,
+  type TranscriptWord,
+} from '@autologger/contract';
 
-export const DEEPGRAM_URL =
-  'https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&diarize=true&utterances=true&punctuate=true';
+const DEEPGRAM_LISTEN = 'https://api.deepgram.com/v1/listen';
+
+/** Per-show transcription settings (columns on `shows`). */
+export interface TranscriptionOptions {
+  smartFormat: boolean;
+  keyTerms: string[];
+}
+
+export const DEFAULT_TRANSCRIPTION_OPTIONS: TranscriptionOptions = {
+  smartFormat: true,
+  keyTerms: [],
+};
+
+/**
+ * Build the Deepgram pre-recorded URL for a show's settings. Punctuation stays on even without
+ * smart formatting. Key terms use nova-3 keyterm prompting: one repeated `keyterm` parameter per
+ * term (URL-encoded, so multi-word terms stay one term), trimmed, de-duplicated and capped by
+ * count, per-term length and total length (Deepgram allows ~500 keyterm tokens per request).
+ */
+export function deepgramUrl(opts: TranscriptionOptions = DEFAULT_TRANSCRIPTION_OPTIONS): string {
+  const q = new URLSearchParams({
+    model: 'nova-3',
+    smart_format: String(opts.smartFormat),
+    diarize: 'true',
+    utterances: 'true',
+    punctuate: 'true',
+  });
+  const terms = new Set<string>();
+  let budget = MAX_KEY_TERMS_TOTAL_CHARS;
+  for (const raw of opts.keyTerms) {
+    const t = raw.trim().slice(0, MAX_KEY_TERM_LENGTH);
+    if (!t || terms.has(t)) continue;
+    // Over the token budget Deepgram rejects the whole request, so drop the rest instead.
+    if (t.length > budget || terms.size >= MAX_KEY_TERMS) break;
+    terms.add(t);
+    budget -= t.length;
+  }
+  for (const t of terms) q.append('keyterm', t);
+  return `${DEEPGRAM_LISTEN}?${q.toString()}`;
+}
 
 export interface DeepgramWord {
   word: string;
@@ -89,13 +132,14 @@ export async function transcribeAudio(
   body: ReadableStream<Uint8Array>,
   mimeType: string,
   size: number | null,
+  opts: TranscriptionOptions = DEFAULT_TRANSCRIPTION_OPTIONS,
 ): Promise<DeepgramResponse> {
   const headers: Record<string, string> = {
     Authorization: `Token ${apiKey}`,
     'Content-Type': mimeType.split(';')[0]!.trim() || 'application/octet-stream',
   };
   if (size !== null) headers['Content-Length'] = String(size);
-  const res = await fetch(DEEPGRAM_URL, {
+  const res = await fetch(deepgramUrl(opts), {
     method: 'POST',
     headers,
     body,
@@ -103,12 +147,15 @@ export async function transcribeAudio(
     signal: AbortSignal.timeout(60 * 60 * 1000),
   } as RequestInit & { duplex: 'half' });
   if (!res.ok) {
-    const detail = (await res.text().catch(() => '')).slice(0, 300);
-    const msg = `Deepgram answered ${res.status}${detail ? `: ${detail}` : ''}`;
-    // 4xx (except rate limiting / timeouts) won't succeed on retry.
+    const detail = (await res.text().catch(() => '')).trim().slice(0, 300);
+    const suffix = detail ? `: ${detail}` : '';
+    // 4xx (except rate limiting / request timeout) won't succeed on retry: a bad key, unsupported
+    // audio or a rejected option such as too many key terms. Fail the job at once.
     if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429)
-      throw new PermanentError(msg);
-    throw new Error(msg);
+      throw new PermanentError(
+        `Deepgram rejected the request (${res.status}); check the API key, the audio and the show’s transcription settings${suffix}`,
+      );
+    throw new Error(`Deepgram answered ${res.status}${suffix}`);
   }
   return (await res.json()) as DeepgramResponse;
 }

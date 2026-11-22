@@ -72,6 +72,8 @@ function toShow(
     nextEpisode: s.nextEpisode,
     defaultFrameRate: s.defaultFrameRate,
     titleSuffix: s.titleSuffix,
+    smartFormat: s.smartFormat,
+    keyTerms: s.keyTerms,
     createdAt: s.createdAt.toISOString(),
     access: access.get(s.id)!,
     sessionCount,
@@ -161,13 +163,22 @@ defineOp({
 defineOp({
   name: 'shows.update',
   description:
-    'Change show settings (owner/admin of the show’s team; showId from shows_list). Only the fields you pass change: name, code (session-title prefix, uppercased), defaultFrameRate (for new sessions), titleSuffix (default title of new sessions created without one: "date" = CODE + date, "episode" = CODE + episode number, "none" = the show name) and nextEpisode (the episode number the next session gets). Event buttons are edited with categories_save. Settings changes are not in the change log and cannot be undone from it.',
+    'Change show settings (owner/admin of the show’s team; showId from shows_list). Only the fields you pass change: name, code (session-title prefix, uppercased), defaultFrameRate (for new sessions), titleSuffix (default title of new sessions created without one: "date" = CODE + date, "episode" = CODE + episode number, "none" = the show name) and nextEpisode (the episode number the next session gets). Transcription: `smartFormat` (default true) toggles Deepgram smart formatting of numbers, dates and currency; turn it off for technical or math talk, where it turns "x squared" into "x2". `keyTerms` replaces the list of key terms (names and jargon such as "dx" or "L’Hôpital") the transcriber should favour: at most 50 terms of up to 50 characters and 1000 characters in total, duplicates dropped, [] clears it. Transcription settings apply to transcriptions that run from now on; to apply them to audio already transcribed, re-transcribe the session (media_retranscribe). Event buttons are edited with categories_save. Settings changes are not in the change log and cannot be undone from it.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId, ...patch }) {
     await requireShow(ctx, showId, 'manage');
-    const set = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
-    if (set.code) set.code = String(set.code).toUpperCase();
+    const set: Partial<typeof shows.$inferInsert> = {
+      name: patch.name,
+      code: patch.code?.toUpperCase(),
+      defaultFrameRate: patch.defaultFrameRate,
+      titleSuffix: patch.titleSuffix,
+      nextEpisode: patch.nextEpisode,
+      smartFormat: patch.smartFormat,
+      keyTerms: patch.keyTerms && [...new Set(patch.keyTerms)],
+    };
+    for (const k of Object.keys(set) as (keyof typeof set)[])
+      if (set[k] === undefined) delete set[k];
     if (Object.keys(set).length) await ctx.db.update(shows).set(set).where(eq(shows.id, showId));
     ctx.publish(`show:${showId}`, { type: 'show_changed', showId, entity: 'show' });
     return getShow(ctx, showId);
