@@ -5,7 +5,21 @@
 // history (wiki revisions) survives a delete/undo round trip.
 
 import type { Change, ChangeEntity, LiveEntity } from '@autologger/contract';
-import { and, desc, eq, getTableColumns, gt, isNull, ne, or, sql } from 'drizzle-orm';
+import {
+  and,
+  type Column,
+  desc,
+  eq,
+  exists,
+  getTableColumns,
+  gt,
+  isNull,
+  ne,
+  not,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import { alias, type PgTable } from 'drizzle-orm/pg-core';
 import { readableShowCondition, requireSession, requireShow } from '../core/authz.ts';
 import { conflict, notFound } from '../core/errors.ts';
@@ -46,6 +60,21 @@ function revive(table: PgTable, snap: Record<string, unknown>): Record<string, u
 }
 
 type ChangeRow = typeof changes.$inferSelect;
+
+/**
+ * True for a `changes` row that is a plain undo of a change newer than `than`: the change and its
+ * undo cancel out, so the item is back where it was and the pair does not block undoing an older
+ * change. A redo (an undo of an undo) is not ignored — it re-applies the newer change.
+ */
+function cancelsNewer(ctx: Ctx, than: SQL | Column): SQL {
+  const orig = alias(changes, 'orig');
+  return exists(
+    ctx.db
+      .select({ one: sql`1` })
+      .from(orig)
+      .where(and(eq(orig.id, changes.revertOf), isNull(orig.revertOf), gt(orig.at, than))),
+  );
+}
 
 async function toChanges(
   ctx: Ctx,
@@ -149,7 +178,7 @@ defineOp({
 defineOp({
   name: 'changes.revert',
   description:
-    'Undo one change. Only the most recent change to an item can be undone; undo newer ones first. Bulk calls (transcript_renameSpeaker, transcript_replace, transcript_updateSegments, events_createMany …) write one change per item: undo the whole call with changes_revertGroup(groupId) instead.',
+    'Undo one change. Only the most recent change to an item can be undone; undo newer ones first (a newer change that was already undone does not count). Bulk calls (transcript_renameSpeaker, transcript_replace, transcript_updateSegments, events_createMany …) write one change per item: undo the whole call with changes_revertGroup(groupId) instead.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { changeId }) {
@@ -165,6 +194,8 @@ defineOp({
           eq(changes.entity, c.entity),
           eq(changes.entityId, c.entityId),
           isNull(changes.revertedAt),
+          // Compare in SQL: `c.at` as a JS Date has lost its microseconds.
+          not(cancelsNewer(ctx, sql`(select at from changes where id = ${c.id})`)),
         ),
       )
       .orderBy(desc(changes.at))
@@ -184,7 +215,7 @@ defineOp({
 defineOp({
   name: 'changes.revertGroup',
   description:
-    'Undo every change one op call made, in one step — e.g. a transcript_renameSpeaker, transcript_replace or transcript_updateSegments call that touched hundreds of segments. groupId comes from changes_list (every change has one; grouped: true lists one row per call). All or nothing: if any item in the group was changed again later by another call, nothing is undone and it fails with conflict (undo the newer change first). Changes in the group that were already undone one by one are skipped. The undo is recorded as a new group (the returned groupId); reverting that group redoes the call. It undoes every change in the group, in every session it touched, and needs write access to each of those sessions (or the show); without it, it fails with not_found and nothing is undone. Returns how many changes were undone.',
+    'Undo every change one op call made, in one step — e.g. a transcript_renameSpeaker, transcript_replace or transcript_updateSegments call that touched hundreds of segments. groupId comes from changes_list (every change has one; grouped: true lists one row per call). All or nothing: if any item in the group was changed again later by another call, nothing is undone and it fails with conflict (undo the newer change first; later changes already undone do not count). Changes in the group that were already undone one by one are skipped. The undo is recorded as a new group (the returned groupId); reverting that group redoes the call. It undoes every change in the group, in every session it touched, and needs write access to each of those sessions (or the show); without it, it fails with not_found and nothing is undone. Returns how many changes were undone.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { groupId }) {
@@ -202,7 +233,7 @@ defineOp({
     if (pending.length === 0) throw conflict('This group was already undone.');
 
     // No item may have changed since: no live change outside the group is newer than the
-    // group's own change to the same item.
+    // group's own change to the same item (a later change undone again cancels out).
     const own = alias(changes, 'own');
     const [newer] = await ctx.db
       .select({ summary: changes.summary })
@@ -218,7 +249,11 @@ defineOp({
         ),
       )
       .where(
-        and(isNull(changes.revertedAt), or(isNull(changes.groupId), ne(changes.groupId, groupId))),
+        and(
+          isNull(changes.revertedAt),
+          or(isNull(changes.groupId), ne(changes.groupId, groupId)),
+          not(cancelsNewer(ctx, own.at)),
+        ),
       )
       .limit(1);
     if (newer)

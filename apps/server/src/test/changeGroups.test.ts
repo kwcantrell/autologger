@@ -123,6 +123,51 @@ describe('change groups', () => {
     expect(left).toHaveLength(2);
   });
 
+  it('ignores a later change that was undone again (but not a redo)', async () => {
+    const { owner, session } = await studio();
+    const [seg] = await seed(session.id, 2);
+    const text = async () =>
+      (
+        await db
+          .select({ text: schema.transcriptSegments.text })
+          .from(schema.transcriptSegments)
+          .where(eq(schema.transcriptSegments.id, seg!))
+      )[0]!.text;
+    const edit = async (t: string) => {
+      await call(owner, 'transcript.updateSegment', { segmentId: seg!, text: t });
+      return (await call(owner, 'changes.list', { sessionId: session.id }))[0]!;
+    };
+
+    // edit → second edit → undo second → undo first.
+    const first = await edit('first edit');
+    const second = await edit('second edit');
+    await call(owner, 'changes.revert', { changeId: second.id });
+    await call(owner, 'changes.revert', { changeId: first.id });
+    expect(await text()).toBe('line 0');
+
+    // A redo re-applies the later change, so it still blocks.
+    const third = await edit('third edit');
+    const fourth = await edit('fourth edit');
+    const undo = await call(owner, 'changes.revert', { changeId: fourth.id });
+    await call(owner, 'changes.revert', { changeId: undo.id });
+    await failsWith(call(owner, 'changes.revert', { changeId: third.id }), 'conflict');
+    expect(await text()).toBe('fourth edit');
+
+    // Group variant: rename → edit one segment → undo the edit → undo the rename.
+    await call(asAgent(owner), 'transcript.renameSpeaker', {
+      sessionId: session.id,
+      from: 'Speaker 1',
+      to: 'Dana',
+    });
+    const [rename] = await call(owner, 'changes.list', { sessionId: session.id, grouped: true });
+    const later = await edit('edited after the rename');
+    await call(owner, 'changes.revert', { changeId: later.id });
+    expect((await call(owner, 'changes.revertGroup', { groupId: rename!.groupId! })).reverted).toBe(
+      2,
+    );
+    expect(await speakers(session.id)).toEqual(['Speaker 1', 'Speaker 1']);
+  });
+
   it('undoes an item changed twice in one group back to its first state', async () => {
     const { owner, session } = await studio();
     const [seg] = await seed(session.id, 1);
