@@ -4,10 +4,10 @@
 // access; a page of a show other than the active one offers the switch.
 
 import type { WikiPage } from '@autologger/contract';
-import { ArrowLeftIcon, HistoryIcon, PencilIcon, Trash2Icon } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { ArrowLeftIcon, FilmIcon, HistoryIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { Link, useLocation, useSearch as useLocationSearch } from 'wouter';
-import { useWikiBacklinks, useWikiPage } from '@/api/queries';
+import { useSessions, useWikiBacklinks, useWikiPage } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { selectShow, useActive } from '@/app/useActive';
 import { PageFrame } from '@/components/RouteState';
@@ -17,6 +17,9 @@ import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
+import { Tooltip } from '@/shared/ui/Tooltip';
+import { citationCandidates, planClips } from '../compilations/clipPlan';
+import { MakeVideoDialog, useMakeVideoBlocked } from '../compilations/MakeVideoDialog';
 import { type WikiDraft, WikiEditor } from './WikiEditor';
 import { WikiHistorySheet } from './WikiHistorySheet';
 import { WikiMarkdown } from './WikiMarkdown';
@@ -100,6 +103,15 @@ function PageBody({ page }: { page: WikiPage }) {
   const del = useWikiDelete(page.showId);
   const { confirm, confirmElement } = useConfirm();
   const [history, setHistory] = useState(false);
+  const [makeVideo, setMakeVideo] = useState(false);
+  const citations = useMemo(() => citationCandidates(page.bodyMd), [page.bodyMd]);
+  // The same cached sessions.list the citation titles use.
+  const citedSessions = useSessions(citations.length ? page.showId : undefined);
+  const noVideo =
+    citedSessions.data && planClips(citations, citedSessions.data).clips.length === 0
+      ? 'None of the cited sessions were imported from YouTube, so there is no video to cut.'
+      : null;
+  const videoBlocked = useMakeVideoBlocked(canWrite, pageShow?.name) ?? noVideo;
   // `?edit=1` (a page just created) opens straight in edit mode.
   const [edit, setEdit] = useState<{ draft: WikiDraft; error: string | null } | null>(() =>
     new URLSearchParams(search).get('edit') === '1' && canWrite
@@ -223,6 +235,20 @@ function PageBody({ page }: { page: WikiPage }) {
             <Button size="sm" variant="outline" onClick={() => setHistory(true)}>
               <HistoryIcon aria-hidden="true" /> History
             </Button>
+            {citations.length > 0 && (
+              <Tooltip content={videoBlocked} disabled={!videoBlocked}>
+                <span className="inline-flex">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!!videoBlocked}
+                    onClick={() => setMakeVideo(true)}
+                  >
+                    <FilmIcon aria-hidden="true" /> Make video
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -234,6 +260,9 @@ function PageBody({ page }: { page: WikiPage }) {
             </Button>
           </div>
           {!canWrite && <p className="m-0 text-xs text-si-dim">{readOnlyWhy}</p>}
+          {canWrite && citations.length > 0 && videoBlocked && (
+            <p className="m-0 text-xs text-si-dim">Make video: {videoBlocked}</p>
+          )}
         </div>
       )}
 
@@ -269,6 +298,17 @@ function PageBody({ page }: { page: WikiPage }) {
 
       {!edit && page.backlinks.length > 0 && <Backlinks page={page} />}
 
+      {citations.length > 0 && (
+        <MakeVideoDialog
+          showId={page.showId}
+          open={makeVideo}
+          onOpenChange={setMakeVideo}
+          defaultTitle={page.title}
+          candidates={citations}
+          sourceNoun="page’s citations"
+          startTicked={true}
+        />
+      )}
       <WikiHistorySheet page={page} open={history} onOpenChange={setHistory} canWrite={canWrite} />
       {confirmElement}
     </Frame>
