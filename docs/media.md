@@ -25,6 +25,7 @@ the **worker** (`apps/server/src/worker/main.ts`), a second entrypoint of the se
 | `MEDIA_SWEEP_INTERVAL_MIN`                              | worker      | Minutes between media sweeps (default 60; first run 5 min after start; `0` turns it off). See _media sweep_ below.                                |
 | `MEDIA_SWEEP_UPLOAD_AGE_HOURS`                          | worker      | Uploads still `uploading` after this long are removed, row and object (default 24, at least 1).                                                   |
 | `MEDIA_SWEEP_ORPHAN_GRACE_HOURS`                        | worker      | Orphaned objects are removed only once the newest under their prefix is this old (default 24, at least 1).                                        |
+| `MEDIA_SWEEP_LIVE_SESSIONS`                             | worker      | Live sessions per sweep whose objects are checked against their segment rows (default 50, rotating; `0` off).                                     |
 | `MEDIA_SWEEP_DRY_RUN`                                   | worker      | `1` logs what the sweep would remove and deletes nothing.                                                                                         |
 
 The bucket is created on first use (worker start, or the first upload) if the credentials allow it.
@@ -117,10 +118,20 @@ In production: `node src/worker/main.ts` with the same environment as the app (c
   prefixes whose show no longer exists and, under a live show, `compilations/<id>.mp4` objects
   whose compilation row is gone. Session, show and compilation deletes already remove their objects
   after commit; the sweep catches what that best-effort step missed (crash, S3 outage, a job still
-  uploading for a deleted session). Objects of existing sessions, and other key shapes under a live
-  show, are never touched; orphans are removed only when their newest object is older than
-  `MEDIA_SWEEP_ORPHAN_GRACE_HOURS`, so in-flight imports and compiles are left alone. A
+  uploading for a deleted session). Other key shapes under a live show are never touched; orphans
+  are removed only when their newest object is older than `MEDIA_SWEEP_ORPHAN_GRACE_HOURS`, so in-flight imports and compiles are left alone. A
   transaction-level advisory lock lets one worker sweep at a time (others skip that round). Every
   removal is logged (`media sweep: removed …`); `MEDIA_SWEEP_DRY_RUN=1` logs `would remove` instead.
+  Under a live session, objects that match no `audio_segments.object_key` / `peaks_key` of that
+  session (an import that crashed between upload and insert, a failed best-effort delete in
+  `media.deleteSegment`, peaks stored for a segment deleted meanwhile) are removed once the object
+  itself is older than the grace period. Listing every live session is a full bucket scan, so each
+  run checks only `MEDIA_SWEEP_LIVE_SESSIONS` of them, in id order after the last one that worker
+  process checked, wrapping around (a restart starts over).
+  Each run ends with one summary line, also when nothing was found (`media sweep (dry run): 0 stuck
+  uploads, 1 orphan prefix, 0 compilation objects, 0 unreferenced live-session objects would be
+  removed; 1 orphan within grace; checked 49 of 49 live sessions; 12 s`),
+  and a worker that finds the lock held logs `media sweep: skipped, another worker holds the sweep
+  lock`.
 - Realtime: the worker publishes `audio_segment` / `job` changes and `transcript_segment` /
   `session` invalidations through the bus (Postgres NOTIFY), so open session pages update live.

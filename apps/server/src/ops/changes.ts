@@ -4,7 +4,12 @@
 // Soft-deleted entities (wiki pages) are hidden and revealed via `deletedAt` instead, so their
 // history (wiki revisions) survives a delete/undo round trip.
 
-import type { Change, ChangeEntity, LiveEntity } from '@autologger/contract';
+import {
+  type Change,
+  type ChangeEntity,
+  framesToAtSec,
+  type LiveEntity,
+} from '@autologger/contract';
 import {
   and,
   type Column,
@@ -98,6 +103,49 @@ function cancelsNewer(than: SQL | Column): SQL {
   )`;
 }
 
+/** The time a snapshot field gives for session content: events in frames, the rest in seconds. */
+function snapshotTime(r: ChangeRow): { frames?: number; sec?: number } | null {
+  const snap = (r.after ?? r.before) as Record<string, unknown> | null;
+  if (!snap || !r.sessionId) return null;
+  if (r.entity === 'event')
+    return typeof snap.timecodeFrames === 'number' ? { frames: snap.timecodeFrames } : null;
+  if (r.entity === 'topic' || r.entity === 'transcript_segment')
+    return typeof snap.startSec === 'number' ? { sec: snap.startSec } : null;
+  return null;
+}
+
+/** atSec per change id, reading event frames on the session's current clock (as events.list). */
+async function atSecs(ctx: Ctx, rows: ChangeRow[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const timed = rows.flatMap((r) => {
+    const t = snapshotTime(r);
+    return t ? [{ r, t }] : [];
+  });
+  const sessionIds = [
+    ...new Set(timed.filter(({ t }) => t.frames !== undefined).map(({ r }) => r.sessionId!)),
+  ];
+  const clocks = new Map(
+    sessionIds.length
+      ? (
+          await ctx.db
+            .select({
+              id: schema.sessions.id,
+              frameRate: schema.sessions.frameRate,
+              startOffsetFrames: schema.sessions.startOffsetFrames,
+            })
+            .from(schema.sessions)
+            .where(inArray(schema.sessions.id, sessionIds))
+        ).map((c) => [c.id, c] as const)
+      : [],
+  );
+  for (const { r, t } of timed) {
+    if (t.sec !== undefined) out.set(r.id, Math.round(t.sec * 1000) / 1000);
+    const clock = clocks.get(r.sessionId!);
+    if (t.frames !== undefined && clock) out.set(r.id, framesToAtSec(t.frames, clock));
+  }
+  return out;
+}
+
 async function toChanges(
   ctx: Ctx,
   rows: (ChangeRow & { groupSize?: number; groupUndone?: number; groupTotal?: number })[],
@@ -106,6 +154,7 @@ async function toChanges(
     ctx.db,
     rows.map((r) => r.actorId),
   );
+  const times = await atSecs(ctx, rows);
   return rows.map((r) => ({
     id: r.id,
     at: r.at.toISOString(),
@@ -129,16 +178,17 @@ async function toChanges(
           ...(r.groupTotal !== r.groupSize ? { groupTotal: r.groupTotal } : {}),
         }
       : {}),
+    ...(times.has(r.id) ? { atSec: times.get(r.id) } : {}),
   }));
 }
 
 defineOp({
   name: 'changes.list',
   description:
-    "The change log: who changed what, from where (web, mcp agent, companion), newest first. Filter by session, show, surface (via), item kind (entity) or groupId. sessionId: null lists only show-level changes — show wiki pages and event buttons (category), which belong to no session; with showId, that show's. Every change one op call wrote shares a groupId (a bulk call such as transcript_renameSpeaker writes one change per segment). grouped: true (needs sessionId or showId) folds each group into one row — its newest change, with groupSize (how many changes match the filter, set when the group has more than one), groupUndone (how many of those are already undone) and, when the group also reaches other sessions, groupTotal (its size everywhere); revertedAt is then set only when the whole group is undone, and limit counts rows. Undo one change with changes_revert(changeId) or a whole op call with changes_revertGroup(groupId).",
+    'The change log: who changed what, from where (web, mcp agent, companion), newest first. Filter by session, show, surface (via: one value or a list, e.g. ["web", "companion"] for operators), MCP client (clientName, as shown on each change; shows_get lists a show\'s mcpClients), item kind (entity) or groupId. Changes to session content carry atSec — seconds from the session start (as in transcript_text) of the event, topic or transcript segment they touched, read from the change\'s after snapshot (before for a delete); absent for other kinds and untimed events. sessionId: null lists only show-level changes — show wiki pages and event buttons (category), which belong to no session; with showId, that show\'s. Every change one op call wrote shares a groupId (a bulk call such as transcript_renameSpeaker writes one change per segment). grouped: true (needs sessionId or showId) folds each group into one row — its newest change, with groupSize (how many changes match the filter, set when the group has more than one), groupUndone (how many of those are already undone) and, when the group also reaches other sessions, groupTotal (its size everywhere); revertedAt is then set only when the whole group is undone, and limit counts rows. Undo one change with changes_revert(changeId) or a whole op call with changes_revertGroup(groupId).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, showId, via, entity, groupId, grouped, limit }) {
+  async run(ctx, { sessionId, showId, via, clientName, entity, groupId, grouped, limit }) {
     if (sessionId) await requireSession(ctx, sessionId, 'read');
     if (showId) await requireShow(ctx, showId, 'read');
     const where = and(
@@ -146,7 +196,9 @@ defineOp({
       sessionId ? eq(changes.sessionId, sessionId) : undefined,
       sessionId === null ? isNull(changes.sessionId) : undefined,
       showId ? eq(changes.showId, showId) : undefined,
-      via ? eq(changes.via, via) : undefined,
+      typeof via === 'string' ? eq(changes.via, via) : undefined,
+      Array.isArray(via) ? inArray(changes.via, via) : undefined,
+      clientName ? eq(changes.clientName, clientName) : undefined,
       entity ? eq(changes.entity, entity) : undefined,
       groupId ? eq(changes.groupId, groupId) : undefined,
     );

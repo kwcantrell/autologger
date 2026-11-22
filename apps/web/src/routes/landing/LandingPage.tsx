@@ -486,7 +486,7 @@ const features = (links: LandingLinks): Feature[] => [
       'Undo a single change, or every change from one call at once',
       'Ready-made skills for topics, moments, dashboards, wiki, briefs and questions',
     ],
-    mock: <LazyMock name="AgentsMock" height="h-[420px] sm:h-[325px] lg:h-[428px]" />,
+    mock: <LazyMock name="AgentsMock" height="h-[415px] sm:h-[337px] lg:h-[423px]" />,
     link: { label: 'Connect an agent', href: links.mcpDocsHref, hint: '' },
   },
 ];

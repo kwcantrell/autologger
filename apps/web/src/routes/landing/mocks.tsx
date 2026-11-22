@@ -2,9 +2,9 @@
 // assistive tech (each feature row says the same thing in text) and from the keyboard (inert).
 // Where the app has a presentational piece the mock renders that same component, so it follows
 // the real UI: the log button; the Event feed, Transcript, Topics and Agents rows and their feed
-// table; the stat, timeline and table dashboard widgets; the wiki page header, body and backlinks;
-// the compilation card; the playlist import preview; the export list. The rest (the hero's top
-// bar, clock and waveform, the Stream Deck page, ConnectCard's Claude Code line) is static markup
+// table; ConnectCard's copy row; the stat, timeline and table dashboard widgets; the wiki page
+// header, body and backlinks; the compilation card; the playlist import preview; the export list.
+// The rest (the hero's top bar, clock and waveform, the Stream Deck page) is static markup
 // in the app's Show Ignition classes and names the component it imitates: changed that
 // component's look? Update its mock.
 //
@@ -29,6 +29,7 @@ import {
 } from '@/session/dashboards/WidgetParts';
 import { FeedTable } from '@/session/feed';
 import { CHANGE_COLUMNS, ChangeRow } from '@/session/tabs/ChangeRow';
+import { CopyRow } from '@/session/tabs/CopyRow';
 import { ExportOptions } from '@/session/tabs/ExportOptions';
 import { SEGMENT_COLUMNS, SegmentRow } from '@/session/tabs/SegmentRow';
 import { TOPIC_COLUMNS, TopicRow } from '@/session/tabs/TopicRow';
@@ -309,7 +310,7 @@ export function DashboardMock() {
   );
 }
 
-/** Agents tab: ConnectCard's Claude Code line (static), then real change-log rows with undo. */
+/** Agents tab: ConnectCard's Claude Code CopyRow, then real change-log rows with undo. */
 export function AgentsMock() {
   const changes = [
     mockChange(1, 'events.createMany', 'event', 'create', 'Laugh', 24),
@@ -319,12 +320,11 @@ export function AgentsMock() {
   ];
   return (
     <MockFrame title="Agents · Change log">
-      <div className="rounded-ctl border border-si-line bg-si-bg px-3 py-2.5 font-tc text-[0.72rem] leading-[1.5] text-si-muted">
-        <span className="text-si-dim">$ </span>
-        <span className="break-all">
-          claude mcp add --transport http autologger https://autologger.example.com/mcp
-        </span>
-      </div>
+      <CopyRow
+        label="Claude Code"
+        value="claude mcp add --transport http autologger https://autologger.example.com/mcp"
+        onCopy={noop}
+      />
       <div className="mt-4">
         <FeedTable columns={CHANGE_COLUMNS} maxHeight={MOCK_TABLE}>
           {changes.map((c) => (

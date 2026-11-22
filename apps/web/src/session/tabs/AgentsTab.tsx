@@ -2,7 +2,6 @@
 
 import type { Change, Session } from '@autologger/contract';
 import type { QueryKey } from '@tanstack/react-query';
-import { Copy } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import {
   qk,
@@ -30,6 +29,7 @@ import {
 } from '@/shared/components/ui/dropdown-menu';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { CHANGE_COLUMNS, ChangeRow } from './ChangeRow';
+import { CopyRow } from './CopyRow';
 
 type Filter = 'all' | 'mcp' | 'operators';
 const FILTER_LABEL: Record<Filter, string> = {
@@ -66,35 +66,10 @@ export function AgentsTab({ session }: { session: Session }) {
   );
 }
 
-function CopyRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <span className="font-label text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-si-dim">
-        {label}
-      </span>
-      <div className="flex min-w-0 items-center gap-2">
-        <code
-          className="min-w-0 flex-1 truncate rounded-ctl border border-si-line bg-si-bg px-2.5 py-1.5 font-tc text-[0.78rem] text-si-fg"
-          title={value}
-        >
-          {value}
-        </code>
-        <Button
-          variant="outline"
-          size="sm"
-          aria-label={`Copy ${label}`}
-          onClick={() => {
-            navigator.clipboard.writeText(value).then(
-              () => showToast('Copied.'),
-              () => showToast('Could not copy to the clipboard.', true),
-            );
-          }}
-        >
-          <Copy aria-hidden="true" />
-          Copy
-        </Button>
-      </div>
-    </div>
+function copyToClipboard(value: string) {
+  navigator.clipboard.writeText(value).then(
+    () => showToast('Copied.'),
+    () => showToast('Could not copy to the clipboard.', true),
   );
 }
 
@@ -126,10 +101,11 @@ function ConnectCard() {
       </div>
       {mcpUrl ? (
         <div className="grid min-w-0 gap-3 md:grid-cols-2">
-          <CopyRow label="MCP URL" value={mcpUrl} />
+          <CopyRow label="MCP URL" value={mcpUrl} onCopy={copyToClipboard} />
           <CopyRow
             label="Claude Code"
             value={`claude mcp add --transport http autologger ${mcpUrl}`}
+            onCopy={copyToClipboard}
           />
         </div>
       ) : caps.isError ? (
