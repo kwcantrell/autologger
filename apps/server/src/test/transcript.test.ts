@@ -62,6 +62,7 @@ describe('transcript find and batch update', () => {
       ],
     });
     expect(res.updated).toBe(2);
+    if (!('segments' in res)) throw new Error('expected the full response');
     expect(res.segments.map((s) => s.edited)).toEqual([true, false, true]);
     expect(res.segments[2]).toMatchObject({ speaker: 'Dana', text: 'the dr said 50% off' });
     // Batch edits keep the recorded timings of unchanged words too.
