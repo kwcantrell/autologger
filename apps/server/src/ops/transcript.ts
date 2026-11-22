@@ -26,10 +26,22 @@ function rangeWhere(sessionId: string, fromSec?: number, toSec?: number) {
   );
 }
 
+/**
+ * Segments that START in [fromSec, toSec): the paging rule of the read ops (get, text, find), so
+ * consecutive windows never return the same segment twice.
+ */
+function startWhere(sessionId: string, fromSec?: number, toSec?: number) {
+  return and(
+    eq(ts.sessionId, sessionId),
+    fromSec !== undefined ? gte(ts.startSec, fromSec) : undefined,
+    toSec !== undefined ? lt(ts.startSec, toSec) : undefined,
+  );
+}
+
 defineOp({
   name: 'transcript.get',
   description:
-    'Transcript segments (speaker turns) with word timings. Times are seconds from session start. Prefer transcript.text for reading.',
+    'Transcript segments (speaker turns) with word timings. Times are seconds from session start. Optional fromSec/toSec select the segments that START in [fromSec, toSec) (the same rule as transcript.text and transcript.find). Prefer transcript.text for reading.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, fromSec, toSec }) {
@@ -37,7 +49,7 @@ defineOp({
     const rows = await ctx.db
       .select()
       .from(ts)
-      .where(rangeWhere(sessionId, fromSec, toSec))
+      .where(startWhere(sessionId, fromSec, toSec))
       .orderBy(asc(ts.startSec));
     return rows.map(toTranscriptSegment);
   },
@@ -102,13 +114,7 @@ defineOp({
     const rows = await ctx.db
       .select({ id: ts.id, startSec: ts.startSec, speaker: ts.speaker, text: ts.text })
       .from(ts)
-      .where(
-        and(
-          eq(ts.sessionId, sessionId),
-          fromSec !== undefined ? gte(ts.startSec, fromSec) : undefined,
-          toSec !== undefined ? lt(ts.startSec, toSec) : undefined,
-        ),
-      )
+      .where(startWhere(sessionId, fromSec, toSec))
       .orderBy(asc(ts.startSec));
     const [whole] = await ctx.db
       .select({
@@ -245,8 +251,8 @@ async function findContext(ctx: Ctx, sessionId: string, ids: string[], context: 
 defineOp({
   name: 'transcript.find',
   description:
-    'Find transcript segments (speaker turns) in one session whose text matches `pattern`, or any of `patterns` (up to 20, OR-ed; pass exactly one of the two), case-insensitive. By default patterns are plain text (substring match); set `regex: true` to use PostgreSQL regular expressions (POSIX style, e.g. `\\mdoctor\\M` for whole words, `x ?2`). Beware: `\\m`/`\\M` treat apostrophes as word boundaries, so `\\mm\\M` also matches "I\'m". Optional fromSec/toSec (seconds from session start) narrow the range. Regex searches time out after 2 seconds (bad_request). ' +
-    'Returns `{ total, lines }`: `total` is the number of matching lines in the range before `limit` is applied; `lines` holds `{ id, startSec, endSec, speaker, text, edited, matches, patternIndexes }` per matching line in time order, without word timings: `matches` lists the distinct matched substrings as written in the text, `patternIndexes` the 0-based indexes into `patterns` that matched (always `[0]` with `pattern`). At most `limit` matching lines (default 500); if total > lines returned, page with fromSec. ' +
+    'Find transcript segments (speaker turns) in one session whose text matches `pattern`, or any of `patterns` (up to 20, OR-ed; pass exactly one of the two), case-insensitive. By default patterns are plain text (substring match); set `regex: true` to use PostgreSQL regular expressions (POSIX style, e.g. `\\mdoctor\\M` for whole words, `x ?2`). Beware: `\\m`/`\\M` treat apostrophes as word boundaries, so `\\mm\\M` also matches "I\'m". Optional fromSec/toSec (seconds from session start) narrow the search to segments that START in [fromSec, toSec), the same rule as transcript.text, so consecutive windows never return a line twice. Regex searches time out after 2 seconds (bad_request). ' +
+    'Returns `{ total, lines }`: `total` is the number of matching lines in the range before `limit` is applied; `lines` holds `{ id, startSec, endSec, speaker, text, edited, matches, patternIndexes }` per matching line in time order, without word timings: `matches` lists the distinct matched substrings as written in the text, `patternIndexes` the 0-based indexes into `patterns` that matched (always `[0]` with `pattern`). At most `limit` matching lines (default 500); if total > lines returned, page with fromSec = the startSec of the last line returned (that line comes back again). ' +
     'Optional `context` (0-3, default 0) also returns up to that many neighbouring lines before and after each match (from the whole session, ignoring fromSec/toSec), flagged `context: true` and without matches or patternIndexes; use it when an error may span two segments. Pass the ids to transcript.updateSegments to fix them. ' +
     'Cheaper modes (context is ignored): `countOnly: true` returns only `{ total, counts }`, where counts[i] is the number of lines matching patterns[i] (use it to size a pattern before fetching lines); `idsOnly: true` returns `{ total, lines }` with only `{ id, startSec, speaker }` per line, up to `limit` (use it to collect ids to edit, e.g. regex `.` over a time range to relabel every line in it).',
   kind: 'read',
@@ -259,7 +265,7 @@ defineOp({
       // Bound regex cost: this op's transaction is read-only, so a local timeout is safe.
       if (regex) await ctx.db.execute(sql`set local statement_timeout = '2s'`);
       const conditions = patterns.map((p) => findCondition(p, regex));
-      const where = and(rangeWhere(sessionId, fromSec, toSec), or(...conditions));
+      const where = and(startWhere(sessionId, fromSec, toSec), or(...conditions));
       const countAll = async () => {
         const [c] = await ctx.db
           .select({

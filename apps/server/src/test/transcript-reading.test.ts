@@ -179,4 +179,30 @@ describe('transcript reading', () => {
       'bad_request',
     );
   });
+
+  it('find and get page by start time like text', async () => {
+    const { owner, session } = await studio();
+    const sessionId = session.id;
+    const [a, b, c] = await seed(sessionId, [
+      { startSec: 0, endSec: 9, speaker: 'Tom', text: 'Columbia one' },
+      { startSec: 8.5, endSec: 12, speaker: 'Tom', text: 'Columbia straddles' },
+      { startSec: 10, endSec: 15, speaker: 'Tom', text: 'Columbia two' },
+    ]);
+    const ids = async (fromSec?: number, toSec?: number) => {
+      const res = await call(owner, 'transcript.find', {
+        sessionId,
+        pattern: 'columbia',
+        idsOnly: true,
+        fromSec,
+        toSec,
+      });
+      return 'lines' in res ? res.lines.map((l) => l.id) : [];
+    };
+    // The straddling segment (8.5-12) is on the [0, 10) page only; toSec is exclusive.
+    expect(await ids(0, 10)).toEqual([a, b]);
+    expect(await ids(10, 20)).toEqual([c]);
+    expect(await ids(9, 10)).toEqual([]);
+    const got = await call(owner, 'transcript.get', { sessionId, fromSec: 10 });
+    expect(got.map((s) => s.id)).toEqual([c]);
+  });
 });

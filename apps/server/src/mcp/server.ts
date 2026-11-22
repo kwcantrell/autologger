@@ -30,7 +30,7 @@ Finding ids: shows_list → sessions_list (filter by showId) → sessions_get. R
 
 Setup: if the user asks for a new team, create it with teams_create (you become its owner). If a team has no show yet, a team owner/admin can create one with shows_create (teamId from teams_list) and set its event buttons with categories_save. Shows are deleted only in the web app.
 
-Time conventions: atSec / startSec / durationSec are seconds from the session start and line up with transcript_text, where each line looks like \`[HH:MM:SS @123.4s] Speaker: text\` — use the @seconds value. timecode strings (HH:MM:SS:FF) are on the session clock (frame rate and start offset in sessions_get). Prefer atSec when working from the transcript.
+Time conventions: atSec / startSec / durationSec are seconds from the session start and line up with transcript_text, where each line looks like \`[HH:MM:SS @123.4s] Speaker: text\` (format "compact": paragraphs \`@123.4 Speaker: text\` with inline \`[@183.4]\` stamps) — use the @seconds value. timecode strings (HH:MM:SS:FF) are on the session clock (frame rate and start offset in sessions_get). Prefer atSec when working from the transcript.
 
 Writes apply immediately, are attributed to you (this client) in the session's change log, and the operator can undo any of them from the Agents tab — so act, but stay within what was asked. topics_replace swaps the whole topic list (the usual way to (re)generate chapters); events_createMany logs many events at once.
 
