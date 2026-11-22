@@ -266,7 +266,9 @@ export const useChanges = (sessionId: string, via: Via | 'all') =>
 export interface ShowChangesFilter {
   sessionId?: string | null;
   entity?: ChangeEntity;
-  via?: Via;
+  via?: Via | Via[];
+  /** One MCP client (Change.clientName). */
+  clientName?: string;
 }
 export const useShowChanges = (showId: string, filter: ShowChangesFilter) =>
   useOpQuery(

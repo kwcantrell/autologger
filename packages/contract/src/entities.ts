@@ -430,6 +430,12 @@ export interface Change {
    * only counts its own). changes.revertGroup undoes all of them.
    */
   groupTotal?: number;
+  /**
+   * Session content (event, topic, transcript segment): where in the session the change was, in
+   * seconds from the session start — from its `after` snapshot, or `before` for a delete. Absent
+   * for other changes and for untimed events.
+   */
+  atSec?: number;
 }
 
 export interface ApiToken {

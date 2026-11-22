@@ -518,7 +518,18 @@ export const opInputs = {
       /** null: only show-level changes (wiki pages, event buttons), which belong to no session. */
       sessionId: id.nullable().optional(),
       showId: id.optional(),
-      via: z.enum(['web', 'mcp', 'companion', 'worker', 'system']).optional(),
+      /** One surface or a list of them (any of). */
+      via: z
+        .union([
+          z.enum(['web', 'mcp', 'companion', 'worker', 'system']),
+          z
+            .array(z.enum(['web', 'mcp', 'companion', 'worker', 'system']))
+            .min(1)
+            .max(5),
+        ])
+        .optional(),
+      /** Only changes by this MCP client (Change.clientName, e.g. "claude-code"). */
+      clientName: z.string().min(1).max(200).optional(),
       /** Only changes to this kind of item. */
       entity: z
         .enum([
@@ -638,7 +649,11 @@ export interface OpOutputs {
   'teams.transferOwnership': TeamDetail;
   'teams.setGrant': TeamDetail;
   'shows.list': Show[];
-  'shows.get': Show & { categories: Category[] };
+  'shows.get': Show & {
+    categories: Category[];
+    /** Distinct clientName of the MCP clients that changed this show (changes.list filter). */
+    mcpClients: string[];
+  };
   'shows.create': Show;
   'shows.update': Show;
   'shows.delete': { deleted: true };
