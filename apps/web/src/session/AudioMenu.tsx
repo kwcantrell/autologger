@@ -107,7 +107,7 @@ export function AudioMenu({
           render={<Button variant="ghost" size="sm" className="text-si-muted hover:text-si-fg" />}
         >
           <AudioLinesIcon aria-hidden="true" />
-          <span className="max-md:sr-only">Audio</span>
+          <span className="max-xl:sr-only">Audio</span>
           {activeJobs.length > 0 && (
             <Badge variant="outline" className="animate-yt-import-pulse motion-reduce:animate-none">
               {activeJobs.length} running

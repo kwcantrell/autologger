@@ -271,7 +271,7 @@ export function SessionDetailsButton({ session }: { session: Session }) {
         onClick={() => setOpen(true)}
       >
         <InfoIcon aria-hidden="true" />
-        <span className="max-md:sr-only">Details</span>
+        <span className="max-xl:sr-only">Details</span>
       </Button>
       {open && <SessionDetailsDialog session={session} onClose={() => setOpen(false)} />}
     </>

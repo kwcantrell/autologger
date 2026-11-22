@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { changeMessage, publish } from '../core/bus.ts';
 import { createAuthSession, SESSION_COOKIE } from '../http/auth.ts';
-import '../ws/show.ts';
+import { EVENT_HINT_MS } from '../ws/show.ts';
 import { attachWebSockets } from '../ws/upgrade.ts';
 import { call, makeUser, resetDb, setupDb, studio } from './harness.ts';
 
@@ -86,6 +86,23 @@ describe('/ws/show/:id', () => {
     await live.next((m) => m.type === 'closed' && m.reason === 'deleted');
     live.ws.close();
   });
+
+  it("throttles event changes of the show's sessions into session-list hints", async () => {
+    const { owner, show, session } = await studio();
+    const live = await connect(owner.user.id, show.id);
+    expect(live.got.shift()).toMatchObject({ type: 'hello' });
+
+    // A burst of logged events: one hint at once, one trailing hint after the window.
+    const event = { id: 'evt_x' };
+    for (let i = 0; i < 5; i++)
+      publish(`session:${session.id}`, changeMessage('event', 'upsert', `evt_${i}`, event));
+    await live.next((m) => m.type === 'invalidate' && m.entity === 'session');
+    await new Promise((r) => setTimeout(r, EVENT_HINT_MS - 500));
+    expect(live.got).toEqual([]);
+    await new Promise((r) => setTimeout(r, 1000));
+    expect(live.got).toEqual([{ type: 'invalidate', entity: 'session' }]);
+    live.ws.close();
+  }, 10_000);
 
   it('closes with 4403 when the reader loses access to the show', async () => {
     const { owner, team, show } = await studio();

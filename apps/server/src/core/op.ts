@@ -59,6 +59,12 @@ export interface Ctx {
   recordMany(changes: RecordChange[]): Promise<string[]>;
   /** Queue a realtime message; delivered only after the transaction commits. */
   publish(topic: Topic, message: BusMessage): void;
+  /**
+   * Queue slow external cleanup (e.g. deleting S3 objects) to run after the transaction commits,
+   * so no connection or lock is held meanwhile. Skipped when the op fails; best effort: errors
+   * are logged, never thrown to the caller.
+   */
+  afterCommit(task: () => Promise<void>): void;
 }
 
 export interface OpDef<N extends OpName, P = undefined> {
@@ -154,6 +160,7 @@ async function runInTransaction<N extends OpName>(
 ): Promise<OpResult<N, OpParsed<N>>> {
   const name = op.name;
   const outbox: [Topic, BusMessage][] = [];
+  const tasks: (() => Promise<void>)[] = [];
   const groupId = newId('grp');
   const result = await db.transaction(async (tx) => {
     const ctx: Ctx = {
@@ -162,6 +169,7 @@ async function runInTransaction<N extends OpName>(
       op: name,
       groupId,
       publish: (topic, message) => outbox.push([topic, message]),
+      afterCommit: (task) => tasks.push(task),
       async record(c) {
         const [id] = await ctx.recordMany([c]);
         return id!;
@@ -205,6 +213,13 @@ async function runInTransaction<N extends OpName>(
     if (sent.has(key)) continue;
     sent.add(key);
     publish(topic, message);
+  }
+  for (const task of tasks) {
+    try {
+      await task();
+    } catch (e) {
+      console.warn(`${name}: after-commit task failed: ${(e as Error).message}`);
+    }
   }
   return result;
 }

@@ -18,7 +18,9 @@ import { badRequest, conflict } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
+import { storageConfigured } from '../env.ts';
 import { toJob, withJobEstimates } from '../media/jobs.ts';
+import { deletePrefix, sessionPrefix } from '../media/s3.ts';
 import { iso, userRefs } from './map.ts';
 
 const { events, jobs, sessions, shows } = schema;
@@ -252,7 +254,7 @@ export const rescaleElapsed = (frames: number, from: number, to: number) =>
 defineOp({
   name: 'sessions.update',
   description:
-    "Edit session metadata; only the fields you pass change. Returns the updated session. Frame rate and start timecode can only change while the transport is stopped (else conflict). `frameRate` is frames per second and may be fractional (e.g. 23.976, 29.97). With `frameRate`, also pass `startTimecode` to keep the start timecode; without it the start offset keeps its frame count. `retime` says what happens to logged events when the clock changes: 'keep_seconds' (default) keeps every event at the same atSec (seconds from the session start, lined up with audio and transcript) by converting its stored frames, so event timecodes are re-read on the new clock; 'keep_frames' keeps the stored frame counts and timecodes, so atSec shifts (use it only when event timecodes were typed from an external timecode source and the session clock was set wrong). Either way the recorded clock (elapsed time) keeps its seconds; topics and transcript are in seconds and never move. A clock change is recorded in the change log together with each retimed event as one group: undo it with changes_revertGroup (groupId from changes_list), not event by event. `keyTerms` replaces this session's transcription key terms (same limits as in sessions_create; [] clears them); they apply to transcriptions that run from now on, so re-transcribe (media_retranscribe) to use them on audio already transcribed. Other metadata and key-term changes are not in the change log and cannot be undone from it.",
+    "Edit session metadata; only the fields you pass change. Returns the updated session. Frame rate and start timecode can only change while the transport is stopped (else conflict). `frameRate` is frames per second and may be fractional (e.g. 23.976, 29.97). Changing `frameRate` without `startTimecode` keeps the start timecode as written (01:00:00:00 stays 01:00:00:00); if its frames field does not exist at the new rate (e.g. :29 going to 24 fps) the call fails with bad_request, so pass `startTimecode` too. `retime` says what happens to logged events when the clock changes: 'keep_seconds' (default) keeps every event at the same atSec (seconds from the session start, lined up with audio and transcript) by converting its stored frames, so event timecodes are re-read on the new clock; 'keep_frames' keeps the stored frame counts and timecodes, so atSec shifts (use it only when event timecodes were typed from an external timecode source and the session clock was set wrong). Either way the recorded clock (elapsed time) keeps its seconds; topics and transcript are in seconds and never move. A clock change is recorded in the change log together with each retimed event as one group: undo it with changes_revertGroup (groupId from changes_list), not event by event. `keyTerms` replaces this session's transcription key terms (same limits as in sessions_create; [] clears them); they apply to transcriptions that run from now on, so re-transcribe (media_retranscribe) to use them on audio already transcribed. Other metadata and key-term changes are not in the change log and cannot be undone from it.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, startTimecode, retime = 'keep_seconds', ...patch }) {
@@ -268,6 +270,16 @@ defineOp({
     if (startTimecode) {
       const f = parseTimecode(startTimecode, set.frameRate ?? session.frameRate);
       if (f === null) throw badRequest('Start timecode is not valid for this frame rate.');
+      set.startOffsetFrames = f;
+    } else if (set.frameRate !== undefined && set.frameRate !== session.frameRate) {
+      // Keep the start timecode label: re-read it at the new rate rather than keeping its frames.
+      const current = formatFrames(session.startOffsetFrames, session.frameRate);
+      const f = parseTimecode(current, set.frameRate);
+      if (f === null) {
+        throw badRequest(
+          `The start timecode ${current} is not valid at ${set.frameRate} fps; pass startTimecode with frameRate.`,
+        );
+      }
       set.startOffsetFrames = f;
     }
     const before = clockOf(session);
@@ -368,14 +380,33 @@ defineOp({
   },
 });
 
+/**
+ * Remove the stored objects (audio, waveform peaks) of deleted sessions once the deletion
+ * commits. Their rows cascade in Postgres; the bucket does not.
+ */
+export function deleteSessionMedia(ctx: Ctx, sessionIds: string[]): void {
+  if (!storageConfigured || sessionIds.length === 0) return;
+  ctx.afterCommit(async () => {
+    for (const id of sessionIds) {
+      try {
+        await deletePrefix(sessionPrefix(id));
+      } catch (e) {
+        console.warn(`could not delete objects of session ${id}: ${(e as Error).message}`);
+      }
+    }
+  });
+}
+
 defineOp({
   name: 'sessions.delete',
-  description: 'Permanently delete a session and everything in it (owner/admin).',
+  description:
+    'Permanently delete a session and everything in it (owner/admin), including its stored audio and waveforms.',
   kind: 'write',
   surfaces: ['web'],
   async run(ctx, { sessionId }) {
     const { session } = await requireSession(ctx, sessionId, 'manage');
     await ctx.db.delete(sessions).where(eq(sessions.id, sessionId));
+    deleteSessionMedia(ctx, [sessionId]);
     ctx.publish(`session:${sessionId}`, { type: 'closed', reason: 'deleted' });
     // The show's session list and jobs (deleted with the session) changed: show socket.
     ctx.publish(`show:${session.showId}`, {
