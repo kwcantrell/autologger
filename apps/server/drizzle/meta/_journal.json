@@ -113,6 +113,13 @@
       "when": 1795349614165,
       "tag": "0015_backfill_compile_job_show",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795356164305,
+      "tag": "0016_dismiss_deleted_segment_jobs",
+      "breakpoints": true
     }
   ]
 }

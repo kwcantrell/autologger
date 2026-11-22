@@ -518,4 +518,61 @@ describe('jobs.dismiss', () => {
     });
     expect(openHere).toEqual([]);
   });
+
+  it('dismisses a deleted audio segment’s failed and queued jobs (media.delete)', async () => {
+    const { owner, team, show, session } = await studio();
+    const segmentId = newId('aud');
+    await db.insert(schema.audioSegments).values({
+      id: segmentId,
+      sessionId: session.id,
+      ordinal: 0,
+      durationSec: 600,
+      mimeType: 'audio/mpeg',
+      origin: 'file',
+      objectKey: `test/${segmentId}`,
+      status: 'failed',
+    });
+    const job = (kind: 'transcribe' | 'waveform', segment = segmentId) =>
+      enqueueJob(db, {
+        kind,
+        sessionId: session.id,
+        actorId: null,
+        payload: { segmentId: segment },
+      });
+    const failed = await job('transcribe');
+    await db
+      .update(schema.jobs)
+      .set({ status: 'failed', error: 'Deepgram error' })
+      .where(eq(schema.jobs.id, failed.id));
+    const queued = await job('waveform');
+    const otherSegment = await job('transcribe', 'aud_other');
+    await db
+      .update(schema.jobs)
+      .set({ status: 'failed', error: 'Deepgram error' })
+      .where(eq(schema.jobs.id, otherSegment.id));
+
+    const reader = await makeUser('reader@example.com');
+    await call(owner, 'teams.invite', { teamId: team.id, email: 'reader@example.com' });
+    await call(owner, 'teams.setGrant', {
+      teamId: team.id,
+      userId: reader.user.id,
+      showId: show.id,
+      access: 'read',
+    });
+    await failsWith(call(reader, 'media.delete', { segmentId }), 'forbidden');
+
+    await call(owner, 'media.delete', { segmentId });
+    const all = await call(owner, 'jobs.list', { showId: show.id });
+    expect(all.find((j) => j.id === queued.id)).toMatchObject({
+      status: 'failed',
+      error: 'Audio segment deleted.',
+    });
+    expect(all.find((j) => j.id === failed.id)?.dismissedAt).not.toBeNull();
+    const open = await call(owner, 'jobs.list', {
+      showId: show.id,
+      status: ['failed'],
+      hideDismissed: true,
+    });
+    expect(open.map((j) => j.id)).toEqual([otherSegment.id]);
+  });
 });
