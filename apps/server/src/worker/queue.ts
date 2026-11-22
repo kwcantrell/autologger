@@ -23,14 +23,23 @@ function publishJob(job: JobRow): void {
  * A follow-up transcription is queued with run_after = its import's created_at (enqueueJob
  * `after`), so it takes its parent's place; the kind tie-break keeps it ahead of sibling imports
  * inserted in the same transaction (identical now() timestamps). id makes the order total.
+ *
+ * `skipKinds`: kinds this worker has no free slot for (per-kind concurrency); the next job of
+ * another kind is claimed instead.
  */
-export async function claimJob(): Promise<JobRow | null> {
+export async function claimJob(skipKinds: readonly JobRow['kind'][] = []): Promise<JobRow | null> {
+  const skip = skipKinds.length
+    ? sql`and kind not in (${sql.join(
+        skipKinds.map((k) => sql`${k}`),
+        sql`, `,
+      )})`
+    : sql``;
   const rows = await db.execute<{ id: string }>(sql`
     update jobs set status = 'running', locked_at = now(), started_at = now(), updated_at = now(),
       attempts = attempts + 1, progress = 'Starting'
     where id = (
       select id from jobs
-      where status = 'queued' and run_after <= now()
+      where status = 'queued' and run_after <= now() ${skip}
       order by run_after, (kind = 'transcribe') desc, created_at, id
       limit 1
       for update skip locked
