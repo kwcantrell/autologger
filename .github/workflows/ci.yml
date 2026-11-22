@@ -39,7 +39,7 @@ jobs:
         run: npm run lint
       - name: Typecheck
         run: npm run typecheck
-      - name: Tests (server against Postgres, companion, contract)
+      - name: Tests (server against Postgres, companion, contract, importer)
         run: npm test
       - name: Build web
         run: npm run build -w @autologger/web

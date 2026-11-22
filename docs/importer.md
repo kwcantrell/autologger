@@ -19,6 +19,21 @@ curl -fLO https://<your-autologger>/api/importer/autologger-import.mjs
 `apps/importer/autologger-import.mjs` next to the server source); the route answers 404 when it
 is missing. It is a file route like the exports, not an op.
 
+### Use
+
+```sh
+export AUTOLOGGER_URL=https://<your-autologger>
+export AUTOLOGGER_TOKEN=alp_…            # Settings › Agents › Personal access tokens
+node autologger-import.mjs playlist '<playlist-url>' --show <showId> --cookies-from-browser chrome
+node autologger-import.mjs video '<video-url>' (--show <showId> | --session <sessionId>)
+node autologger-import.mjs compile <compilationId>
+```
+
+Needs yt-dlp (and ffmpeg + ffprobe for `compile`) on the user's computer; it says how to install
+them when they are missing. `--cookies-from-browser <browser>` / `--cookies <file>` are passed to
+yt-dlp; `--dry-run` changes nothing; re-running a command resumes. All options:
+[apps/importer/README.md](../apps/importer/README.md).
+
 ### What it calls
 
 The helper authenticates with a personal access token (Settings › Agents) as `Authorization:
