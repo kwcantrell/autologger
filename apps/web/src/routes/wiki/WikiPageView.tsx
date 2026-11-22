@@ -7,7 +7,7 @@ import type { WikiPage } from '@autologger/contract';
 import { ArrowLeftIcon, HistoryIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { Link, useLocation, useSearch as useLocationSearch } from 'wouter';
-import { useWikiPage } from '@/api/queries';
+import { useWikiBacklinks, useWikiPage } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { selectShow, useActive } from '@/app/useActive';
 import { PageFrame } from '@/components/RouteState';
@@ -264,40 +264,61 @@ function PageBody({ page }: { page: WikiPage }) {
         <p className="m-0 text-sm text-si-muted">This page is empty.</p>
       )}
 
-      {!edit && page.backlinks.length > 0 && (
-        <section
-          aria-labelledby="wiki-backlinks"
-          className="flex flex-col gap-1 border-t border-si-line pt-4"
-        >
-          <h2
-            id="wiki-backlinks"
-            className="m-0 text-xs font-semibold tracking-wide text-si-dim uppercase"
-          >
-            Linked from
-          </h2>
-          <ul className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0">
-            {page.backlinks.map((b) => (
-              <li key={b.id} className="flex items-baseline gap-1.5 text-sm">
-                <Link
-                  href={wikiHref(b.id)}
-                  className="text-si-fg underline decoration-(--si-line-strong) underline-offset-2 hover:text-si-accent"
-                >
-                  {b.title}
-                </Link>
-                <span className="text-xs text-si-dim">{WIKI_KIND_LABEL[b.kind]}</span>
-              </li>
-            ))}
-            {page.backlinkCount > page.backlinks.length && (
-              <li className="text-sm text-si-dim">
-                and {page.backlinkCount - page.backlinks.length} more
-              </li>
-            )}
-          </ul>
-        </section>
-      )}
+      {!edit && page.backlinks.length > 0 && <Backlinks page={page} />}
 
       <WikiHistorySheet page={page} open={history} onOpenChange={setHistory} canWrite={canWrite} />
       {confirmElement}
     </Frame>
+  );
+}
+
+/** "Linked from": the first 50 backlinks from wiki.get; "and N more" loads all (wiki.list linksTo). */
+function Backlinks({ page }: { page: WikiPage }) {
+  const [showAll, setShowAll] = useState(false);
+  const all = useWikiBacklinks(page.showId, page.id, showAll);
+  const list = showAll && all.data ? all.data : page.backlinks;
+  const hidden = page.backlinkCount - list.length;
+  return (
+    <section
+      aria-labelledby="wiki-backlinks"
+      className="flex flex-col gap-1 border-t border-si-line pt-4"
+    >
+      <h2
+        id="wiki-backlinks"
+        className="m-0 text-xs font-semibold tracking-wide text-si-dim uppercase"
+      >
+        Linked from
+      </h2>
+      <ul className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0">
+        {list.map((b) => (
+          <li key={b.id} className="flex items-baseline gap-1.5 text-sm">
+            <Link
+              href={wikiHref(b.id)}
+              className="text-si-fg underline decoration-(--si-line-strong) underline-offset-2 hover:text-si-accent"
+            >
+              {b.title}
+            </Link>
+            <span className="text-xs text-si-dim">{WIKI_KIND_LABEL[b.kind]}</span>
+          </li>
+        ))}
+        {hidden > 0 && (
+          <li className="flex items-baseline gap-1.5 text-sm text-si-dim">
+            {all.isError && <span role="alert">Couldn’t load the other {hidden}.</span>}
+            <button
+              type="button"
+              disabled={all.isFetching}
+              aria-busy={all.isFetching}
+              onClick={() => (showAll ? void all.refetch() : setShowAll(true))}
+              className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-sm text-si-dim underline decoration-(--si-line-strong) underline-offset-2 hover:text-si-fg disabled:cursor-default"
+            >
+              {all.isFetching && (
+                <Spinner role="presentation" aria-hidden="true" className="size-3" />
+              )}
+              {all.isError ? 'Try again' : `and ${hidden} more`}
+            </button>
+          </li>
+        )}
+      </ul>
+    </section>
   );
 }

@@ -6,7 +6,7 @@ import {
   type WikiPageSummary,
   wikiLinkTargets,
 } from '@autologger/contract';
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { requireSession, requireShow } from '../core/authz.ts';
 import { badRequest, conflict, notFound } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
@@ -86,12 +86,26 @@ const BACKLINK_LIMIT = 50;
 
 async function fullPage(ctx: Ctx, row: PageRow): Promise<WikiPage> {
   const [summary] = await summaries(ctx, [row]);
+  const linking = await linkingPages(ctx, row);
+  return {
+    ...summary!,
+    bodyMd: row.bodyMd,
+    backlinks: linking.slice(0, BACKLINK_LIMIT),
+    backlinkCount: linking.length,
+  };
+}
+
+/** The show's live pages whose [[links]] resolve to `row` (itself excluded), sorted by title. */
+async function linkingPages(
+  ctx: Ctx,
+  row: PageRow,
+): Promise<{ id: string; title: string; kind: PageRow['kind'] }[]> {
   // Links resolve as in the renderer and wiki.lint: [[targets]] outside code, by normTitle, titles
   // winning over aliases. SQL narrows to bodies that mention one of this page's names (whitespace
   // collapsed, case-insensitive); the shared link parser confirms.
   const byName = await wikiNames(ctx.db, row.showId);
   const names = [...byName].filter(([, id]) => id === row.id).map(([n]) => n);
-  if (!names.length) return { ...summary!, bodyMd: row.bodyMd, backlinks: [], backlinkCount: 0 };
+  if (!names.length) return [];
   const candidates = await ctx.db
     .select({ id: pages.id, title: pages.title, kind: pages.kind, bodyMd: pages.bodyMd })
     .from(pages)
@@ -108,15 +122,9 @@ async function fullPage(ctx: Ctx, row: PageRow): Promise<WikiPage> {
       ),
     )
     .orderBy(asc(pages.title));
-  const linking = candidates.filter((c) =>
-    wikiLinkTargets(c.bodyMd).some((t) => byName.get(normTitle(t)) === row.id),
-  );
-  return {
-    ...summary!,
-    bodyMd: row.bodyMd,
-    backlinks: linking.slice(0, BACKLINK_LIMIT).map(({ id, title, kind }) => ({ id, title, kind })),
-    backlinkCount: linking.length,
-  };
+  return candidates
+    .filter((c) => wikiLinkTargets(c.bodyMd).some((t) => byName.get(normTitle(t)) === row.id))
+    .map(({ id, title, kind }) => ({ id, title, kind }));
 }
 
 async function loadPage(ctx: Ctx, pageId: string, need: 'read' | 'write') {
@@ -168,12 +176,24 @@ async function findByTitle(ctx: Ctx, showId: string, title: string): Promise<Pag
 defineOp({
   name: 'wiki.list',
   description:
-    'Wiki pages of a show (people, topics, recurring bits, session recaps), sorted by kind then title, as { pages, total, nextOffset }. Paged: limit (default 50, max 200) and offset; when nextOffset is not null, call again with offset = nextOffset for the rest. Metadata only by default. Bulk read: include "summary" adds each page\'s first paragraph (headings skipped, max 400 chars); include "body" adds the full bodyMd of every page, which is large (pages run to several KB each) — narrow it with kind (e.g. kind "session" for all recaps) and a smaller limit. Backlinks are only in wiki_get.',
+    'Wiki pages of a show (people, topics, recurring bits, session recaps), sorted by kind then title, as { pages, total, nextOffset }. Paged: limit (default 50, max 200) and offset; when nextOffset is not null, call again with offset = nextOffset for the rest. Metadata only by default. Bulk read: include "summary" adds each page\'s first paragraph (headings skipped, max 400 chars); include "body" adds the full bodyMd of every page, which is large (pages run to several KB each) — narrow it with kind (e.g. kind "session" for all recaps) and a smaller limit. linksTo (a pageId of this show, from wiki_list / wiki_get) keeps only the pages whose [[links]] point to that page: its full backlinks list, of which wiki_get returns only the first 50 (backlinkCount has the total).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { showId, kind, include, limit = 50, offset = 0 }): Promise<WikiList> {
+  async run(ctx, { showId, kind, include, linksTo, limit = 50, offset = 0 }): Promise<WikiList> {
     await requireShow(ctx, showId, 'read');
-    const where = and(live, eq(pages.showId, showId), kind ? eq(pages.kind, kind) : undefined);
+    let linking: string[] | undefined;
+    if (linksTo) {
+      const target = await loadPage(ctx, linksTo, 'read');
+      if (target.showId !== showId) throw badRequest('linksTo is a page of another show.');
+      linking = (await linkingPages(ctx, target)).map((p) => p.id);
+      if (!linking.length) return { pages: [], total: 0, nextOffset: null };
+    }
+    const where = and(
+      live,
+      eq(pages.showId, showId),
+      kind ? eq(pages.kind, kind) : undefined,
+      linking ? inArray(pages.id, linking) : undefined,
+    );
     const [{ total } = { total: 0 }] = await ctx.db
       .select({ total: sql<number>`count(*)::int` })
       .from(pages)
@@ -248,7 +268,7 @@ defineOp({
 defineOp({
   name: 'wiki.get',
   description:
-    'Read a wiki page by pageId, or by showId + title (aliases match too; case and extra spaces are ignored, as in [[links]]). Includes backlinkCount and backlinks (the pages linking here, first 50 by title). To read many pages in one call use wiki_list with include "summary" or "body".',
+    'Read a wiki page by pageId, or by showId + title (aliases match too; case and extra spaces are ignored, as in [[links]]). Includes backlinkCount and backlinks (the pages linking here, first 50 by title; when backlinkCount is larger, wiki_list with linksTo = this pageId pages through all of them). To read many pages in one call use wiki_list with include "summary" or "body".',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { pageId, showId, title }) {

@@ -16,7 +16,9 @@ const POLL_MS = 5000;
 const RECOVER_MS = 60_000;
 const HEARTBEAT_MS = 60_000;
 
-const active = new Map<string, Promise<void>>();
+const KIND_CONCURRENCY = env.workerKindConcurrency;
+
+const active = new Map<string, { kind: JobRow['kind']; done: Promise<void> }>();
 let stopping = false;
 let wake: (() => void) | null = null;
 
@@ -48,15 +50,24 @@ async function runJob(job: JobRow): Promise<void> {
   }
 }
 
+/** Kinds that already fill their WORKER_CONCURRENCY_<KIND> slots in this worker. */
+function fullKinds(): JobRow['kind'][] {
+  const running = new Map<JobRow['kind'], number>();
+  for (const { kind } of active.values()) running.set(kind, (running.get(kind) ?? 0) + 1);
+  return (Object.keys(KIND_CONCURRENCY) as JobRow['kind'][]).filter(
+    (kind) => (running.get(kind) ?? 0) >= KIND_CONCURRENCY[kind],
+  );
+}
+
 async function fillSlots(): Promise<void> {
   while (!stopping && active.size < CONCURRENCY) {
-    const job = await claimJob();
+    const job = await claimJob(fullKinds());
     if (!job) return;
-    const p = runJob(job).finally(() => {
+    const done = runJob(job).finally(() => {
       active.delete(job.id);
       wake?.();
     });
-    active.set(job.id, p);
+    active.set(job.id, { kind: job.kind, done });
   }
 }
 
@@ -103,7 +114,7 @@ async function shutdown(): Promise<void> {
   console.log(`worker stopping; waiting for ${active.size} job(s)`);
   const ids = [...active.keys()];
   await Promise.race([
-    Promise.allSettled(active.values()),
+    Promise.allSettled([...active.values()].map((a) => a.done)),
     new Promise((r) => setTimeout(r, 20_000)),
   ]);
   for (const id of ids) if (active.has(id)) await releaseJob(id).catch(() => {});
@@ -114,7 +125,7 @@ async function shutdown(): Promise<void> {
 for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => void shutdown());
 
 console.log(
-  `autologger worker starting (concurrency ${CONCURRENCY}; storage ${storageConfigured ? 'on' : 'off'}, ` +
+  `autologger worker starting (concurrency ${CONCURRENCY}, per kind ${JSON.stringify(KIND_CONCURRENCY)}; storage ${storageConfigured ? 'on' : 'off'}, ` +
     `transcription ${transcriptionConfigured ? 'on' : 'off'}, youtube ${env.youtubeEnabled ? `on via ${env.ytDlpPath}` : 'off'})`,
 );
 await ensureBucket();

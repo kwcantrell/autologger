@@ -197,6 +197,28 @@ describe('job queue order', () => {
     expect((await claimJob())?.id).toBe(transcribe.id);
     expect(imports.map((j) => j.id)).toContain((await claimJob())?.id);
   });
+
+  it('skips kinds with no free slot and claims the next job of another kind', async () => {
+    const { owner, session } = await studio();
+    const imp = await enqueueJob(db, {
+      kind: 'youtube_import',
+      sessionId: session.id,
+      actorId: owner.user.id,
+      payload: { url: 'https://youtu.be/x' },
+    });
+    const transcribe = await enqueueJob(db, {
+      kind: 'transcribe',
+      sessionId: session.id,
+      actorId: null,
+      payload: { segmentId: 'aud_x' },
+    });
+
+    expect(await claimJob(['youtube_import', 'transcribe'])).toBeNull();
+    // The import is first in line, but its kind is full: the transcription runs instead.
+    expect((await claimJob(['youtube_import']))?.id).toBe(transcribe.id);
+    expect(await claimJob(['youtube_import'])).toBeNull();
+    expect((await claimJob())?.id).toBe(imp.id);
+  });
 });
 
 describe('job timing', () => {

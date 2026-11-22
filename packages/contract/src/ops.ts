@@ -357,6 +357,7 @@ export const opInputs = {
     showId: id,
     kind: z.enum(['person', 'topic', 'bit', 'session']).optional(),
     include: z.enum(['summary', 'body']).optional(),
+    linksTo: id.optional(),
     limit: z.number().int().min(1).max(200).optional(),
     offset: z.number().int().min(0).optional(),
   }),
