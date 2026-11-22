@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { toRpcError } from '../core/errors.ts';
 import { type Actor, executeOp, listOps } from '../core/op.ts';
 import { bearerFrom } from '../http/app.ts';
+import { coerceArguments, looksLikeStaleToolList, STALE_TOOL_LIST_HINT } from './coerce.ts';
 import { resourceMetadataUrl } from './oauth.ts';
 import { PROMPTS } from './prompts.ts';
 import { actorFromBearer } from './tokens.ts';
@@ -47,7 +48,12 @@ export const toolName = (op: string) => op.replace(/\./g, '_');
 const DESTRUCTIVE =
   /\.(delete|replace|revert|restore|archive|removeMember|leave|revoke)|^categories\.save$/;
 
-let toolCache: { tools: Tool[]; byTool: Map<string, OpName> } | null = null;
+type ToolCache = {
+  tools: Tool[];
+  byTool: Map<string, OpName>;
+  schemas: Map<string, Record<string, unknown>>;
+};
+let toolCache: ToolCache | null = null;
 
 function inputSchema(op: OpName): Tool['inputSchema'] {
   const schema = opInputs[op] as z.ZodType;
@@ -60,17 +66,20 @@ function inputSchema(op: OpName): Tool['inputSchema'] {
   return json as Tool['inputSchema'];
 }
 
-export function mcpTools(): { tools: Tool[]; byTool: Map<string, OpName> } {
+export function mcpTools(): ToolCache {
   if (toolCache) return toolCache;
   const byTool = new Map<string, OpName>();
+  const schemas = new Map<string, Record<string, unknown>>();
   const tools: Tool[] = listOps('mcp').map((op) => {
     const name = toolName(op.name);
     byTool.set(name, op.name);
+    const schema = inputSchema(op.name);
+    schemas.set(name, schema);
     return {
       name,
       title: op.name,
       description: op.description,
-      inputSchema: inputSchema(op.name),
+      inputSchema: schema,
       annotations:
         op.kind === 'read'
           ? { readOnlyHint: true, openWorldHint: false }
@@ -81,7 +90,7 @@ export function mcpTools(): { tools: Tool[]; byTool: Map<string, OpName> } {
             },
     };
   });
-  toolCache = { tools, byTool };
+  toolCache = { tools, byTool, schemas };
   return toolCache;
 }
 
@@ -114,17 +123,26 @@ export function createMcpServer(actor: Actor): Server {
         isError: true,
         content: [{ type: 'text', text: `Unknown tool ${req.params.name}.` }],
       };
+    // Clients with a tool list from before an option existed send its value as a string.
+    const args = coerceArguments(
+      mcpTools().schemas.get(req.params.name) ?? {},
+      req.params.arguments ?? {},
+    );
     try {
-      const data = await executeOp(op, req.params.arguments ?? {}, actor, 'mcp', extra.signal);
+      const data = await executeOp(op, args, actor, 'mcp', extra.signal);
       return resultContent(op, data);
     } catch (e) {
       const err = toRpcError(e);
       const issues = err.issues?.length
         ? `\n${err.issues.map((i) => `- ${i.path || '(input)'}: ${i.message}`).join('\n')}`
         : '';
+      const hint =
+        e instanceof z.ZodError && looksLikeStaleToolList(e.issues, args)
+          ? `\n${STALE_TOOL_LIST_HINT}`
+          : '';
       return {
         isError: true,
-        content: [{ type: 'text', text: `${err.code}: ${err.message}${issues}` }],
+        content: [{ type: 'text', text: `${err.code}: ${err.message}${issues}${hint}` }],
       };
     }
   });
