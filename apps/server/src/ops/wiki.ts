@@ -253,12 +253,13 @@ defineOp({
   name: 'wiki.list',
   description:
     'Wiki pages of a show (people, topics, recurring bits, session recaps, answered questions), sorted by kind then title, as { pages, total, nextOffset }. Paged: limit (default 50, max 200) and offset; when nextOffset is not null, call again with offset = nextOffset for the rest. Metadata only by default. Bulk read: include "summary" adds each page\'s first paragraph (headings skipped, max 400 chars); include "body" adds the full bodyMd of every page, which is large (pages run to several KB each) — narrow it with kind (e.g. kind "session" for all recaps, kind "question" for questions already answered — check these before answering a question again) and a smaller limit. linksTo (a pageId of this show, from wiki_list / wiki_get) keeps only the pages whose [[links]] point to that page: its full backlinks list, of which wiki_get returns only the first 50 (backlinkCount has the total). ' +
-    'citesSession (a sessionId of this show, from sessions_list) keeps only the pages that cite that session ([label](/sessions/<sessionId>?t=…) links, any page kind) and adds to each page `citations`: [{ startSec, endSec?, label }] — the cited ranges of that session in seconds from its start, in body order. Use it to find what the wiki already says about a session (e.g. question pages answered from it) before answering again or rewriting its recap.',
+    'citesSession (a sessionId of this show, from sessions_list) keeps only the pages that cite that session ([label](/sessions/<sessionId>?t=…) links, any page kind) and adds to each page `citations`: [{ startSec, endSec?, label }] — the cited ranges of that session in seconds from its start, in body order — plus `citationTotal`, the number of citations of that session across all matching pages (every page, not just this one). Use it to find what the wiki already says about a session (e.g. question pages answered from it) before answering again or rewriting its recap. ' +
+    'countOnly: true (only with citesSession) replaces each page\'s `citations` with `citationCount` (how many times it cites that session) — use it to check coverage or report progress without pulling every range; with limit 1, `total` (citing pages) and `citationTotal` answer "how much of the wiki cites this session" in one small call.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(
     ctx,
-    { showId, kind, include, linksTo, citesSession, limit = 50, offset = 0 },
+    { showId, kind, include, linksTo, citesSession, countOnly, limit = 50, offset = 0 },
   ): Promise<WikiList> {
     await requireShow(ctx, showId, 'read');
     let linking: SQL | undefined;
@@ -268,6 +269,7 @@ defineOp({
       linking = await linkingTo(ctx, target);
       if (!linking) return { pages: [], total: 0, nextOffset: null };
     }
+    if (countOnly && !citesSession) throw badRequest('countOnly needs citesSession.');
     if (citesSession) {
       const { session } = await requireSession(ctx, citesSession, 'read');
       if (session.showId !== showId) throw badRequest('citesSession is a session of another show.');
@@ -299,7 +301,37 @@ defineOp({
       .limit(limit)
       .offset(offset);
     let list: WikiListItem[] = await summaries(ctx, rows);
-    if (citesSession && rows.length) {
+    let citationTotal: number | undefined;
+    if (citesSession) {
+      const [{ n } = { n: 0 }] = await ctx.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(citations)
+        .where(
+          and(
+            eq(citations.sessionId, citesSession),
+            inArray(citations.fromPageId, ctx.db.select({ id: pages.id }).from(pages).where(where)),
+          ),
+        );
+      citationTotal = n;
+    }
+    if (citesSession && countOnly && rows.length) {
+      const counts = new Map<string, number>();
+      for (const c of await ctx.db
+        .select({ id: citations.fromPageId, n: sql<number>`count(*)::int` })
+        .from(citations)
+        .where(
+          and(
+            eq(citations.sessionId, citesSession),
+            inArray(
+              citations.fromPageId,
+              rows.map((r) => r.id),
+            ),
+          ),
+        )
+        .groupBy(citations.fromPageId))
+        counts.set(c.id, c.n);
+      list = list.map((p) => ({ ...p, citationCount: counts.get(p.id) ?? 0 }));
+    } else if (citesSession && rows.length) {
       const ranges = new Map<string, NonNullable<WikiListItem['citations']>>();
       for (const c of await ctx.db
         .select()
@@ -330,14 +362,21 @@ defineOp({
         pages: list.map((p, i) => ({ ...p, bodyMd: rows[i]!.bodyMd })),
         total,
         nextOffset,
+        ...(citationTotal != null ? { citationTotal } : {}),
       };
     if (include === 'summary')
       return {
         pages: list.map((p, i) => ({ ...p, summary: firstParagraph(rows[i]!.bodyMd) })),
         total,
         nextOffset,
+        ...(citationTotal != null ? { citationTotal } : {}),
       };
-    return { pages: list, total, nextOffset };
+    return {
+      pages: list,
+      total,
+      nextOffset,
+      ...(citationTotal != null ? { citationTotal } : {}),
+    };
   },
 });
 
