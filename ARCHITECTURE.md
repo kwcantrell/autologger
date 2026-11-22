@@ -72,8 +72,9 @@ export const createEvent = defineOp({
 - **Companion WS**: ops with `'companion'` in `surfaces`.
 - `ctx` carries `actor` (`{ userId, via: 'web'|'mcp'|'companion'|'worker', clientName, tokenId }`),
   `db` (the transaction), `record()` (change-log writer) and `publish()` (realtime, flushed after commit).
-- Long-poll ops (`jobs.list` with `waitSec`) define `waitForChange`: after the transaction commits
-  it waits on the realtime bus (no DB connection held), then the op runs again in a new transaction.
+- Long-poll ops (`jobs.list` with `waitSec`) define `watch`: it starts listening on the realtime bus
+  before the transaction, waits after commit (no DB connection held; ends early on client
+  disconnect via the request's AbortSignal), then the op runs again in a new transaction.
 - Authorization is explicit inside `run` via helpers in `core/authz.ts`: `requireTeamRole`,
   `requireShow(ctx, showId, 'read'|'write')`, `requireSession(ctx, sessionId, 'read'|'write')`.
 - Errors: `AppError(code, message)`; codes `bad_request`, `unauthenticated`, `forbidden`,

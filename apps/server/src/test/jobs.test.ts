@@ -1,5 +1,6 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { executeOp } from '../core/op.ts';
 import { db, schema } from '../db/client.ts';
 import { enqueueJob } from '../media/jobs.ts';
 import { claimJob, completeJob, setProgress } from '../worker/queue.ts';
@@ -63,6 +64,15 @@ describe('jobs.list', () => {
     const queued = await call(agent, 'jobs.list', pending);
     expect(queued.find((j) => j.id === first.id)?.queuePosition).toBe(0);
     expect(queued.find((j) => j.id === second.id)?.queuePosition).toBe(1);
+    // Waiting out a retry backoff: no position.
+    const later = await job();
+    await db
+      .update(schema.jobs)
+      .set({ runAfter: new Date(Date.now() + 60_000) })
+      .where(eq(schema.jobs.id, later.id));
+    const withLater = await call(agent, 'jobs.list', { sessionId: session.id });
+    expect(withLater.find((j) => j.id === later.id)?.queuePosition).toBeUndefined();
+    await db.delete(schema.jobs).where(eq(schema.jobs.id, later.id));
 
     // Nothing changes: answers after waitSec.
     let t = Date.now();
@@ -78,6 +88,52 @@ describe('jobs.list', () => {
     expect(Date.now() - t).toBeGreaterThanOrEqual(350);
     expect(Date.now() - t).toBeLessThan(5000);
     expect(after.map((j) => [j.id, j.status, j.queuePosition])).toEqual([[second.id, 'queued', 0]]);
+
+    // A change racing the first read is not missed (the watch starts before the transaction).
+    const racing = (await claimJob())!;
+    t = Date.now();
+    const raced = call(agent, 'jobs.list', { ...pending, waitSec: 30 });
+    await completeJob(racing);
+    expect(await raced).toEqual([]);
+    expect(Date.now() - t).toBeLessThan(5000);
+  });
+
+  it('re-checks access after waiting, and stops waiting when the caller goes away', async () => {
+    const { owner, team, show, session } = await studio();
+    const imp = await enqueueJob(db, {
+      kind: 'youtube_import',
+      sessionId: session.id,
+      actorId: owner.user.id,
+      payload: { url: 'https://youtu.be/x' },
+    });
+    const agent = asAgent(owner);
+    const input = { showId: show.id, status: ['queued' as const, 'running' as const] };
+
+    // Aborted (client disconnected): returns the first answer at once, no re-run.
+    const abort = new AbortController();
+    const t = Date.now();
+    setTimeout(() => abort.abort(), 100);
+    const first = await executeOp(
+      'jobs.list',
+      { ...input, waitSec: 30 },
+      agent,
+      'mcp',
+      abort.signal,
+    );
+    expect(Date.now() - t).toBeLessThan(2000);
+    expect(first.map((j) => j.id)).toEqual([imp.id]);
+
+    // Access removed while waiting: the re-run answers not_found.
+    const waiting = call(agent, 'jobs.list', { ...input, waitSec: 30 });
+    setTimeout(async () => {
+      await db
+        .delete(schema.teamMembers)
+        .where(
+          and(eq(schema.teamMembers.teamId, team.id), eq(schema.teamMembers.userId, owner.user.id)),
+        );
+      await completeJob((await claimJob())!);
+    }, 100);
+    await failsWith(waiting, 'not_found');
   });
 
   it('needs exactly one scope and read access to the show', async () => {
