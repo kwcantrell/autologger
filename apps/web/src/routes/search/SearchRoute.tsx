@@ -2,14 +2,16 @@
 // (Back leaves the page rather than stepping through keystrokes). Results are grouped by kind;
 // moments are grouped under their session, 3 each, with "Show N more in this session". "Make video"
 // turns the moments of one show into a compilation (MakeVideoDialog), one per show. The page asks
-// for the best PAGE_LIMIT hits and says when it got that many; "Make video" asks again for just that
-// show's moments, up to VIDEO_LIMIT, so it is not limited to what the page shows.
+// for the best PAGE_LIMIT hits and "Load more" adds the next PAGE_LIMIT (the search op's offset);
+// "Make video" asks again for just that show's moments, up to VIDEO_LIMIT, so it is not limited to
+// what the page shows. Its button counts the page's moments with a "+" while there may be more, and
+// the dialog's count once it has been opened.
 
 import type { SearchHit } from '@autologger/contract';
 import { BookOpenIcon, FilmIcon, SearchIcon } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useMemo, useState } from 'react';
 import { Link, useLocation, useSearch as useLocationSearch } from 'wouter';
-import { useSearch, useSessions } from '@/api/queries';
+import { useSearch, useSearchPages, useSessions } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { useActive } from '@/app/useActive';
 import { PageFrame } from '@/components/RouteState';
@@ -182,19 +184,27 @@ function ShowVideoButton({
   group,
   query,
   named,
+  more,
 }: {
   group: ShowMoments;
   query: string;
   named: boolean;
+  /** The page has more results to load, so this show may have more moments than it lists. */
+  more: boolean;
 }) {
   const { allShows } = useActive();
   const [open, setOpen] = useState(false);
+  // Once opened, keep the dialog's search so the button keeps its count. Keyed by query (below),
+  // so a new search starts unopened and costs no extra request until the dialog is opened again.
+  const [opened, setOpened] = useState(false);
   const show = allShows.find((s) => s.id === group.showId);
   const canWrite = show?.access === 'manage' || show?.access === 'write';
   const pageCandidates = useMemo(() => searchClipCandidates(group.moments), [group.moments]);
   // Opening the dialog asks for this show's moments alone, past the page's top PAGE_LIMIT hits.
   const all = useSearch(
-    open ? { query, showId: group.showId, kinds: MOMENT_KINDS, limit: VIDEO_LIMIT } : null,
+    open || opened
+      ? { query, showId: group.showId, kinds: MOMENT_KINDS, limit: VIDEO_LIMIT }
+      : null,
   );
   const fetched = useMemo(
     () => (all.data && !all.isPlaceholderData ? all.data.filter(isMoment) : null),
@@ -213,6 +223,7 @@ function ShowVideoButton({
   const blocked = useMakeVideoBlocked(canWrite, group.showName) ?? noVideo;
   const n = moments.length;
   const capped = fetched && n >= VIDEO_LIMIT ? `the best ${VIDEO_LIMIT} of the ` : '';
+  const count = `${n}${(fetched ? n >= VIDEO_LIMIT : more) ? '+' : ''}`;
   const partial = all.isError
     ? ' The full list of moments could not be loaded, so only the ones on the search page are listed.'
     : '';
@@ -224,11 +235,16 @@ function ShowVideoButton({
             size="sm"
             variant="outline"
             disabled={!!blocked}
-            onClick={() => setOpen(true)}
+            onClick={() => {
+              setOpen(true);
+              setOpened(true);
+            }}
             className="max-w-full"
           >
             <FilmIcon aria-hidden="true" />
-            <span className="truncate">{named ? `${group.showName} (${n})` : 'Make video'}</span>
+            <span className="truncate">
+              {named ? `${group.showName} (${count})` : 'Make video'}
+            </span>
           </Button>
         </span>
       </Tooltip>
@@ -248,7 +264,15 @@ function ShowVideoButton({
 }
 
 /** A compilation belongs to one show: one button, or one per show when the moments span shows. */
-function MakeVideoBar({ moments, query }: { moments: MomentHit[]; query: string }) {
+function MakeVideoBar({
+  moments,
+  query,
+  more,
+}: {
+  moments: MomentHit[];
+  query: string;
+  more: boolean;
+}) {
   const groups = useMemo(() => momentsByShow(moments), [moments]);
   if (groups.length === 0) return null;
   const many = groups.length > 1;
@@ -261,7 +285,13 @@ function MakeVideoBar({ moments, query }: { moments: MomentHit[]; query: string 
       </p>
       <div className="flex min-w-0 flex-wrap gap-2">
         {groups.map((g) => (
-          <ShowVideoButton key={g.showId} group={g} query={query} named={many} />
+          <ShowVideoButton
+            key={`${g.showId}\n${query}`}
+            group={g}
+            query={query}
+            named={many}
+            more={more}
+          />
         ))}
       </div>
     </div>
@@ -294,11 +324,33 @@ export function SearchRoute() {
   }, [q]);
 
   const { allShows, teams } = useActive();
-  const { data, isPending, isFetching, isError, error, refetch } = useSearch(
+  const {
+    data: pages,
+    isPending,
+    isFetching,
+    isError,
+    error,
+    refetch,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+  } = useSearchPages(
     isSearchable(debouncedQ)
       ? { query: debouncedQ.trim(), limit: PAGE_LIMIT, ...(show ? { showId: show } : {}) }
       : null,
   );
+  // Pages are disjoint, but a hit can move between pages when the data changes in between.
+  const data = useMemo(() => {
+    if (!pages) return undefined;
+    const seen = new Set<string>();
+    return pages.pages.flat().filter((h) => {
+      const k = `${h.kind}:${h.id}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }, [pages]);
 
   const multiTeam = teams.length > 1;
   const showItems = [
@@ -320,7 +372,7 @@ export function SearchRoute() {
         Type at least 2 characters to search sessions, transcripts, topics and events.
       </p>
     );
-  } else if (isError && !waiting) {
+  } else if (isError && !isFetchNextPageError && !waiting) {
     body = (
       <div role="alert" className="flex flex-col items-center gap-3 py-10 text-center text-sm">
         <p className="m-0 text-si-fg">{errorMessage(error) || 'Search failed.'}</p>
@@ -345,10 +397,10 @@ export function SearchRoute() {
   } else {
     body = (
       <div className="flex flex-col gap-6">
-        {data && data.length >= PAGE_LIMIT && (
+        {hasNextPage && (
           <p role="status" className="m-0 px-3 text-sm text-si-muted">
-            Showing the top {PAGE_LIMIT} matches. {show ? 'Add' : 'Narrow by show or add'} words to
-            see the rest.
+            Showing the top {data?.length} matches. Load more at the end of the page, or{' '}
+            {show ? 'add' : 'narrow by show or add'} words.
             {groups.moments.length > 0 &&
               ` Make video looks further: it searches its show again, up to ${VIDEO_LIMIT} moments.`}
           </p>
@@ -370,7 +422,7 @@ export function SearchRoute() {
         )}
         {groups.moments.length > 0 && (
           <ResultGroup title="Moments" list={false}>
-            <MakeVideoBar moments={groups.moments} query={debouncedQ.trim()} />
+            <MakeVideoBar moments={groups.moments} query={debouncedQ.trim()} more={!!hasNextPage} />
             <MomentsBySession key={`${debouncedQ}\n${show}`} moments={groups.moments} />
           </ResultGroup>
         )}
@@ -392,6 +444,26 @@ export function SearchRoute() {
               </li>
             ))}
           </ResultGroup>
+        )}
+        {hasNextPage && (
+          <div className="flex flex-col items-center gap-2 px-3 text-center text-sm">
+            {isFetchNextPageError && (
+              <p role="alert" className="m-0 text-si-fg">
+                {errorMessage(error) || 'Could not load more results.'}
+              </p>
+            )}
+            <Button
+              variant="outline"
+              disabled={isFetchingNextPage}
+              onClick={() => void fetchNextPage()}
+            >
+              {isFetchingNextPage && <Spinner role="presentation" aria-hidden="true" />}
+              {isFetchNextPageError ? 'Try again' : 'Load more'}
+            </Button>
+            <p className="m-0 text-xs text-si-dim">
+              The next {PAGE_LIMIT} matches join the groups above.
+            </p>
+          </div>
         )}
       </div>
     );

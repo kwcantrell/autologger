@@ -507,6 +507,8 @@ export const opInputs = {
     sessionId: id.optional(),
     kinds: z.array(z.enum(['event', 'transcript', 'topic', 'wiki', 'session'])).optional(),
     limit: z.number().int().min(1).max(500).default(30),
+    /** Hits to skip, for the next page: pass the number of hits already read. */
+    offset: z.number().int().min(0).max(10000).default(0),
   }),
 
   // ── change log ────────────────────────────────────────────
