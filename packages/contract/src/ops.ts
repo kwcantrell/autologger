@@ -29,6 +29,10 @@ import type {
 
 const id = z.string().min(1).max(64);
 const name = z.string().trim().min(1).max(200);
+
+/** Show transcription key terms (Deepgram keyterm prompting caps a request at ~500 tokens). */
+export const MAX_KEY_TERMS = 50;
+export const MAX_KEY_TERM_LENGTH = 50;
 const teamRole = z.enum(['owner', 'admin', 'member']);
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 const sec = z
@@ -113,6 +117,11 @@ export const opInputs = {
     defaultFrameRate: z.number().positive().max(120).optional(),
     titleSuffix: z.enum(['date', 'episode', 'none']).optional(),
     nextEpisode: z.number().int().min(1).optional(),
+    smartFormat: z.boolean().optional(),
+    keyTerms: z
+      .array(z.string().trim().min(1).max(MAX_KEY_TERM_LENGTH))
+      .max(MAX_KEY_TERMS)
+      .optional(),
   }),
   'shows.delete': z.object({ showId: id }),
   'categories.list': z.object({ showId: id }),

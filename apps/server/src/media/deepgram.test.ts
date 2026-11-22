@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type DeepgramResponse, mapDeepgram } from './deepgram.ts';
+import { type DeepgramResponse, deepgramUrl, mapDeepgram } from './deepgram.ts';
 import { isYoutubeUrl } from './youtube.ts';
 
 const fixture: DeepgramResponse = {
@@ -118,5 +118,43 @@ describe('isYoutubeUrl', () => {
     expect(isYoutubeUrl('https://youtu.be/abc')).toBe(true);
     expect(isYoutubeUrl('https://youtube.com.evil.example/watch')).toBe(false);
     expect(isYoutubeUrl('ftp://youtube.com/x')).toBe(false);
+  });
+});
+
+describe('deepgramUrl', () => {
+  const params = (url: string) => new URL(url).searchParams;
+
+  it('keeps the previous defaults: nova-3 with smart formatting, no key terms', () => {
+    const q = params(deepgramUrl());
+    expect(q.get('model')).toBe('nova-3');
+    expect(q.get('smart_format')).toBe('true');
+    expect(q.get('punctuate')).toBe('true');
+    expect(q.get('diarize')).toBe('true');
+    expect(q.get('utterances')).toBe('true');
+    expect(q.has('keyterm')).toBe(false);
+  });
+
+  it('turns smart formatting off and repeats keyterm once per URL-encoded term', () => {
+    const url = deepgramUrl({
+      smartFormat: false,
+      keyTerms: [' dx ', 'L’Hôpital', 'chain rule', 'dx', '', 'a&b=c'],
+    });
+    expect(params(url).get('smart_format')).toBe('false');
+    expect(params(url).get('punctuate')).toBe('true');
+    expect(params(url).getAll('keyterm')).toEqual(['dx', 'L’Hôpital', 'chain rule', 'a&b=c']);
+    expect(url).toContain('keyterm=chain+rule');
+    expect(url).toContain('keyterm=a%26b%3Dc');
+    expect(url).not.toContain('Hôpital');
+  });
+
+  it('caps the number and length of key terms', () => {
+    const many = Array.from({ length: 80 }, (_, i) => `term${i}`);
+    expect(
+      params(deepgramUrl({ smartFormat: true, keyTerms: many })).getAll('keyterm'),
+    ).toHaveLength(50);
+    const [long] = params(deepgramUrl({ smartFormat: true, keyTerms: ['x'.repeat(200)] })).getAll(
+      'keyterm',
+    );
+    expect(long).toHaveLength(50);
   });
 });

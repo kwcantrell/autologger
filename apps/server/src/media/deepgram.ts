@@ -1,10 +1,43 @@
 // Deepgram pre-recorded transcription. The mapping from Deepgram's response to transcript rows is
 // pure (no db) so it can be unit-tested with a fixture.
 
-import type { TranscriptWord } from '@autologger/contract';
+import { MAX_KEY_TERM_LENGTH, MAX_KEY_TERMS, type TranscriptWord } from '@autologger/contract';
 
-export const DEEPGRAM_URL =
-  'https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&diarize=true&utterances=true&punctuate=true';
+const DEEPGRAM_LISTEN = 'https://api.deepgram.com/v1/listen';
+
+/** Per-show transcription settings (columns on `shows`). */
+export interface TranscriptionOptions {
+  smartFormat: boolean;
+  keyTerms: string[];
+}
+
+export const DEFAULT_TRANSCRIPTION_OPTIONS: TranscriptionOptions = {
+  smartFormat: true,
+  keyTerms: [],
+};
+
+/**
+ * Build the Deepgram pre-recorded URL for a show's settings. Punctuation stays on even without
+ * smart formatting. Key terms use nova-3 keyterm prompting: one repeated `keyterm` parameter per
+ * term (URL-encoded, so multi-word terms stay one term), trimmed, de-duplicated and capped.
+ */
+export function deepgramUrl(opts: TranscriptionOptions = DEFAULT_TRANSCRIPTION_OPTIONS): string {
+  const q = new URLSearchParams({
+    model: 'nova-3',
+    smart_format: String(opts.smartFormat),
+    diarize: 'true',
+    utterances: 'true',
+    punctuate: 'true',
+  });
+  const terms = new Set<string>();
+  for (const raw of opts.keyTerms) {
+    const t = raw.trim().slice(0, MAX_KEY_TERM_LENGTH);
+    if (t) terms.add(t);
+    if (terms.size >= MAX_KEY_TERMS) break;
+  }
+  for (const t of terms) q.append('keyterm', t);
+  return `${DEEPGRAM_LISTEN}?${q.toString()}`;
+}
 
 export interface DeepgramWord {
   word: string;
@@ -89,13 +122,14 @@ export async function transcribeAudio(
   body: ReadableStream<Uint8Array>,
   mimeType: string,
   size: number | null,
+  opts: TranscriptionOptions = DEFAULT_TRANSCRIPTION_OPTIONS,
 ): Promise<DeepgramResponse> {
   const headers: Record<string, string> = {
     Authorization: `Token ${apiKey}`,
     'Content-Type': mimeType.split(';')[0]!.trim() || 'application/octet-stream',
   };
   if (size !== null) headers['Content-Length'] = String(size);
-  const res = await fetch(DEEPGRAM_URL, {
+  const res = await fetch(deepgramUrl(opts), {
     method: 'POST',
     headers,
     body,
