@@ -22,7 +22,7 @@ import { Spinner } from '@/shared/components/ui/spinner';
 import { Dialog, DialogActions } from '@/shared/ui/Dialog';
 import { useWikiUpsert, WIKI_KIND_LABEL, wikiHref } from './wikiShared';
 
-const KINDS: WikiKind[] = ['person', 'topic', 'bit', 'session'];
+const KINDS: WikiKind[] = ['person', 'topic', 'bit', 'session', 'question'];
 
 interface Props {
   showId: string;

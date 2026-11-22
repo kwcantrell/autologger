@@ -51,3 +51,25 @@ describe('Markdown GFM tables', () => {
     expect(html).toContain('list-none');
   });
 });
+
+describe('wiki citations', () => {
+  it('renders session range links as chips with the session title and range', () => {
+    const body =
+      'Dana on the dog [she said](/sessions/ses_1?t=61.5&to=3725) and [here](/sessions/ses_9?t=5).';
+    const html = renderToStaticMarkup(
+      <Router ssrPath="/wiki">
+        <WikiMarkdown
+          body={body}
+          resolve={resolve}
+          sessionTitle={(id) => (id === 'ses_1' ? 'Episode 12' : null)}
+        />
+      </Router>,
+    );
+    expect(html.match(/data-slot="wiki-citation"/g)).toHaveLength(2);
+    expect(html).toContain('href="/sessions/ses_1?t=61.5&amp;to=3725"');
+    expect(html).toContain('Episode 12');
+    expect(html).toContain('00:01:01–01:02:05');
+    expect(html).toContain('Unknown session');
+    expect(html).toContain('00:00:05');
+  });
+});

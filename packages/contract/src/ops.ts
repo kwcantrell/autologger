@@ -358,7 +358,7 @@ export const opInputs = {
   // ── wiki ──────────────────────────────────────────────────
   'wiki.list': z.object({
     showId: id,
-    kind: z.enum(['person', 'topic', 'bit', 'session']).optional(),
+    kind: z.enum(['person', 'topic', 'bit', 'session', 'question']).optional(),
     include: z.enum(['summary', 'body']).optional(),
     linksTo: id.optional(),
     limit: z.number().int().min(1).max(200).optional(),
@@ -372,7 +372,7 @@ export const opInputs = {
   'wiki.upsert': z.object({
     showId: id,
     pageId: id.optional(),
-    kind: z.enum(['person', 'topic', 'bit', 'session']),
+    kind: z.enum(['person', 'topic', 'bit', 'session', 'question']),
     title: z.string().trim().min(1).max(200),
     bodyMd: z.string().max(100_000),
     aliases: z.array(z.string().trim().min(1).max(200)).max(50).optional(),

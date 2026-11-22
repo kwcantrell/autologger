@@ -10,7 +10,7 @@ import { Label } from '@/shared/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui/tabs';
 import { Textarea } from '@/shared/components/ui/textarea';
 import { WikiMarkdown } from './WikiMarkdown';
-import type { WikiResolver } from './wikiShared';
+import { useSessionTitles, type WikiResolver } from './wikiShared';
 
 export interface WikiDraft {
   title: string;
@@ -23,9 +23,11 @@ interface Props {
   onChange: (draft: WikiDraft) => void;
   showAliases: boolean;
   resolve: WikiResolver;
+  showId: string;
 }
 
-export function WikiEditor({ draft, onChange, showAliases, resolve }: Props) {
+export function WikiEditor({ draft, onChange, showAliases, resolve, showId }: Props) {
+  const sessionTitle = useSessionTitles(showId, draft.body);
   const titleId = useId();
   const aliasId = useId();
   const [alias, setAlias] = useState('');
@@ -114,14 +116,14 @@ export function WikiEditor({ draft, onChange, showAliases, resolve }: Props) {
           />
           <p className="m-0 mt-1.5 text-xs text-si-dim">
             Markdown. Link another page with <code className="font-mono">[[Title]]</code> or{' '}
-            <code className="font-mono">[[Title|label]]</code>, a moment with{' '}
-            <code className="font-mono">[quote](/sessions/id?t=seconds)</code>.
+            <code className="font-mono">[[Title|label]]</code>, cite a moment with{' '}
+            <code className="font-mono">[quote](/sessions/id?t=seconds&amp;to=seconds)</code>.
           </p>
         </TabsContent>
         <TabsContent value="preview">
           <div className="min-h-[18rem] rounded-ctl border border-si-line px-4 py-2">
             {draft.body.trim() ? (
-              <WikiMarkdown body={draft.body} resolve={resolve} />
+              <WikiMarkdown body={draft.body} resolve={resolve} sessionTitle={sessionTitle} />
             ) : (
               <p className="m-0 py-2 text-sm text-si-muted">Nothing to preview yet.</p>
             )}

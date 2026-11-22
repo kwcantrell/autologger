@@ -38,7 +38,7 @@ Writes apply immediately, are attributed to you (this client) in the session's c
 
 Dashboards: dashboards_save takes a declarative JSON spec (its description lists widget types and named queries; preview data with dashboards_query). Nothing you write is executed or rendered as HTML.
 
-Wiki: wiki_upsert writes Markdown pages per show (people, recurring bits, session recaps); link pages with [[Title]]. Read before writing (wiki_list / wiki_get) and update existing pages rather than duplicating them. wiki_lint lists links to missing pages and orphan pages across the whole wiki; run it after a batch of edits.`;
+Wiki: wiki_upsert writes Markdown pages per show (people, recurring bits, session recaps, answered questions); link pages with [[Title]] and cite moments with [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>) rather than bare timecodes. Read before writing (wiki_list / wiki_get) and update existing pages rather than duplicating them. wiki_lint lists links to missing pages, orphan pages and broken citations across the whole wiki; run it after a batch of edits.`;
 
 /** `events.create` → `events_create`. */
 export const toolName = (op: string) => op.replace(/\./g, '_');

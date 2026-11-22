@@ -154,7 +154,8 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
     return () => window.removeEventListener('keydown', onKey);
   }, [player, session.isRolling]);
 
-  // Deep links from search: ?t=<sec>&event=<id>&topic=<id>
+  // Deep links from search and wiki citations: ?t=<sec>[&to=<sec>]&event=<id>&topic=<id>.
+  // With `to`, pressing play plays the cited range and pauses at its end.
   const [, navigate] = useLocation();
   const deepLinkDone = useRef(false);
   useEffect(() => {
@@ -174,7 +175,9 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
     if (tr && TABS.some((x) => x.id === tr)) switchTab(tr as WorkspaceTab);
     if (ev) revealEvent(ev);
     else if (topic) switchTab('topics');
-    if (t && Number.isFinite(Number(t)) && !session.isRolling) void player.seek(Number(t), false);
+    const to = Number(p.get('to') ?? Number.NaN);
+    if (t && Number.isFinite(Number(t)) && !session.isRolling)
+      void player.seek(Number(t), false, Number.isFinite(to) ? to : null);
     navigate(location.pathname, { replace: true });
   }, [
     events.data,

@@ -150,7 +150,14 @@ describe('wiki lint and bulk read', () => {
     ]);
     // Nothing links to Cold open; session recaps are never orphans.
     expect(lint.orphans.map((o) => o.title)).toEqual(['Cold open']);
-    expect(lint.counts).toEqual({ pages: 5, links: 7, unresolvedLinks: 2, orphans: 1 });
+    expect(lint.counts).toEqual({
+      pages: 5,
+      links: 7,
+      unresolvedLinks: 2,
+      orphans: 1,
+      citations: 0,
+      badCitations: 0,
+    });
 
     const stranger = await makeUser('stranger@example.com');
     await failsWith(call(stranger, 'wiki.lint', { showId: show.id }), 'not_found');
@@ -453,5 +460,76 @@ describe('wiki link index', () => {
     expect(await backfillWikiLinks(db, 2)).toBe(0);
     expect(await rows()).toEqual(indexed);
     expect(await read()).toEqual(before);
+  });
+});
+
+describe('question pages and citations', () => {
+  it('stores a cited answer and lints citations against the show sessions', async () => {
+    const { owner, team, show, session } = await studio();
+    await db.insert(schema.audioSegments).values({
+      id: 'aud_cite',
+      sessionId: session.id,
+      ordinal: 0,
+      startSec: 0,
+      durationSec: 600,
+      mimeType: 'audio/mpeg',
+      origin: 'file',
+      objectKey: 'test/aud_cite',
+      status: 'ready',
+    });
+    const silent = await call(owner, 'sessions.create', { showId: show.id });
+    const other = await call(owner, 'shows.create', { teamId: team.id, name: 'Other' });
+    const elsewhere = await call(owner, 'sessions.create', { showId: other.id });
+    const cite = (id: string, q: string) => `[x](/sessions/${id}?${q})`;
+    const agent = asAgent(owner);
+    const page = await call(agent, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'question',
+      title: 'When did Dana mention the dog?',
+      bodyMd: [
+        `Twice: ${cite(session.id, 't=10&to=20')} and ${cite(silent.id, 't=5000')}.`,
+        `Wrong: ${cite(session.id, 't=550&to=700')} ${cite(session.id, 't=30&to=30')}`,
+        `${cite(elsewhere.id, 't=1&to=2')} ${cite('ses_gone', 't=1')}`,
+        `\`${cite('ses_code', 't=1')}\``,
+      ].join('\n'),
+      compact: true,
+    });
+    expect(page.kind).toBe('question');
+
+    const lint = await call(owner, 'wiki.lint', { showId: show.id });
+    expect(lint.badCitations).toEqual([
+      {
+        pageId: page.id,
+        title: 'When did Dana mention the dog?',
+        kind: 'question',
+        citations: [
+          { sessionId: session.id, startSec: 550, endSec: 700, label: 'x', problem: 'past_end' },
+          { sessionId: session.id, startSec: 30, endSec: 30, label: 'x', problem: 'bad_range' },
+          {
+            sessionId: elsewhere.id,
+            startSec: 1,
+            endSec: 2,
+            label: 'x',
+            problem: 'unknown_session',
+          },
+          { sessionId: 'ses_gone', startSec: 1, label: 'x', problem: 'unknown_session' },
+        ],
+      },
+    ]);
+    // Question pages are reached from the Questions list, never orphans.
+    expect(lint.orphans).toEqual([]);
+    expect(lint.counts).toMatchObject({ pages: 1, citations: 6, badCitations: 4 });
+    const listed = await call(owner, 'wiki.list', { showId: show.id, kind: 'question' });
+    expect(listed.pages.map((p) => p.title)).toEqual(['When did Dana mention the dog?']);
+
+    const stranger = await makeUser('stranger@example.com');
+    await failsWith(
+      call(stranger, 'wiki.upsert', { showId: show.id, kind: 'question', title: 'Q', bodyMd: '' }),
+      'not_found',
+    );
+
+    const [created] = await call(owner, 'changes.list', { showId: show.id, via: 'mcp' });
+    await call(owner, 'changes.revert', { changeId: created!.id });
+    expect((await call(owner, 'wiki.lint', { showId: show.id })).counts.citations).toBe(0);
   });
 });
