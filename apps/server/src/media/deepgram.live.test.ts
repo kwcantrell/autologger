@@ -12,7 +12,12 @@
 
 import { readFileSync, statSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { type DeepgramResponse, mapDeepgram, transcribeAudio } from './deepgram.ts';
+import {
+  type DeepgramResponse,
+  describeTranscriber,
+  mapDeepgram,
+  transcribeAudio,
+} from './deepgram.ts';
 
 const audioPath = new URL('./fixtures/two-speakers.ogg', import.meta.url);
 const samplePath = new URL('./fixtures/two-speakers.deepgram.json', import.meta.url);
@@ -39,6 +44,8 @@ function expectTwoSpeakerTranscript(resp: DeepgramResponse, offsetSec: number) {
   // The v2 diarizer ran (diarize_model=latest, #173), not the deprecated v1 that diarize=true gets.
   expect(resp.metadata?.diarize_info?.arch, 'metadata.diarize_info.arch').toBeDefined();
   expect(resp.metadata?.diarize_info?.arch).not.toBe('v1');
+  // The job-result note names both the diarizer and the transcription model (#208).
+  expect(describeTranscriber(resp)).toMatch(/^diarizer v\S+ · nova-3 \S+$/);
 
   // Word-level speakers change exactly at the turn boundary ("Denver?" | "It").
   const words = resp.results?.channels?.[0]?.alternatives?.[0]?.words ?? [];
@@ -120,7 +127,7 @@ describe.runIf(optedIn)('two-speaker transcription (live Deepgram)', () => {
       throw new Error('DEEPGRAM_LIVE_TEST=1 needs DEEPGRAM_TEST_API_KEY set to a Deepgram key');
     const resp = await transcribeFixture(apiKey);
     // Shown in the run output so a failure (or a new diarizer) is easy to read.
-    console.info('diarize_info', resp.metadata?.diarize_info);
+    console.info('transcriber', describeTranscriber(resp), resp.metadata?.diarize_info);
     console.info(
       mapDeepgram(resp, 0)
         .map((r) => `[${r.startSec}–${r.endSec}] ${r.speaker}: ${r.text}`)

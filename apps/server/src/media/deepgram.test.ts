@@ -5,6 +5,7 @@ import {
   type DeepgramResponse,
   deepgramUrl,
   describeKeyTermCounts,
+  describeTranscriber,
   mapDeepgram,
   PermanentError,
   transcribeAudio,
@@ -248,6 +249,34 @@ describe('key term hit counts', () => {
     const many = Array.from({ length: 20 }, (_, i) => ({ term: `t${i}`, count: i === 19 ? 0 : 1 }));
     const listed = many.slice(0, 14).map((c) => `${c.term} ×1`);
     expect(describeKeyTermCounts(many)).toBe(`key terms: t19 ×0, ${listed.join(', ')}, +5 more`);
+  });
+
+  it('names the diarizer and model Deepgram reports, tolerating either being missing', () => {
+    const uuid = '40bd3654-e622-47c4-a111-63a61b23bfe2';
+    const model = { name: 'general-nova-3', version: '2025-04-17.21547', arch: 'nova-3' };
+    const diarize_info = { model_uuid: 'diar-uuid', arch: 'v2' };
+    expect(
+      describeTranscriber({
+        metadata: { models: [uuid], model_info: { [uuid]: model }, diarize_info },
+      }),
+    ).toBe('diarizer v2 · nova-3 2025-04-17');
+    // No `models` list: the model_info entry that isn't the diarizer's.
+    expect(
+      describeTranscriber({
+        metadata: {
+          model_info: { 'diar-uuid': { name: 'diarizer' }, [uuid]: model },
+          diarize_info,
+        },
+      }),
+    ).toBe('diarizer v2 · nova-3 2025-04-17');
+    expect(describeTranscriber({ metadata: { diarize_info } })).toBe('diarizer v2');
+    expect(
+      describeTranscriber({
+        metadata: { models: [uuid], model_info: { [uuid]: { name: 'general-nova-3' } } },
+      }),
+    ).toBe('general-nova-3');
+    expect(describeTranscriber({ metadata: { duration: 1 } })).toBe('');
+    expect(describeTranscriber({})).toBe('');
   });
 });
 
