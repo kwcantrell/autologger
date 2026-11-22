@@ -2,6 +2,7 @@
 // Times are ISO strings; session-relative times are seconds (`*Sec`) or frames (`*Frames`).
 
 import type { DashboardSpec } from './dashboard.ts';
+import type { TranscriptRule, TranscriptRuleCount } from './transcriptRules.ts';
 
 export type TeamRole = 'owner' | 'admin' | 'member';
 export type UserStatus = 'pending' | 'active' | 'disabled';
@@ -81,6 +82,8 @@ export interface Show {
   smartFormat: boolean;
   /** Transcription: key terms the transcriber should favour (Deepgram keyterm prompting). */
   keyTerms: string[];
+  /** Transcription: find/replace rules applied, in order, to every new transcription. */
+  transcriptRules: TranscriptRule[];
   createdAt: string;
   access: ShowAccess;
   sessionCount: number;
@@ -179,6 +182,28 @@ export interface TranscriptLine {
   speaker: string;
   text: string;
   edited: boolean;
+}
+
+/** One segment a transcript.replace call changes (or would change, in a dry run). */
+export interface TranscriptReplaceChange {
+  id: string;
+  startSec: number;
+  endSec: number;
+  speaker: string;
+  before: string;
+  after: string;
+}
+
+export interface TranscriptReplaceResult {
+  dryRun: boolean;
+  /** Segments changed (or that would change). */
+  changed: number;
+  /** Matches per rule, in rule order. */
+  rules: TranscriptRuleCount[];
+  /** The changed segments in time order, at most TRANSCRIPT_REPLACE_LIST_LIMIT of them. */
+  segments: TranscriptReplaceChange[];
+  /** True when more segments changed than `segments` lists. */
+  truncated: boolean;
 }
 
 /**

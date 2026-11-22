@@ -1,3 +1,4 @@
+import type { TranscriptRule } from '@autologger/contract';
 import { sql } from 'drizzle-orm';
 import {
   bigint,
@@ -108,6 +109,8 @@ export const shows = pgTable(
     smartFormat: boolean('smart_format').notNull().default(true),
     /** Deepgram keyterm prompting (nova-3): terms the transcriber should favour. */
     keyTerms: text('key_terms').array().notNull().default(sql`'{}'::text[]`),
+    /** Find/replace rules applied, in order, to every new transcription of this show. */
+    transcriptRules: jsonb('transcript_rules').$type<TranscriptRule[]>().notNull().default([]),
     createdAt: created(),
   },
   (t) => [index('shows_team').on(t.teamId)],

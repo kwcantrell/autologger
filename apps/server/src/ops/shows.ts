@@ -9,6 +9,7 @@ import {
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
+import { checkRules } from '../media/rules.ts';
 import { toCategory } from './map.ts';
 
 const { shows, teams, categories } = schema;
@@ -74,6 +75,7 @@ function toShow(
     titleSuffix: s.titleSuffix,
     smartFormat: s.smartFormat,
     keyTerms: s.keyTerms,
+    transcriptRules: s.transcriptRules,
     createdAt: s.createdAt.toISOString(),
     access: access.get(s.id)!,
     sessionCount,
@@ -163,11 +165,12 @@ defineOp({
 defineOp({
   name: 'shows.update',
   description:
-    'Change show settings (owner/admin of the show’s team; showId from shows_list). Only the fields you pass change: name, code (session-title prefix, uppercased), defaultFrameRate (for new sessions), titleSuffix (default title of new sessions created without one: "date" = CODE + date, "episode" = CODE + episode number, "none" = the show name) and nextEpisode (the episode number the next session gets). Transcription: `smartFormat` (default true) toggles Deepgram smart formatting of numbers, dates and currency; turn it off for technical or math talk, where it turns "x squared" into "x2". `keyTerms` replaces the list of key terms (names and jargon such as "dx" or "L’Hôpital") the transcriber should favour: at most 50 terms of up to 50 characters and 1000 characters in total, duplicates dropped, [] clears it. Transcription settings apply to transcriptions that run from now on; to apply them to audio already transcribed, re-transcribe the session (media_retranscribe). Event buttons are edited with categories_save. Settings changes are not in the change log and cannot be undone from it.',
+    'Change show settings (owner/admin of the show’s team; showId from shows_list). Only the fields you pass change: name, code (session-title prefix, uppercased), defaultFrameRate (for new sessions), titleSuffix (default title of new sessions created without one: "date" = CODE + date, "episode" = CODE + episode number, "none" = the show name) and nextEpisode (the episode number the next session gets). Transcription: `smartFormat` (default true) toggles Deepgram smart formatting of numbers, dates and currency; turn it off for technical or math talk, where it turns "x squared" into "x2". `keyTerms` replaces the list of key terms (names and jargon such as "dx" or "L’Hôpital") the transcriber should favour: at most 50 terms of up to 50 characters and 1000 characters in total, duplicates dropped, [] clears it. `transcriptRules` replaces the ordered list of find/replace rules applied to every new transcription before it is stored (and again on every re-transcription), e.g. `{ find: "doctor", replace: "dr", wholeWord: true }`: at most 100 rules, `find` and `replace` up to 200 characters. `find` is plain text unless `regex: true`, then a PostgreSQL regular expression (the same dialect as transcript_find; `\\1`…`\\9` in `replace` insert capture groups). `wholeWord` only matches where `find` is not part of a longer word; matching is case-insensitive unless `caseSensitive: true`; each rule sees the output of the ones before it; [] clears them. Invalid regexes and regexes that match empty text are rejected (bad_request). In the transcription job each rule may run at most 2 s; a rule that fails or times out is skipped and named in the job result. Transcription settings apply to transcriptions that run from now on; to apply them to audio already transcribed, re-transcribe the session (media_retranscribe), or apply the rules to the existing transcript with transcript_replace, which keeps manual edits. Event buttons are edited with categories_save. Settings changes are not in the change log and cannot be undone from it.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId, ...patch }) {
     await requireShow(ctx, showId, 'manage');
+    if (patch.transcriptRules) await checkRules(ctx.db, patch.transcriptRules);
     const set: Partial<typeof shows.$inferInsert> = {
       name: patch.name,
       code: patch.code?.toUpperCase(),
@@ -176,6 +179,7 @@ defineOp({
       nextEpisode: patch.nextEpisode,
       smartFormat: patch.smartFormat,
       keyTerms: patch.keyTerms && [...new Set(patch.keyTerms)],
+      transcriptRules: patch.transcriptRules,
     };
     for (const k of Object.keys(set) as (keyof typeof set)[])
       if (set[k] === undefined) delete set[k];

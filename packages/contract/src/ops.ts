@@ -23,11 +23,13 @@ import type {
   Topic,
   TranscriptFindLine,
   TranscriptLine,
+  TranscriptReplaceResult,
   TranscriptSegment,
   WikiPage,
   WikiPageSummary,
   WikiRevision,
 } from './entities.ts';
+import { MAX_TRANSCRIPT_RULES, TranscriptRuleInput } from './transcriptRules.ts';
 
 const id = z.string().min(1).max(64);
 const name = z.string().trim().min(1).max(200);
@@ -135,6 +137,7 @@ export const opInputs = {
         message: `Key terms may total at most ${MAX_KEY_TERMS_TOTAL_CHARS} characters (Deepgram limits key terms to about 500 tokens per request).`,
       })
       .optional(),
+    transcriptRules: z.array(TranscriptRuleInput).max(MAX_TRANSCRIPT_RULES).optional(),
   }),
   'shows.delete': z.object({ showId: id }),
   'categories.list': z.object({ showId: id }),
@@ -245,6 +248,13 @@ export const opInputs = {
     segmentId: id,
     atWord: z.number().int().min(1).max(100000),
     speaker: z.string().trim().max(80).optional(),
+  }),
+  'transcript.replace': z.object({
+    sessionId: id,
+    rules: z.array(TranscriptRuleInput).min(1).max(MAX_TRANSCRIPT_RULES).optional(),
+    fromSec: sec.optional(),
+    toSec: sec.optional(),
+    dryRun: z.boolean().default(false),
   }),
 
   // ── topics ────────────────────────────────────────────────
@@ -453,6 +463,7 @@ export interface OpOutputs {
   'transcript.renameSpeaker': { updated: number };
   'transcript.mergeSegments': TranscriptSegment;
   'transcript.splitSegment': TranscriptSegment[];
+  'transcript.replace': TranscriptReplaceResult;
   'topics.list': Topic[];
   'topics.create': Topic;
   'topics.update': Topic;

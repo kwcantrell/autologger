@@ -1,6 +1,7 @@
 // Job handlers. The worker writes directly through `db` (no executeOp): these are machine
 // writes attributed to the job's actor and are not recorded in the change log.
 
+import type { TranscriptRule } from '@autologger/contract';
 import { eq, sql } from 'drizzle-orm';
 import { changeMessage, publish } from '../core/bus.ts';
 import { newId } from '../core/ids.ts';
@@ -14,6 +15,7 @@ import {
   transcribeAudio,
 } from '../media/deepgram.ts';
 import { enqueueJob, type JobRow, toJob } from '../media/jobs.ts';
+import { applyShowRules, describeRuleCounts } from '../media/rules.ts';
 import { getObjectStream, objectKeyFor, putObjectFromFile, requireStorage } from '../media/s3.ts';
 import { lockSession, nextSegmentSlot } from '../media/segments.ts';
 import { downloadAudio } from '../media/youtube.ts';
@@ -58,6 +60,16 @@ export async function transcriptionOptionsFor(sessionId: string): Promise<Transc
   return row ?? DEFAULT_TRANSCRIPTION_OPTIONS;
 }
 
+/** The show's transcript replacement rules for a session, read when the job runs. */
+export async function transcriptRulesFor(sessionId: string): Promise<TranscriptRule[]> {
+  const [row] = await db
+    .select({ rules: shows.transcriptRules })
+    .from(sessions)
+    .innerJoin(shows, eq(shows.id, sessions.showId))
+    .where(eq(sessions.id, sessionId));
+  return row?.rules ?? [];
+}
+
 const segmentIdOf = (job: JobRow) => (job.payload as { segmentId?: string }).segmentId;
 
 const transcribe: Handler = {
@@ -76,7 +88,13 @@ const transcribe: Handler = {
     const opts = await transcriptionOptionsFor(seg.sessionId);
     const { body, size } = await getObjectStream(seg.objectKey);
     const resp = await transcribeAudio(env.deepgramApiKey!, body, seg.mimeType, size, opts);
-    const mapped = mapDeepgram(resp, seg.startSec);
+    const rules = await transcriptRulesFor(seg.sessionId);
+    if (rules.length) await setProgress(job, 'Applying replacement rules');
+    const {
+      segments: mapped,
+      counts,
+      skipped,
+    } = await applyShowRules(mapDeepgram(resp, seg.startSec), rules);
 
     const updated = await db.transaction(async (tx) => {
       const [still] = await tx
@@ -115,7 +133,8 @@ const transcribe: Handler = {
     publishSegment(updated);
     publish(topic, { type: 'invalidate', entity: 'transcript_segment' });
     publish(topic, { type: 'invalidate', entity: 'session' });
-    return `Transcribed ${mapped.length} segment${mapped.length === 1 ? '' : 's'}`;
+    const rulesNote = describeRuleCounts(counts, skipped);
+    return `Transcribed ${mapped.length} segment${mapped.length === 1 ? '' : 's'}${rulesNote ? `; ${rulesNote}` : ''}`;
   },
   async onFinalFailure(job, message) {
     const segmentId = segmentIdOf(job);
