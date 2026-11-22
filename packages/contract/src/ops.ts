@@ -234,21 +234,36 @@ export const opInputs = {
       .max(500),
     compact,
   }),
-  'transcript.renameSpeaker': z.object({
-    sessionId: id,
-    from: z.string().max(80),
-    to: z.string().trim().min(1).max(80),
-  }),
+  'transcript.renameSpeaker': z
+    .object({
+      sessionId: id,
+      from: z.string().max(80).optional(),
+      to: z.string().trim().min(1).max(80),
+      fromSec: sec.optional(),
+      toSec: sec.optional(),
+    })
+    .refine((v) => v.from !== undefined || v.fromSec !== undefined || v.toSec !== undefined, {
+      message: 'Pass from, or a fromSec/toSec range to relabel every speaker in it',
+    })
+    .refine((v) => v.fromSec === undefined || v.toSec === undefined || v.fromSec <= v.toSec, {
+      message: 'fromSec must not be after toSec',
+    }),
   // Segment structure fixes (merge / split).
   'transcript.mergeSegments': z.object({
     segmentIds: z.array(id).min(2).max(50),
     speaker: z.string().trim().max(80).optional(),
   }),
-  'transcript.splitSegment': z.object({
-    segmentId: id,
-    atWord: z.number().int().min(1).max(100000),
-    speaker: z.string().trim().max(80).optional(),
-  }),
+  'transcript.splitSegment': z
+    .object({
+      segmentId: id,
+      atWord: z.number().int().min(1).max(100000).optional(),
+      atText: z.string().trim().min(1).max(500).optional(),
+      atSec: sec.optional(),
+      speaker: z.string().trim().max(80).optional(),
+    })
+    .refine((v) => [v.atWord, v.atText, v.atSec].filter((x) => x !== undefined).length === 1, {
+      message: 'Pass exactly one of atWord, atText or atSec',
+    }),
   'transcript.replace': z.object({
     sessionId: id,
     rules: z.array(TranscriptRuleInput).min(1).max(MAX_TRANSCRIPT_RULES).optional(),
