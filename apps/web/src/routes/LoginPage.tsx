@@ -209,14 +209,17 @@ export function LoginPage() {
             </Alert>
           )}
         </Card>
-        <p className="mt-5 mb-0 text-center text-[0.8125rem]">
-          <Link
-            href="/"
-            className="text-si-muted no-underline outline-none hover:text-si-fg hover:underline focus-visible:rounded-ctl focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          >
-            What is AutoLogger?
-          </Link>
-        </p>
+        {/* The landing page is on unless this server turned it off (LANDING_PAGE=0). */}
+        {(caps.isError || c?.landingPage) && (
+          <p className="mt-5 mb-0 text-center text-[0.8125rem]">
+            <Link
+              href="/"
+              className="text-si-muted no-underline outline-none hover:text-si-fg hover:underline focus-visible:rounded-ctl focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              What is AutoLogger?
+            </Link>
+          </p>
+        )}
       </main>
     </div>
   );
