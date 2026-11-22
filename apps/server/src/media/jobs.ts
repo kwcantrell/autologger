@@ -98,8 +98,8 @@ export const MAX_WORKER_SLOTS = 256;
  * Fill `queuePosition` and `etaSec` on the unfinished jobs of a list (jobs.list, sessions.get).
  *
  * queuePosition: how many runnable queued jobs (any show) the worker claims first, 0 = next.
- * Mirrors claimJob's order (run_after, transcriptions first, created_at, id); `kind <> 'transcribe'`
- * is false for transcriptions, so they sort first. Jobs waiting out a retry backoff (run_after in
+ * Mirrors claimJob's order (waveform jobs last, run_after, transcriptions first, created_at, id);
+ * `kind <> 'transcribe'` is false for transcriptions, so they sort first. Jobs waiting out a retry backoff (run_after in
  * the future) get no position.
  *
  * etaSec, a rough estimate: a job's own duration is the median of the last ESTIMATE_SAMPLE
@@ -132,8 +132,8 @@ export async function withJobEstimates<T extends Job>(
         id: jobs.id,
         ahead: sql<number>`(select count(*)::int from jobs a
           where a.status = 'queued' and a.run_after <= now()
-            and (a.run_after, a.kind <> 'transcribe', a.created_at, a.id)
-              < (jobs.run_after, jobs.kind <> 'transcribe', jobs.created_at, jobs.id))`,
+            and (a.kind = 'waveform', a.run_after, a.kind <> 'transcribe', a.created_at, a.id)
+              < (jobs.kind = 'waveform', jobs.run_after, jobs.kind <> 'transcribe', jobs.created_at, jobs.id))`,
       })
       .from(jobs)
       .where(and(inArray(jobs.id, queued), sql`${jobs.runAfter} <= now()`));
@@ -181,6 +181,8 @@ export async function withJobEstimates<T extends Job>(
           (select s.duration_sec from audio_segments s where s.id = j.payload->>'segmentId') as audio
         from jobs j
         where j.kind = k.kind and j.status = 'done' and j.started_at is not null
+          -- A waveform job skipped for lack of ffmpeg took no time.
+          and coalesce(j.progress, '') not like 'Skipped:%'
         order by j.updated_at desc
         limit ${ESTIMATE_SAMPLE}
       ) r

@@ -304,8 +304,11 @@ const waveform: Handler = {
  * and ones whose job was skipped on a worker without ffmpeg. Segments with a queued, running or
  * failed waveform job are left alone (a failed one is not retried on every restart). Runs at
  * worker startup when ffmpeg is available; an advisory lock keeps simultaneous starts from
- * queueing twice. Returns the number of jobs queued.
+ * queueing twice. Queues at most BACKFILL_MAX per run. Returns the number of jobs queued.
  */
+/** Waveform jobs one backfill queues at most; the next worker start continues. */
+export const BACKFILL_MAX = 200;
+
 export async function backfillWaveforms(): Promise<number> {
   const queued = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('autologger:waveform-backfill'))`);
@@ -321,7 +324,8 @@ export async function backfillWaveforms(): Promise<number> {
             and j.payload->>'segmentId' = ${audioSegments.id})`,
         ),
       )
-      .orderBy(audioSegments.createdAt);
+      .orderBy(audioSegments.createdAt)
+      .limit(BACKFILL_MAX);
     const base = Date.now();
     const out: JobRow[] = [];
     for (const [i, r] of rows.entries()) {

@@ -431,6 +431,11 @@ export const opInputs = {
         .min(1)
         .max(4)
         .optional(),
+      kinds: z
+        .array(z.enum(['transcribe', 'youtube_import', 'waveform']))
+        .min(1)
+        .max(3)
+        .optional(),
       limit: z.number().int().min(1).max(500).default(100),
       waitSec: z.number().int().min(1).max(55).optional(),
     })

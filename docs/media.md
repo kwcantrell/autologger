@@ -19,8 +19,8 @@ the **worker** (`apps/server/src/worker/main.ts`), a second entrypoint of the se
 | `WORKER_CONCURRENCY`                                    | worker, api | Jobs run in parallel per worker process (default 2). The API uses it for etaSec only while no worker heartbeat row is live.                       |
 | `WORKER_CONCURRENCY_TRANSCRIBE`                         | worker      | Of those slots, how many `transcribe` jobs may hold at once (1 to `WORKER_CONCURRENCY`, which is the default).                                    |
 | `WORKER_CONCURRENCY_YOUTUBE_IMPORT`                     | worker      | Same for `youtube_import` jobs. Set it below `WORKER_CONCURRENCY` so slow downloads always leave a slot for transcriptions.                       |
-| `WORKER_CONCURRENCY_WAVEFORM`                           | worker      | Same for `waveform` jobs.                                                                                                                         |
-| `FFMPEG_PATH`                                           | worker      | ffmpeg binary for waveform peaks (default `ffmpeg` on `PATH`; in the worker image). Without it, waveform jobs finish as skipped.                  |
+| `WORKER_CONCURRENCY_WAVEFORM`                           | worker      | Same for `waveform` jobs (default 1).                                                                                                                       |
+| `FFMPEG_PATH`                                           | worker      | ffmpeg binary for waveform peaks (default `ffmpeg` on `PATH`; in the worker image). Without it, the worker doesn't claim waveform jobs.           |
 
 The bucket is created on first use (worker start, or the first upload) if the credentials allow it.
 
@@ -80,10 +80,11 @@ In production: `node src/worker/main.ts` with the same environment as the app (c
 - **waveform**: ffmpeg decodes the segment (read by presigned URL) to 8 kHz mono PCM; one peak
   (max |sample|, one byte) per 50 ms goes to `sessions/<sessionId>/<segmentId>.peaks.json` next to
   the audio, and `audio_segments.peaks_key` points at it. Peak `i` sits at session second
-  `startSec + i / 20`. Queued by `media.completeUpload` and `youtube_import` (transcriptions are
-  claimed first); read with `media.waveform` (presigned GETs). Without ffmpeg the job ends done with
-  a "Skipped: ffmpeg not found" note. On start, a worker with ffmpeg queues waveform jobs for
+  `startSec + i / 20`. Queued by `media.completeUpload` and `youtube_import`; waveform jobs are
+  claimed after every other kind. Read with `media.waveform` (presigned GETs). A worker without
+  ffmpeg never claims them (if one does, the job ends done with a "Skipped: ffmpeg not found" note,
+  left out of etaSec medians). On start, a worker with ffmpeg queues up to 200 waveform jobs for
   stored segments that have no peaks and no queued, running or failed waveform job (older audio,
-  skipped jobs).
+  skipped jobs). ffmpeg errors are stored with URLs redacted (they carry presigned signatures).
 - Realtime: the worker publishes `audio_segment` / `job` changes and `transcript_segment` /
   `session` invalidations through the bus (Postgres NOTIFY), so open session pages update live.

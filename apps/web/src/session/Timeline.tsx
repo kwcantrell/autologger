@@ -62,6 +62,15 @@ export function Timeline({
   const dragging = useRef(false);
   const segmentList = useMemo(() => segments.map((p) => p.seg), [segments]);
   const waveform = useWaveform(session.id, segmentList);
+  // Audio without a drawn waveform says why instead of looking like silence.
+  const waveformNote =
+    segmentList.length === 0
+      ? null
+      : waveform.isError
+        ? 'Waveform unavailable'
+        : !segmentList.some((s) => s.hasWaveform)
+          ? 'No waveform yet'
+          : null;
 
   const markers: Marker[] = useMemo(
     () =>
@@ -306,6 +315,11 @@ export function Timeline({
                 view={view}
                 playheadSec={playheadSec}
               />
+            )}
+            {waveformNote && (
+              <span className="pointer-events-none absolute top-1 right-2 z-[1] font-label text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-si-dim">
+                {waveformNote}
+              </span>
             )}
             <div className="pointer-events-none absolute inset-0 z-[1] before:absolute before:top-1/2 before:right-[0.4rem] before:left-[0.4rem] before:h-px before:-translate-y-1/2 before:bg-[rgba(148,163,184,0.38)] before:content-['']" />
             {/* Audio clips */}

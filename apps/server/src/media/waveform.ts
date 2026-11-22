@@ -89,6 +89,15 @@ export function decodePeaks(json: string): {
   };
 }
 
+/** ffmpeg stderr when the input has no (decodable) audio: retrying won't help. */
+const NO_AUDIO =
+  /does not contain any stream|matches no streams|Output file .* does not contain|Invalid data found when processing input/i;
+
+/** Replace URLs (presigned, with their signature) in text bound for jobs.error or logs. */
+export function redactUrls(text: string): string {
+  return text.replace(/https?:\/\/\S+/g, '<object url>');
+}
+
 const ffmpegChecks = new Map<string, Promise<boolean>>();
 
 /** Whether `ffmpeg -version` runs (cached per path for the process lifetime). */
@@ -121,6 +130,21 @@ export function computePeaks(
         '-nostdin',
         '-v',
         'error',
+        ...(/^https?:/.test(input)
+          ? [
+              // Give up on a stalled connection after 30 s; resume dropped ones.
+              '-rw_timeout',
+              '30000000',
+              '-reconnect',
+              '1',
+              '-reconnect_streamed',
+              '1',
+              '-reconnect_delay_max',
+              '5',
+            ]
+          : []),
+        '-protocol_whitelist',
+        'file,http,https,tcp,tls,crypto',
         '-i',
         input,
         '-vn',
@@ -144,13 +168,13 @@ export function computePeaks(
     });
     child.on('close', (code, signal) => {
       if (code === 0) return resolve(acc.finish());
-      const last = stderr.trim().split('\n').at(-1) ?? '';
+      // ffmpeg echoes the input URL, presigned signature included: never store or log it.
+      const last = redactUrls(stderr.trim().split('\n').at(-1) ?? '').slice(0, 300);
       if (signal) reject(new Error(`ffmpeg stopped (${signal}) before decoding finished.`));
+      else if (NO_AUDIO.test(stderr))
+        reject(new PermanentError(`The file has no audio stream ffmpeg can decode: ${last}`));
       // Retried: reading the object over HTTP can fail transiently.
-      else
-        reject(
-          new Error(`ffmpeg exited with code ${code}${last ? `: ${last.slice(0, 300)}` : ''}`),
-        );
+      else reject(new Error(`ffmpeg exited with code ${code}${last ? `: ${last}` : ''}`));
     });
   });
 }

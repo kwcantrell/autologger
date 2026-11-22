@@ -2,7 +2,7 @@
 // presigned URL, decode it, and reduce the visible part to one peak per pixel column.
 
 import type { AudioSegment } from '@autologger/contract';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { qk } from '@/api/queries';
 import { rpc } from '@/api/rpc';
 
@@ -79,6 +79,8 @@ export function useWaveform(sessionId: string, segments: AudioSegment[]) {
     queryKey: qk.waveform(sessionId, ready),
     enabled: ready !== '',
     staleTime: Number.POSITIVE_INFINITY,
+    // Keep drawing the segments we have while a newly computed one loads.
+    placeholderData: keepPreviousData,
     retry: 1,
     queryFn: async () => {
       const list = await rpc('media.waveform', { sessionId });

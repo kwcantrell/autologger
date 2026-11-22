@@ -19,7 +19,8 @@ function publishJob(job: JobRow): void {
 /**
  * Atomically take the next runnable job, or null.
  *
- * Claim order: run_after, then transcriptions before other kinds, then created_at, then id.
+ * Claim order: waveform jobs last (cosmetic; they never hold up imports or transcriptions), then
+ * run_after, then transcriptions before other kinds, then created_at, then id.
  * A follow-up transcription is queued with run_after = its import's created_at (enqueueJob
  * `after`), so it takes its parent's place; the kind tie-break keeps it ahead of sibling imports
  * inserted in the same transaction (identical now() timestamps). id makes the order total.
@@ -40,7 +41,7 @@ export async function claimJob(skipKinds: readonly JobRow['kind'][] = []): Promi
     where id = (
       select id from jobs
       where status = 'queued' and run_after <= now() ${skip}
-      order by run_after, (kind = 'transcribe') desc, created_at, id
+      order by (kind = 'waveform'), run_after, (kind = 'transcribe') desc, created_at, id
       limit 1
       for update skip locked
     )

@@ -24,11 +24,18 @@ export function TimelineWaveform({
   const bodyRef = useRef<HTMLSpanElement>(null);
   const playedRef = useRef<HTMLSpanElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  const colors = useRef<{ key: string; body: string; played: string } | null>(null);
 
   useEffect(() => {
     const c = canvasRef.current;
     if (!c) return;
-    const ro = new ResizeObserver(() => setSize({ w: c.clientWidth, h: c.clientHeight }));
+    const ro = new ResizeObserver(() =>
+      setSize((prev) =>
+        prev.w === c.clientWidth && prev.h === c.clientHeight
+          ? prev
+          : { w: c.clientWidth, h: c.clientHeight },
+      ),
+    );
     ro.observe(c);
     return () => ro.disconnect();
   }, []);
@@ -51,9 +58,16 @@ export function TimelineWaveform({
     if (c.width !== w) c.width = w;
     if (c.height !== h) c.height = h;
     ctx.clearRect(0, 0, w, h);
-    // Resolved theme colours (the played one follows data-transport).
-    const body = bodyRef.current ? getComputedStyle(bodyRef.current).color : 'gray';
-    const played = playedRef.current ? getComputedStyle(playedRef.current).color : 'white';
+    // Resolved theme colours, re-read only when the transport state (which tints the played
+    // colour) or the theme changes.
+    const key = `${c.closest('[data-transport]')?.getAttribute('data-transport')}|${document.documentElement.className}`;
+    if (colors.current?.key !== key)
+      colors.current = {
+        key,
+        body: bodyRef.current ? getComputedStyle(bodyRef.current).color : 'gray',
+        played: playedRef.current ? getComputedStyle(playedRef.current).color : 'white',
+      };
+    const { body, played } = colors.current;
     const colW = (size.w / Math.max(1, heights.length)) * dpr;
     const barW = Math.max(1, colW - dpr);
     const mid = h / 2;

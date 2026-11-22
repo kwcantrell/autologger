@@ -24,8 +24,16 @@ const { db, schema } = await import('../db/client.ts');
 const { env } = await import('../env.ts');
 const { newId } = await import('../core/ids.ts');
 const { enqueueJob } = await import('../media/jobs.ts');
-const { PeakAccumulator, PCM_RATE, PEAKS_PER_SEC, computePeaks, decodePeaks, encodePeaks } =
-  await import('../media/waveform.ts');
+const {
+  PeakAccumulator,
+  PCM_RATE,
+  PEAKS_PER_SEC,
+  computePeaks,
+  decodePeaks,
+  encodePeaks,
+  redactUrls,
+} = await import('../media/waveform.ts');
+const { claimJob } = await import('../worker/queue.ts');
 const { backfillWaveforms, handlers } = await import('../worker/handlers.ts');
 const { call, failsWith, makeUser, resetDb, setupDb, studio } = await import('./harness.ts');
 
@@ -75,6 +83,12 @@ describe('waveform peaks computation', () => {
     const back = decodePeaks(encodePeaks(peaks, durationSec));
     expect(back).toMatchObject({ peaksPerSec: PEAKS_PER_SEC, durationSec: 1 });
     expect([...back.peaks]).toEqual([...peaks]);
+  });
+
+  it('redacts presigned URLs from ffmpeg messages', () => {
+    expect(redactUrls('http://s3:8333/b/k.m4a?X-Amz-Signature=abc: Connection refused')).toBe(
+      '<object url> Connection refused',
+    );
   });
 
   it('keeps a trailing partial window and handles negative full scale', () => {
@@ -181,5 +195,39 @@ describe('waveform jobs and media.waveform', () => {
     // A skipped job ends done; the next startup with ffmpeg queues the segment again.
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job!.id));
     expect(await backfillWaveforms()).toBe(1);
+  });
+
+  it('claims waveform jobs last, and agents can leave them out of jobs.list', async () => {
+    const { owner, session } = await studio();
+    const segId = await segment(session.id, 1, null);
+    const wave = await enqueueJob(
+      db,
+      {
+        kind: 'waveform',
+        sessionId: session.id,
+        actorId: owner.user.id,
+        payload: { segmentId: segId },
+      },
+      { at: new Date(Date.now() - 60_000) },
+    );
+    const imp = await enqueueJob(db, {
+      kind: 'youtube_import',
+      sessionId: session.id,
+      actorId: owner.user.id,
+      payload: { url: 'https://youtu.be/x' },
+    });
+    const listed = await call(owner, 'jobs.list', { sessionId: session.id });
+    expect(listed.find((j) => j.id === wave.id)?.queuePosition).toBe(1);
+    expect(listed.find((j) => j.id === imp.id)?.queuePosition).toBe(0);
+    const transcriptWork = await call(owner, 'jobs.list', {
+      sessionId: session.id,
+      kinds: ['youtube_import', 'transcribe'],
+    });
+    expect(transcriptWork.map((j) => j.id)).toEqual([imp.id]);
+    // Older, but still behind the import.
+    expect((await claimJob())?.id).toBe(imp.id);
+    // A worker without ffmpeg skips the kind.
+    expect(await claimJob(['waveform'])).toBeNull();
+    expect((await claimJob())?.id).toBe(wave.id);
   });
 });
