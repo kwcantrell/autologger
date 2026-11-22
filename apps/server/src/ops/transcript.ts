@@ -133,7 +133,7 @@ defineOp({
 defineOp({
   name: 'transcript.find',
   description:
-    'Find transcript segments (speaker turns) in one session whose text matches `pattern`, case-insensitive. By default `pattern` is plain text (substring match); set `regex: true` to use a PostgreSQL regular expression (POSIX style, e.g. `\\mdoctor\\M` for whole words, `x ?2`). Optional fromSec/toSec (seconds from session start) narrow the range. Returns `{ id, startSec, endSec, speaker, text, edited }` per match in time order, without word timings, at most `limit` (default 500); page with fromSec if you hit the limit. Pass the ids to transcript.updateSegments to fix them.',
+    'Find transcript segments (speaker turns) in one session whose text matches `pattern`, case-insensitive. By default `pattern` is plain text (substring match); set `regex: true` to use a PostgreSQL regular expression (POSIX style, e.g. `\\mdoctor\\M` for whole words, `x ?2`). Optional fromSec/toSec (seconds from session start) narrow the range. Regex searches time out after 2 seconds (bad_request). Returns `{ id, startSec, endSec, speaker, text, edited }` per match in time order, without word timings, at most `limit` (default 500); page with fromSec if you hit the limit. Pass the ids to transcript.updateSegments to fix them.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, pattern, regex, fromSec, toSec, limit }) {
@@ -142,6 +142,8 @@ defineOp({
       ? sql`${ts.text} ~* ${pattern}`
       : ilike(ts.text, `%${pattern.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
     try {
+      // Bound regex cost: this op's transaction is read-only, so a local timeout is safe.
+      if (regex) await ctx.db.execute(sql`set local statement_timeout = '2s'`);
       const rows = await ctx.db
         .select()
         .from(ts)
@@ -150,10 +152,17 @@ defineOp({
         .limit(limit);
       return rows.map(toTranscriptLine);
     } catch (e) {
-      // 2201B invalid_regular_expression
       const err = e as { code?: string; cause?: { code?: string; message?: string } };
-      if ((err.code ?? err.cause?.code) === '2201B') {
+      const code = err.code ?? err.cause?.code;
+      // 2201B invalid_regular_expression
+      if (code === '2201B') {
         throw badRequest(`Invalid regular expression: ${err.cause?.message ?? pattern}`);
+      }
+      // 57014 query_canceled (statement_timeout)
+      if (code === '57014') {
+        throw badRequest(
+          'Pattern too slow: simplify the regular expression or narrow fromSec/toSec.',
+        );
       }
       throw e;
     }

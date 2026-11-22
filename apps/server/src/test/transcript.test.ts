@@ -76,7 +76,7 @@ describe('transcript find and batch update', () => {
     ]);
   });
 
-  it('rejects readers, outsiders and segments from another session', async () => {
+  it('rejects readers, outsiders, and a batch naming a segment from another session', async () => {
     const { owner, team, show, session } = await studio();
     const [a] = await seedTranscript(session.id, ['hello there']);
     const other = await call(owner, 'sessions.create', { showId: show.id });
@@ -117,6 +117,7 @@ describe('transcript find and batch update', () => {
       }),
       'not_found',
     );
+    // The foreign id is rejected up front; the valid entry in the same batch is not applied.
     const [unchanged] = await call(owner, 'transcript.get', { sessionId: session.id });
     expect(unchanged?.text).toBe('hello there');
   });
