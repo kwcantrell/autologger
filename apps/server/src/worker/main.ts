@@ -3,13 +3,22 @@
 // FOR UPDATE SKIP LOCKED.
 
 import { eq } from 'drizzle-orm';
+import { newId } from '../core/ids.ts';
 import { db, schema, sqlClient } from '../db/client.ts';
 import { env, storageConfigured, transcriptionConfigured } from '../env.ts';
 import { PermanentError } from '../media/deepgram.ts';
-import { JOBS_CHANNEL, type JobRow } from '../media/jobs.ts';
+import { JOBS_CHANNEL, type JobRow, WORKER_HEARTBEAT_SEC } from '../media/jobs.ts';
 import { ensureBucket } from '../media/s3.ts';
 import { handlers } from './handlers.ts';
-import { claimJob, completeJob, failJob, recoverStuckJobs, releaseJob } from './queue.ts';
+import {
+  beatWorker,
+  claimJob,
+  completeJob,
+  failJob,
+  recoverStuckJobs,
+  releaseJob,
+  removeWorker,
+} from './queue.ts';
 
 const CONCURRENCY = env.workerConcurrency;
 const POLL_MS = 5000;
@@ -17,6 +26,14 @@ const RECOVER_MS = 60_000;
 const HEARTBEAT_MS = 60_000;
 
 const KIND_CONCURRENCY = env.workerKindConcurrency;
+const WORKER_ID = newId('wrk');
+
+// Heartbeat row in `workers`: tells the API how many job slots are live (jobs.list etaSec).
+const beat = () =>
+  beatWorker(WORKER_ID, CONCURRENCY, KIND_CONCURRENCY).catch((e) =>
+    console.error('worker heartbeat failed', e),
+  );
+const presence = setInterval(beat, WORKER_HEARTBEAT_SEC * 1000);
 
 const active = new Map<string, { kind: JobRow['kind']; done: Promise<void> }>();
 let stopping = false;
@@ -118,6 +135,8 @@ async function shutdown(): Promise<void> {
     new Promise((r) => setTimeout(r, 20_000)),
   ]);
   for (const id of ids) if (active.has(id)) await releaseJob(id).catch(() => {});
+  clearInterval(presence);
+  await removeWorker(WORKER_ID).catch(() => {});
   await sqlClient.end({ timeout: 5 });
   process.exit(0);
 }
@@ -129,5 +148,6 @@ console.log(
     `transcription ${transcriptionConfigured ? 'on' : 'off'}, youtube ${env.youtubeEnabled ? `on via ${env.ytDlpPath}` : 'off'})`,
 );
 await ensureBucket();
+await beat();
 await sqlClient.listen(JOBS_CHANNEL, () => wake?.());
 await loop();

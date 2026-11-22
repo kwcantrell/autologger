@@ -47,7 +47,10 @@ export const env = {
   deepgramApiKey: str('DEEPGRAM_API_KEY'),
   ytDlpPath: str('YTDLP_PATH', 'yt-dlp')!,
   youtubeEnabled: str('YOUTUBE_IMPORT', '1') === '1',
-  /** Jobs a worker process runs in parallel (the API also uses it for jobs.list etaSec). */
+  /**
+   * Jobs a worker process runs in parallel. Workers report it in their `workers` heartbeat row;
+   * the API uses its own value for etaSec only when no worker row is live.
+   */
   workerConcurrency,
   /**
    * Per job kind, how many of a worker's slots it may fill at once (WORKER_CONCURRENCY_<KIND>,
