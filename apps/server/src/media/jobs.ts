@@ -19,7 +19,13 @@ export type JobSpec =
       actorId: string | null;
       payload: { segmentId: string; keyTerms?: string[] };
     }
-  | { kind: 'youtube_import'; sessionId: string; actorId: string | null; payload: { url: string } };
+  | {
+      kind: 'youtube_import';
+      sessionId: string;
+      actorId: string | null;
+      /** durationSec: the video's length when known up front (playlist imports); estimates only. */
+      payload: { url: string; durationSec?: number };
+    };
 
 /**
  * Queue a job. Pass `after` for follow-up work (an import's transcription): the new job takes
@@ -87,8 +93,17 @@ const ESTIMATE_SAMPLE = 20;
  * segment's length, when both are known). Running: own duration minus time since startedAt (at
  * least 0). Queued with a position: own duration plus position × median duration of any kind ÷
  * worker concurrency. At most two queries per call, whatever the list length.
+ *
+ * `untilTranscript` (sessions.get): a youtube_import's etaSec also covers the transcription it
+ * queues when the download finishes (median seconds per audio second × the video length from its
+ * payload), so it answers "when is the transcript ready". Without a known length it covers the
+ * download only.
  */
-export async function withJobEstimates<T extends Job>(tx: DbOrTx, list: T[]): Promise<T[]> {
+export async function withJobEstimates<T extends Job>(
+  tx: DbOrTx,
+  list: T[],
+  opts: { untilTranscript?: boolean } = {},
+): Promise<T[]> {
   const queued = list.filter((j) => j.status === 'queued').map((j) => j.id);
   const unfinished = list.filter((j) => j.status === 'queued' || j.status === 'running');
   if (!unfinished.length) return list;
@@ -121,6 +136,7 @@ export async function withJobEstimates<T extends Job>(tx: DbOrTx, list: T[]): Pr
     per_audio_sec: number | null;
     overall: number | null;
     audio: Record<string, number>;
+    video: Record<string, number>;
     elapsed: Record<string, number>;
   }>(sql`
     with recent as (
@@ -144,6 +160,11 @@ export async function withJobEstimates<T extends Job>(tx: DbOrTx, list: T[]): Pr
       (select coalesce(json_object_agg(j.id, s.duration_sec), '{}'::json)
         from jobs j join audio_segments s on s.id = j.payload->>'segmentId'
         where j.id in (${ids}) and j.kind = 'transcribe' and s.duration_sec > 0) as audio,
+      (select coalesce(json_object_agg(id, sec), '{}'::json) from (
+        select j.id, case when jsonb_typeof(j.payload->'durationSec') = 'number'
+          then (j.payload->>'durationSec')::float end as sec
+        from jobs j where j.id in (${ids}) and j.kind = 'youtube_import') v
+        where sec > 0) as video,
       (select coalesce(json_object_agg(j.id, extract(epoch from now() - j.started_at)), '{}'::json)
         from jobs j
         where j.id in (${ids}) and j.status = 'running' and j.started_at is not null) as elapsed`);
@@ -164,6 +185,9 @@ export async function withJobEstimates<T extends Job>(tx: DbOrTx, list: T[]): Pr
     if (j.status === 'running' && elapsed !== undefined) eta = Math.max(0, duration - elapsed);
     else if (position !== undefined && stats?.overall != null)
       eta = duration + (position * stats.overall) / env.workerConcurrency;
+    const video = stats?.video[j.id];
+    if (eta !== undefined && opts.untilTranscript && video && stats?.per_audio_sec != null)
+      eta += video * stats.per_audio_sec;
     return eta === undefined ? out : { ...out, etaSec: Math.round(eta) };
   });
 }

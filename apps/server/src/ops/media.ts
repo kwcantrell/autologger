@@ -395,7 +395,11 @@ defineOp({
             kind: 'youtube_import',
             sessionId,
             actorId: ctx.actor.user.id,
-            payload: { url: videoUrl },
+            payload: {
+              url: videoUrl,
+              // Lets sessions.get estimate the transcription that follows the download.
+              ...(e.durationSec ? { durationSec: e.durationSec } : {}),
+            },
           },
           { at: new Date(base + i) },
         );
