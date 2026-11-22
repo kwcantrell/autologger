@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, Plus } from 'lucide-react';
+import { ChevronRight, ListVideo, Plus } from 'lucide-react';
 import { type FormEvent, useMemo, useState } from 'react';
 import { useLocation } from 'wouter';
 import { qk, useCapabilities } from '@/api/queries';
@@ -14,12 +14,21 @@ import { Button } from '@/shared/components/ui/button';
 import { Field, FieldDescription, FieldLabel } from '@/shared/components/ui/field';
 import { Input } from '@/shared/components/ui/input';
 import { Textarea } from '@/shared/components/ui/textarea';
+import { ToggleGroup, ToggleGroupItem } from '@/shared/components/ui/toggle-group';
 import { cn } from '@/shared/lib/utils';
 import { Dialog, DialogActions } from '@/shared/ui/Dialog';
+import { PlaylistImportForm } from './PlaylistImportForm';
 
 const today = () => new Date().toLocaleDateString('en-CA');
 
-export function NewSessionModal({ onClose }: { onClose: () => void }) {
+export function NewSessionModal({
+  initialMode = 'session',
+  onClose,
+}: {
+  /** 'import' opens with the audio source section expanded. */
+  initialMode?: 'session' | 'import';
+  onClose: () => void;
+}) {
   const active = useActive();
   const caps = useCapabilities().data;
   const qc = useQueryClient();
@@ -36,7 +45,8 @@ export function NewSessionModal({ onClose }: { onClose: () => void }) {
   const [startTc, setStartTc] = useState('00:00:00:00');
   const [notes, setNotes] = useState('');
   const [tcOpen, setTcOpen] = useState(false);
-  const [srcOpen, setSrcOpen] = useState(false);
+  const [srcOpen, setSrcOpen] = useState(initialMode === 'import');
+  const [kind, setKind] = useState<'session' | 'playlist'>('session');
   const [ytUrl, setYtUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -103,14 +113,34 @@ export function NewSessionModal({ onClose }: { onClose: () => void }) {
     <Dialog
       open
       onOpenChange={(o) => !o && onClose()}
-      title="New session"
+      title={kind === 'playlist' ? 'Import a YouTube playlist' : 'New session'}
       hideTitle
       className="md:max-w-lg"
     >
-      <form onSubmit={submit} className="flex flex-col gap-4">
-        <div className="flex items-center gap-2">
-          <Plus className="size-5" aria-hidden="true" />
-          <h2 className="m-0 text-[1rem] font-semibold uppercase tracking-[0.06em]">New session</h2>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex items-center gap-2">
+            {kind === 'playlist' ? (
+              <ListVideo className="size-5" aria-hidden="true" />
+            ) : (
+              <Plus className="size-5" aria-hidden="true" />
+            )}
+            <h2 className="m-0 text-[1rem] font-semibold uppercase tracking-[0.06em]">
+              {kind === 'playlist' ? 'Import playlist' : 'New session'}
+            </h2>
+          </div>
+          <ToggleGroup
+            variant="outline"
+            size="sm"
+            aria-label="Create"
+            value={[kind]}
+            onValueChange={([v]) => {
+              if (v === 'session' || v === 'playlist') setKind(v);
+            }}
+          >
+            <ToggleGroupItem value="session">One session</ToggleGroupItem>
+            <ToggleGroupItem value="playlist">YouTube playlist</ToggleGroupItem>
+          </ToggleGroup>
         </div>
 
         <Field>
@@ -131,6 +161,15 @@ export function NewSessionModal({ onClose }: { onClose: () => void }) {
           )}
         </Field>
 
+        {kind === 'playlist' ? <PlaylistImportForm show={show} onClose={onClose} /> : sessionForm()}
+      </div>
+    </Dialog>
+  );
+
+  // A plain render helper (not a component), so typing never remounts the inputs.
+  function sessionForm() {
+    return (
+      <form onSubmit={submit} className="flex flex-col gap-4">
         <Field>
           <FieldLabel htmlFor="ns-title">Title (optional)</FieldLabel>
           <Input
@@ -300,6 +339,6 @@ export function NewSessionModal({ onClose }: { onClose: () => void }) {
           </Button>
         </DialogActions>
       </form>
-    </Dialog>
-  );
+    );
+  }
 }

@@ -63,7 +63,7 @@ export function HomeRoute() {
             <Button
               variant={recent ? 'outline' : 'default'}
               id="home-new-session"
-              onClick={() => newSessionOpen.set(true)}
+              onClick={() => newSessionOpen.set('session')}
             >
               <Plus strokeWidth={2} aria-hidden="true" />
               {recent ? 'New session' : 'Start a session'}

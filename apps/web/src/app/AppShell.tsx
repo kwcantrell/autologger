@@ -121,7 +121,9 @@ export function AppShell() {
           id="v3-main"
           className="relative m-0 block min-h-0 w-full min-w-0 max-w-none flex-1 [overflow-x:clip] overflow-y-visible md:overflow-y-auto"
         >
-          {showNew && <NewSessionModal onClose={() => newSessionOpen.set(false)} />}
+          {showNew && (
+            <NewSessionModal initialMode={showNew} onClose={() => newSessionOpen.set(false)} />
+          )}
           {settings && (
             <ErrorBoundary>
               <Suspense fallback={null}>
