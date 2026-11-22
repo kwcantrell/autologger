@@ -267,6 +267,28 @@ export interface WikiPageSummary {
   updatedBy: UserRef | null;
 }
 
+/** A wiki.list row; `summary` / `bodyMd` only with `include: 'summary'` / `'body'`. */
+export interface WikiListItem extends WikiPageSummary {
+  /** First paragraph of the body (headings skipped), at most 400 characters. */
+  summary?: string;
+  bodyMd?: string;
+}
+
+/** A page of wiki.list. `nextOffset` is null on the last page. */
+export interface WikiList {
+  pages: WikiListItem[];
+  total: number;
+  nextOffset: number | null;
+}
+
+export interface WikiLint {
+  /** Pages whose [[links]] name no page title or alias in the show. */
+  unresolved: { pageId: string; title: string; kind: WikiKind; targets: string[] }[];
+  /** Person, topic and bit pages no other page links to (session recaps are left out). */
+  orphans: { pageId: string; title: string; kind: WikiKind }[];
+  counts: { pages: number; links: number; unresolvedLinks: number; orphans: number };
+}
+
 export interface WikiPage extends WikiPageSummary {
   bodyMd: string;
   /** Pages that link to this one via [[Title]]. */

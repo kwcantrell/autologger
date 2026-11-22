@@ -6,6 +6,7 @@
 // titles and aliases; an unknown title renders dim with a "No page named …" tooltip. Inside a table
 // cell an aliased link escapes its pipe, as GFM requires: [[Title\|label]].
 
+import { WIKI_LINK } from '@autologger/contract';
 import type { ReactNode } from 'react';
 import Markdown, { type Components, type UrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -29,8 +30,6 @@ interface MdNode {
   url?: string;
   children?: MdNode[];
 }
-
-const WIKI_LINK = /\[\[([^[\]|\n]+?)(?:\|([^[\]\n]+?))?\]\]/g;
 
 function splitText(value: string): MdNode[] | null {
   WIKI_LINK.lastIndex = 0;
