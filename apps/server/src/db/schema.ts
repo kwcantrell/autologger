@@ -368,6 +368,31 @@ export const wikiRevisions = pgTable(
   (t) => [primaryKey({ columns: [t.pageId, t.revision] })],
 );
 
+/**
+ * Link index: the distinct [[link]] targets of each page's current body (wikiLinkTargets), kept in
+ * step with every body write and undo. Targets are stored normalised, not as page ids, and resolve
+ * to pages through titles and aliases at read time, so renames and new aliases need no reindex.
+ * Rows of a soft-deleted page stay (undo brings them back); readers join live pages.
+ */
+export const wikiLinks = pgTable(
+  'wiki_links',
+  {
+    fromPageId: text('from_page_id')
+      .notNull()
+      .references(() => wikiPages.id, { onDelete: 'cascade' }),
+    /** normTitle(target): what titles and aliases are matched against. */
+    targetNorm: text('target_norm').notNull(),
+    /** The target as first written in the body (wiki.lint reports it). */
+    target: text('target').notNull(),
+    /** Order of first appearance in the body. */
+    ord: integer('ord').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.fromPageId, t.targetNorm] }),
+    index('wiki_links_target').on(t.targetNorm),
+  ],
+);
+
 // ── audit / undo ────────────────────────────────────────────
 
 export const changes = pgTable(

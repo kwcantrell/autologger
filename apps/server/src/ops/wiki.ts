@@ -6,15 +6,15 @@ import {
   type WikiPageSummary,
   wikiLinkTargets,
 } from '@autologger/contract';
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, ne, type SQL, sql } from 'drizzle-orm';
 import { requireSession, requireShow } from '../core/authz.ts';
 import { badRequest, conflict, notFound } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
-import { schema } from '../db/client.ts';
+import { type Db, schema } from '../db/client.ts';
 import { iso, userRefs } from './map.ts';
 
-const { wikiPages: pages, wikiRevisions: revisions } = schema;
+const { wikiPages: pages, wikiRevisions: revisions, wikiLinks: links } = schema;
 type PageRow = typeof pages.$inferSelect;
 
 /** Deleted pages are kept (with their revisions) for undo, but are invisible everywhere else. */
@@ -56,6 +56,62 @@ export async function wikiNames(db: Ctx['db'], showId: string): Promise<Map<stri
   return byName;
 }
 
+/**
+ * Re-index a page's [[links]] from its body. Every write of `bodyMd` calls this (upsert, patch,
+ * restore, undo); a soft delete keeps the rows, which readers skip by joining live pages.
+ */
+export async function indexWikiLinks(db: Ctx['db'], pageId: string, bodyMd: string) {
+  await db.delete(links).where(eq(links.fromPageId, pageId));
+  const targets = wikiLinkTargets(bodyMd);
+  if (targets.length)
+    await db.insert(links).values(
+      targets.map((target, i) => ({
+        fromPageId: pageId,
+        targetNorm: normTitle(target),
+        target,
+        ord: i + 1,
+      })),
+    );
+}
+
+/**
+ * Index the links of pages written before the link index existed: pages (live or deleted) with no
+ * wiki_links rows whose body contains `[[`. Runs at API startup; idempotent, and one query when
+ * nothing is pending. Uses the shared JS parser so the index matches what the ops write (a SQL
+ * regex port would differ on Unicode whitespace and case). Pages whose `[[` yields no link (e.g.
+ * only inside code) stay without rows and are re-read on each run, which is harmless.
+ * Returns how many pages got rows.
+ */
+export async function backfillWikiLinks(db: Db, batchSize = 200): Promise<number> {
+  let after = '';
+  let indexed = 0;
+  for (;;) {
+    const batch = await db.transaction(async (tx) => {
+      // Re-checked inside the transaction (and locked), so a page an op indexes meanwhile is skipped.
+      const rows = await tx
+        .select({ id: pages.id, bodyMd: pages.bodyMd })
+        .from(pages)
+        .where(
+          and(
+            sql`${pages.id} > ${after}`,
+            sql`${pages.bodyMd} like '%[[%'`,
+            sql`not exists (select 1 from ${links} where ${links.fromPageId} = ${pages.id})`,
+          ),
+        )
+        .orderBy(asc(pages.id))
+        .limit(batchSize)
+        .for('update');
+      for (const r of rows) {
+        await indexWikiLinks(tx, r.id, r.bodyMd);
+        if (wikiLinkTargets(r.bodyMd).length) indexed++;
+      }
+      return rows;
+    });
+    if (batch.length < batchSize) return indexed;
+    after = batch[batch.length - 1]!.id;
+  }
+}
+
 /** The [[link]] targets of a body that name no live page of the show (as written). */
 export async function unresolvedTargets(
   db: Ctx['db'],
@@ -86,45 +142,39 @@ const BACKLINK_LIMIT = 50;
 
 async function fullPage(ctx: Ctx, row: PageRow): Promise<WikiPage> {
   const [summary] = await summaries(ctx, [row]);
-  const linking = await linkingPages(ctx, row);
-  return {
-    ...summary!,
-    bodyMd: row.bodyMd,
-    backlinks: linking.slice(0, BACKLINK_LIMIT),
-    backlinkCount: linking.length,
-  };
+  const linking = await linkingTo(ctx, row);
+  if (!linking) return { ...summary!, bodyMd: row.bodyMd, backlinks: [], backlinkCount: 0 };
+  const where = and(live, eq(pages.showId, row.showId), linking);
+  const backlinks = await ctx.db
+    .select({ id: pages.id, title: pages.title, kind: pages.kind })
+    .from(pages)
+    .where(where)
+    .orderBy(asc(pages.title), asc(pages.id))
+    .limit(BACKLINK_LIMIT);
+  const [{ count } = { count: 0 }] = await ctx.db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(pages)
+    .where(where);
+  return { ...summary!, bodyMd: row.bodyMd, backlinks, backlinkCount: count };
 }
 
-/** The show's live pages whose [[links]] resolve to `row` (itself excluded), sorted by title. */
-async function linkingPages(
-  ctx: Ctx,
-  row: PageRow,
-): Promise<{ id: string; title: string; kind: PageRow['kind'] }[]> {
-  // Links resolve as in the renderer and wiki.lint: [[targets]] outside code, by normTitle, titles
-  // winning over aliases. SQL narrows to bodies that mention one of this page's names (whitespace
-  // collapsed, case-insensitive); the shared link parser confirms.
+/**
+ * Condition on `pages` for the pages whose [[links]] resolve to `row` (itself excluded), from the
+ * link index; undefined when no name resolves to it. Links resolve as in the renderer and
+ * wiki.lint: by normTitle, titles winning over aliases — resolved here, at read time, so renames
+ * and alias changes need no reindex.
+ */
+async function linkingTo(ctx: Ctx, row: PageRow): Promise<SQL | undefined> {
   const byName = await wikiNames(ctx.db, row.showId);
   const names = [...byName].filter(([, id]) => id === row.id).map(([n]) => n);
-  if (!names.length) return [];
-  const candidates = await ctx.db
-    .select({ id: pages.id, title: pages.title, kind: pages.kind, bodyMd: pages.bodyMd })
-    .from(pages)
-    .where(
-      and(
-        live,
-        eq(pages.showId, row.showId),
-        sql`${pages.id} <> ${row.id}`,
-        sql`${pages.bodyMd} like '%[[%'`,
-        sql`regexp_replace(${pages.bodyMd}, ${'\\s+'}, ' ', 'g') ilike any(array[${sql.join(
-          names.map((n) => sql`${`%${n.replace(/[%_\\]/g, '\\$&')}%`}`),
-          sql`, `,
-        )}]::text[])`,
-      ),
-    )
-    .orderBy(asc(pages.title));
-  return candidates
-    .filter((c) => wikiLinkTargets(c.bodyMd).some((t) => byName.get(normTitle(t)) === row.id))
-    .map(({ id, title, kind }) => ({ id, title, kind }));
+  if (!names.length) return undefined;
+  return and(
+    ne(pages.id, row.id),
+    inArray(
+      pages.id,
+      ctx.db.select({ id: links.fromPageId }).from(links).where(inArray(links.targetNorm, names)),
+    ),
+  );
 }
 
 async function loadPage(ctx: Ctx, pageId: string, need: 'read' | 'write') {
@@ -181,18 +231,18 @@ defineOp({
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId, kind, include, linksTo, limit = 50, offset = 0 }): Promise<WikiList> {
     await requireShow(ctx, showId, 'read');
-    let linking: string[] | undefined;
+    let linking: SQL | undefined;
     if (linksTo) {
       const target = await loadPage(ctx, linksTo, 'read');
       if (target.showId !== showId) throw badRequest('linksTo is a page of another show.');
-      linking = (await linkingPages(ctx, target)).map((p) => p.id);
-      if (!linking.length) return { pages: [], total: 0, nextOffset: null };
+      linking = await linkingTo(ctx, target);
+      if (!linking) return { pages: [], total: 0, nextOffset: null };
     }
     const where = and(
       live,
       eq(pages.showId, showId),
       kind ? eq(pages.kind, kind) : undefined,
-      linking ? inArray(pages.id, linking) : undefined,
+      linking,
     );
     const [{ total } = { total: 0 }] = await ctx.db
       .select({ total: sql<number>`count(*)::int` })
@@ -232,21 +282,33 @@ defineOp({
   async run(ctx, { showId }): Promise<WikiLint> {
     await requireShow(ctx, showId, 'read');
     const rows = await ctx.db
-      .select({ id: pages.id, title: pages.title, kind: pages.kind, bodyMd: pages.bodyMd })
+      .select({ id: pages.id, title: pages.title, kind: pages.kind })
       .from(pages)
       .where(and(live, eq(pages.showId, showId)))
       .orderBy(asc(pages.kind), asc(pages.title));
     const byName = await wikiNames(ctx.db, showId);
+    // The link index of the show's live pages, in each body's order (no bodies are parsed).
+    const targetsOf = new Map<string, { target: string; norm: string }[]>();
+    for (const l of await ctx.db
+      .select({ from: links.fromPageId, target: links.target, norm: links.targetNorm })
+      .from(links)
+      .innerJoin(pages, eq(pages.id, links.fromPageId))
+      .where(and(live, eq(pages.showId, showId)))
+      .orderBy(asc(links.fromPageId), asc(links.ord))) {
+      const list = targetsOf.get(l.from) ?? [];
+      list.push(l);
+      targetsOf.set(l.from, list);
+    }
     const linked = new Set<string>();
     const unresolved: WikiLint['unresolved'] = [];
-    let links = 0;
+    let linkCount = 0;
     let unresolvedLinks = 0;
     for (const r of rows) {
       const missing: string[] = [];
-      for (const t of wikiLinkTargets(r.bodyMd)) {
-        links++;
-        const target = byName.get(normTitle(t));
-        if (!target) missing.push(t);
+      for (const t of targetsOf.get(r.id) ?? []) {
+        linkCount++;
+        const target = byName.get(t.norm);
+        if (!target) missing.push(t.target);
         else if (target !== r.id) linked.add(target);
       }
       if (missing.length) {
@@ -260,7 +322,7 @@ defineOp({
     return {
       unresolved,
       orphans,
-      counts: { pages: rows.length, links, unresolvedLinks, orphans: orphans.length },
+      counts: { pages: rows.length, links: linkCount, unresolvedLinks, orphans: orphans.length },
     };
   },
 });
@@ -355,6 +417,7 @@ defineOp({
       });
     }
     await addRevision(ctx, row);
+    await indexWikiLinks(ctx.db, row.id, row.bodyMd);
     if (input.compact)
       return {
         id: row.id,
@@ -418,6 +481,7 @@ defineOp({
       after: snapshot(after),
     });
     await addRevision(ctx, after);
+    await indexWikiLinks(ctx.db, after.id, after.bodyMd);
     const [summary] = await summaries(ctx, [after]);
     return summary!;
   },
@@ -503,6 +567,7 @@ defineOp({
       .where(eq(pages.id, pageId))
       .returning()) as [PageRow];
     await addRevision(ctx, after);
+    await indexWikiLinks(ctx.db, after.id, after.bodyMd);
     await ctx.record({
       entity: 'wiki_page',
       entityId: pageId,

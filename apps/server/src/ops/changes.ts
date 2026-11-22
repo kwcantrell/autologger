@@ -25,6 +25,7 @@ import { conflict, notFound } from '../core/errors.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
 import { iso, userRefs } from './map.ts';
+import { indexWikiLinks } from './wiki.ts';
 
 const { changes } = schema;
 
@@ -33,13 +34,24 @@ const { changes } = schema;
 type AnyTable = PgTable & { id: any };
 const TABLES: Record<
   ChangeEntity,
-  { table: AnyTable; live: LiveEntity | null; softDelete?: boolean }
+  {
+    table: AnyTable;
+    live: LiveEntity | null;
+    softDelete?: boolean;
+    /** Keep derived rows (an index) in step with a row an undo wrote back. */
+    reindex?: (db: Ctx['db'], row: Record<string, unknown>) => Promise<void>;
+  }
 > = {
   event: { table: schema.events, live: 'event' },
   topic: { table: schema.topics, live: 'topic' },
   transcript_segment: { table: schema.transcriptSegments, live: 'transcript_segment' },
   dashboard: { table: schema.dashboards, live: 'dashboard' },
-  wiki_page: { table: schema.wikiPages, live: null, softDelete: true },
+  wiki_page: {
+    table: schema.wikiPages,
+    live: null,
+    softDelete: true,
+    reindex: (db, row) => indexWikiLinks(db, row.id as string, row.bodyMd as string),
+  },
   category: { table: schema.categories, live: null },
 };
 
@@ -277,7 +289,7 @@ async function requireRevertAccess(ctx: Ctx, c: ChangeRow): Promise<void> {
 
 /** Restore the item to `c.before`, mark `c` undone and record the undo; returns its change id. */
 async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
-  const { table, live, softDelete } = TABLES[c.entity];
+  const { table, live, softDelete, reindex } = TABLES[c.entity];
   const idCol = table.id;
   const [current] = (await ctx.db.select().from(table).where(eq(idCol, c.entityId))) as
     | Record<string, unknown>[]
@@ -325,6 +337,7 @@ async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
     }
     throw e;
   }
+  if (restored && reindex) await reindex(ctx.db, restored);
   await ctx.db.update(changes).set({ revertedAt: new Date() }).where(eq(changes.id, c.id));
   const revertId = await ctx.record({
     entity: c.entity,
