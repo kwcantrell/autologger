@@ -82,14 +82,19 @@ function publishJob(ctx: Ctx, job: JobRow): void {
     ctx.publish(`session:${job.sessionId}`, changeMessage('job', 'upsert', job.id, toJob(job)));
 }
 
-async function enqueueTranscribe(ctx: Ctx, seg: SegmentRow): Promise<JobRow> {
+async function enqueueTranscribe(ctx: Ctx, seg: SegmentRow, keyTerms?: string[]): Promise<JobRow> {
   const existing = await activeTranscribeJob(ctx.db, seg.id);
+  // The active job runs with its own key terms; don't pretend this one-off list was applied.
+  if (existing && keyTerms)
+    throw conflict(
+      'a transcription is already queued or running for this audio; retry when it finishes',
+    );
   if (existing) return existing;
   const job = await enqueueJob(ctx.db, {
     kind: 'transcribe',
     sessionId: seg.sessionId,
     actorId: ctx.actor.user.id,
-    payload: { segmentId: seg.id },
+    payload: { segmentId: seg.id, keyTerms: keyTerms && [...new Set(keyTerms)] },
   });
   publishJob(ctx, job);
   return job;
@@ -392,7 +397,7 @@ defineOp({
             actorId: ctx.actor.user.id,
             payload: { url: videoUrl },
           },
-          new Date(base + i),
+          { at: new Date(base + i) },
         );
         item.sessionId = sessionId;
         item.jobId = job.id;
@@ -407,10 +412,10 @@ defineOp({
 defineOp({
   name: 'media.retranscribe',
   description:
-    'Transcribe one audio segment again, or every segment of the session when segmentId is omitted. Replaces the machine transcript of those segments (manual edits to them are lost).',
+    "Transcribe one audio segment again, or every segment of the session when segmentId is omitted. Replaces the machine transcript of those segments (manual edits to them are lost). Uses the show's current transcription settings and the session's key terms; pass `keyTerms` to use that list instead of the session's for this run only (the show's terms are still added after them; same limits as sessions_update). A segment that already has a queued or running transcription keeps that job; with `keyTerms` that is a conflict error instead (retry when the job finishes). Returns the jobs; when a job is done, its `progress` (jobs_list) reports how often each key term occurs in the new transcript, listing terms that never occur first and at most 15 terms, e.g. \"key terms: Olu Dara ×0, Tom Segura ×41, +3 more\".",
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, segmentId }) {
+  async run(ctx, { sessionId, segmentId, keyTerms }) {
     requireTranscription();
     await requireSession(ctx, sessionId, 'write');
     const where = segmentId
@@ -425,7 +430,7 @@ defineOp({
     const eligible = rows.filter((r) => r.status !== 'uploading');
     if (segmentId && eligible.length === 0) throw conflict('This segment is still uploading.');
     const out: JobRow[] = [];
-    for (const seg of eligible) out.push(await enqueueTranscribe(ctx, seg));
+    for (const seg of eligible) out.push(await enqueueTranscribe(ctx, seg, keyTerms));
     return out.map(toJob);
   },
 });

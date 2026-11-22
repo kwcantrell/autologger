@@ -8,9 +8,12 @@ import { newId } from '../core/ids.ts';
 import { db, schema } from '../db/client.ts';
 import { env, transcriptionConfigured } from '../env.ts';
 import {
+  countKeyTerms,
   DEFAULT_TRANSCRIPTION_OPTIONS,
+  describeKeyTermCounts,
   mapDeepgram,
   PermanentError,
+  selectKeyTerms,
   type TranscriptionOptions,
   transcribeAudio,
 } from '../media/deepgram.ts';
@@ -48,16 +51,26 @@ async function updateSegment(
 }
 
 /**
- * The show's transcription settings for a session, read when the job runs (not when it is
- * queued) so `media.retranscribe` picks up edits made in Show details.
+ * The transcription settings for a session, read when the job runs (not when it is queued) so
+ * `media.retranscribe` picks up edits made since. Key terms are the session's (or a one-off list
+ * given to `media.retranscribe`) followed by the show's; `deepgramUrl` keeps the first that fit.
  */
-export async function transcriptionOptionsFor(sessionId: string): Promise<TranscriptionOptions> {
+export async function transcriptionOptionsFor(
+  sessionId: string,
+  sessionTermsOverride?: string[],
+): Promise<TranscriptionOptions> {
   const [row] = await db
-    .select({ smartFormat: shows.smartFormat, keyTerms: shows.keyTerms })
+    .select({
+      smartFormat: shows.smartFormat,
+      showTerms: shows.keyTerms,
+      sessionTerms: sessions.keyTerms,
+    })
     .from(sessions)
     .innerJoin(shows, eq(shows.id, sessions.showId))
     .where(eq(sessions.id, sessionId));
-  return row ?? DEFAULT_TRANSCRIPTION_OPTIONS;
+  if (!row) return DEFAULT_TRANSCRIPTION_OPTIONS;
+  const sessionTerms = sessionTermsOverride ?? row.sessionTerms;
+  return { smartFormat: row.smartFormat, keyTerms: [...sessionTerms, ...row.showTerms] };
 }
 
 /** The show's transcript replacement rules for a session, read when the job runs. */
@@ -71,6 +84,8 @@ export async function transcriptRulesFor(sessionId: string): Promise<TranscriptR
 }
 
 const segmentIdOf = (job: JobRow) => (job.payload as { segmentId?: string }).segmentId;
+/** One-off session key terms passed to `media.retranscribe`. */
+const keyTermsOf = (job: JobRow) => (job.payload as { keyTerms?: string[] }).keyTerms;
 
 const transcribe: Handler = {
   async run(job) {
@@ -85,7 +100,7 @@ const transcribe: Handler = {
 
     await updateSegment(seg.id, { status: 'transcribing', error: null });
     await setProgress(job, 'Transcribing');
-    const opts = await transcriptionOptionsFor(seg.sessionId);
+    const opts = await transcriptionOptionsFor(seg.sessionId, keyTermsOf(job));
     const { body, size } = await getObjectStream(seg.objectKey);
     const resp = await transcribeAudio(env.deepgramApiKey!, body, seg.mimeType, size, opts);
     const rules = await transcriptRulesFor(seg.sessionId);
@@ -133,8 +148,16 @@ const transcribe: Handler = {
     publishSegment(updated);
     publish(topic, { type: 'invalidate', entity: 'transcript_segment' });
     publish(topic, { type: 'invalidate', entity: 'session' });
-    const rulesNote = describeRuleCounts(counts, skipped);
-    return `Transcribed ${mapped.length} segment${mapped.length === 1 ? '' : 's'}${rulesNote ? `; ${rulesNote}` : ''}`;
+    const notes = [
+      describeRuleCounts(counts, skipped),
+      describeKeyTermCounts(
+        countKeyTerms(
+          mapped.map((m) => m.text),
+          selectKeyTerms(opts.keyTerms),
+        ),
+      ),
+    ].filter(Boolean);
+    return `Transcribed ${mapped.length} segment${mapped.length === 1 ? '' : 's'}${notes.map((n) => `; ${n}`).join('')}`;
   },
   async onFinalFailure(job, message) {
     const segmentId = segmentIdOf(job);
@@ -202,12 +225,11 @@ const youtubeImport: Handler = {
           })
           .where(eq(sessions.id, sessionId));
         const transcribeJob = transcriptionConfigured
-          ? await enqueueJob(tx, {
-              kind: 'transcribe',
-              sessionId,
-              actorId: job.actorId,
-              payload: { segmentId },
-            })
+          ? await enqueueJob(
+              tx,
+              { kind: 'transcribe', sessionId, actorId: job.actorId, payload: { segmentId } },
+              { after: job },
+            )
           : null;
         return { seg: seg!, transcribeJob };
       });

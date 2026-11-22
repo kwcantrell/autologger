@@ -3,7 +3,13 @@ import { BookOpenIcon, WifiOffIcon } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'wouter';
 import type { LiveStatus } from '@/api/live';
-import { useCapabilities, useCategories, useEvents, useMedia } from '@/api/queries';
+import {
+  listAllWikiPages,
+  useCapabilities,
+  useCategories,
+  useEvents,
+  useMedia,
+} from '@/api/queries';
 import { errorMessage, rpc } from '@/api/rpc';
 import { isTypingTarget } from '@/lib/keys';
 import { type TransportTint, transportStatus } from '@/lib/store';
@@ -313,7 +319,7 @@ function SessionWikiButton({ session }: { session: Session }) {
   const open = async () => {
     setBusy(true);
     try {
-      const pages = await rpc('wiki.list', { showId: session.showId, kind: 'session' });
+      const pages = await listAllWikiPages(session.showId, 'session');
       const existing = pages.find((p) => p.sessionId === session.id);
       if (existing) {
         navigate(`/wiki/${encodeURIComponent(existing.id)}`);

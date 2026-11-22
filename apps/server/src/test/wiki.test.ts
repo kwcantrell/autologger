@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { asAgent, call, failsWith, resetDb, setupDb, studio } from './harness.ts';
+import { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
 
 beforeAll(setupDb);
 beforeEach(resetDb);
@@ -33,9 +33,9 @@ describe('wiki delete keeps history', () => {
     const { owner, show, page } = await pageWithHistory();
     await call(owner, 'wiki.delete', { pageId: page.id });
 
-    expect((await call(owner, 'wiki.list', { showId: show.id })).map((p) => p.title)).toEqual([
-      'Cold open',
-    ]);
+    expect((await call(owner, 'wiki.list', { showId: show.id })).pages.map((p) => p.title)).toEqual(
+      ['Cold open'],
+    );
     await failsWith(call(owner, 'wiki.get', { pageId: page.id }), 'not_found');
     await failsWith(call(owner, 'wiki.get', { showId: show.id, title: 'Dana' }), 'not_found');
     await failsWith(call(owner, 'wiki.revisions', { pageId: page.id }), 'not_found');
@@ -89,5 +89,108 @@ describe('wiki delete keeps history', () => {
     await call(owner, 'changes.revert', { changeId: undo.id });
     expect((await call(owner, 'wiki.get', { pageId: page.id })).bodyMd).toBe('Draft.');
     expect(await call(owner, 'wiki.revisions', { pageId: page.id })).toHaveLength(1);
+  });
+});
+
+describe('wiki lint and bulk read', () => {
+  it('lints links the way the wiki renders them', async () => {
+    const { owner, team, show, session } = await pageWithHistory();
+    await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'person',
+      title: 'Mark Manson',
+      aliases: ['Mark'],
+      bodyMd: 'Guest.',
+    });
+    await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'topic',
+      title: 'Guide',
+      bodyMd: [
+        '# Guide',
+        '',
+        'Hosted by [[ dana ]], with [[MARK]] and [[Missing]] twice: [[missing|again]].',
+        '',
+        '| Ep | Guest |',
+        '| -- | ----- |',
+        '| 1 | [[Mark   Manson\\|Mark]] |',
+        '| 2 | [[Table Gap\\|someone]] |',
+        '',
+        'Literal `[[Not A Link]]` and:',
+        '```',
+        '[[Fenced]]',
+        '```',
+      ].join('\n'),
+    });
+    await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'session',
+      title: 'Ep 1 recap',
+      bodyMd: 'With [[Guide]].',
+      sessionId: session.id,
+    });
+
+    // A read-only member can lint.
+    const viewer = await makeUser('viewer@example.com');
+    await call(owner, 'teams.invite', { teamId: team.id, email: 'viewer@example.com' });
+    await call(owner, 'teams.setGrant', {
+      teamId: team.id,
+      userId: viewer.user.id,
+      showId: show.id,
+      access: 'read',
+    });
+    const lint = await call(viewer, 'wiki.lint', { showId: show.id });
+    expect(lint.unresolved).toEqual([
+      expect.objectContaining({ title: 'Guide', targets: ['Missing', 'Table Gap'] }),
+    ]);
+    // Nothing links to Cold open; session recaps are never orphans.
+    expect(lint.orphans.map((o) => o.title)).toEqual(['Cold open']);
+    expect(lint.counts).toEqual({ pages: 5, links: 7, unresolvedLinks: 2, orphans: 1 });
+
+    const stranger = await makeUser('stranger@example.com');
+    await failsWith(call(stranger, 'wiki.lint', { showId: show.id }), 'not_found');
+  });
+
+  it('lists pages in pages with summaries or bodies', async () => {
+    const { owner, team, show } = await pageWithHistory();
+    await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'topic',
+      title: 'Guide',
+      bodyMd: '# Guide\n\nFirst  paragraph\nwraps.\n\nSecond.',
+    });
+
+    const first = await call(owner, 'wiki.list', { showId: show.id, include: 'summary', limit: 2 });
+    expect(first.total).toBe(3);
+    expect(first.nextOffset).toBe(2);
+    expect(first.pages).toHaveLength(2);
+    expect(first.pages[0]).not.toHaveProperty('bodyMd');
+    const [guide] = (
+      await call(owner, 'wiki.list', { showId: show.id, kind: 'topic', include: 'summary' })
+    ).pages;
+    expect(guide).toMatchObject({ title: 'Guide', summary: 'First  paragraph wraps.' });
+    const rest = await call(owner, 'wiki.list', { showId: show.id, limit: 2, offset: 2 });
+    expect(rest).toMatchObject({ total: 3, nextOffset: null });
+    expect(rest.pages[0]).not.toHaveProperty('bodyMd');
+
+    const viewer = await makeUser('viewer@example.com');
+    await call(owner, 'teams.invite', { teamId: team.id, email: 'viewer@example.com' });
+    await call(owner, 'teams.setGrant', {
+      teamId: team.id,
+      userId: viewer.user.id,
+      showId: show.id,
+      access: 'read',
+    });
+    const bodies = await call(viewer, 'wiki.list', {
+      showId: show.id,
+      kind: 'person',
+      include: 'body',
+    });
+    expect(bodies.pages).toEqual([
+      expect.objectContaining({ title: 'Dana', bodyMd: 'Host of the show.' }),
+    ]);
+
+    const stranger = await makeUser('stranger@example.com');
+    await failsWith(call(stranger, 'wiki.list', { showId: show.id, include: 'body' }), 'not_found');
   });
 });
