@@ -100,7 +100,7 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
                 className="w-full min-w-0"
                 onClick={() => {
                   closeSheet();
-                  newSessionOpen.set(true);
+                  newSessionOpen.set('session');
                 }}
               >
                 <Plus aria-hidden="true" data-icon="inline-start" />
@@ -111,10 +111,10 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
               <Button
                 variant="outline"
                 className="w-full min-w-0"
-                title="New session from an audio file or a YouTube link"
+                title="New session from an audio file or a YouTube link, or one session per video of a YouTube playlist"
                 onClick={() => {
                   closeSheet();
-                  newSessionOpen.set(true);
+                  newSessionOpen.set('import');
                 }}
               >
                 <Upload aria-hidden="true" data-icon="inline-start" />
