@@ -170,10 +170,10 @@ defineOp({
 defineOp({
   name: 'transcript.updateSegments',
   description:
-    'Correct the text and/or speaker of up to 500 transcript segments of one session in a single call (ids from transcript.find or transcript.get). All edits apply in one transaction: if any segmentId is unknown or belongs to another session, nothing changes. Each changed segment is its own entry in the change log, so the operator can undo edits one by one from the Agents tab; entries that change nothing are skipped. Unchanged words keep their recorded word timings; only inserted or replaced words get interpolated ones. Returns `{ updated, segments }` with compact `{ id, startSec, endSec, speaker, text, edited }` lines (no word timings), in the order given.',
+    'Correct the text and/or speaker of up to 500 transcript segments of one session in a single call (ids from transcript.find or transcript.get). All edits apply in one transaction: if any segmentId is unknown or belongs to another session, nothing changes. Each changed segment is its own entry in the change log, so the operator can undo edits one by one from the Agents tab; entries that change nothing are skipped. Unchanged words keep their recorded word timings; only inserted or replaced words get interpolated ones. Returns `{ updated, segments }` with `{ id, startSec, endSec, speaker, text, edited }` lines (no word timings), in the order given. Pass `compact: true` to get only `{ updated, ids }` (the segment ids actually changed, in the order given), which saves context on large batches.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, updates }) {
+  async run(ctx, { sessionId, updates, compact }) {
     const { session } = await requireSession(ctx, sessionId, 'write');
     const ids = updates.map((u) => u.segmentId);
     if (new Set(ids).size !== ids.length) throw badRequest('Each segmentId may appear only once.');
@@ -185,7 +185,7 @@ defineOp({
     const missing = ids.filter((i) => !byId.has(i));
     if (missing.length) throw notFound(`Transcript segment ${missing.slice(0, 5).join(', ')}`);
 
-    let updated = 0;
+    const changed: string[] = [];
     const segments: TranscriptLine[] = [];
     for (const u of updates) {
       const row = byId.get(u.segmentId)!;
@@ -197,9 +197,10 @@ defineOp({
         continue;
       }
       segments.push(toTranscriptLine(await editSegment(ctx, session, row, u)));
-      updated++;
+      changed.push(row.id);
     }
-    return { updated, segments };
+    if (compact) return { updated: changed.length, ids: changed };
+    return { updated: changed.length, segments };
   },
 });
 

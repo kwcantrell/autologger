@@ -170,14 +170,15 @@ defineOp({
 defineOp({
   name: 'events.createMany',
   description:
-    'Log up to 500 events at once (same fields as events.create). Use atSec to line events up with the transcript.',
+    'Log up to 500 events at once (same fields as events.create). Use atSec to line events up with the transcript. Returns the created events in input order; pass `compact: true` to get only `[{ id, atSec, category }]` per event (atSec in seconds from the session start, category = resolved button name), which saves context on large batches.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, events: list }) {
+  async run(ctx, { sessionId, events: list, compact }) {
     const { session } = await requireSession(ctx, sessionId, 'write');
     const rows: EventRow[] = [];
     for (const e of list) rows.push(await insertEvent(ctx, session, e));
-    return publishEvents(ctx, session, rows);
+    const out = await publishEvents(ctx, session, rows);
+    return compact ? out.map(({ id, atSec, category }) => ({ id, atSec, category })) : out;
   },
 });
 
