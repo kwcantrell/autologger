@@ -26,6 +26,7 @@ import { FEED_CELL, FEED_TH } from '@/session/feed';
 import { Skeleton } from '@/shared/components/ui/skeleton';
 import { cn } from '@/shared/lib/utils';
 import {
+  fmtField,
   fmtFormat,
   fmtNum,
   fmtValue,
@@ -364,6 +365,12 @@ function PieWidget({ widget, rows }: { widget: Extract<Widget, { type: 'pie' }>;
   if (rest > 0) slices.push({ name: 'Other', value: rest, color: C.dim });
   const total = slices.reduce((s, d) => s + d.value, 0);
   if (!total) return <Note>No data yet.</Note>;
+  // Legend and tooltip share the spec format (e.g. talk-time seconds as minutes).
+  const fmt = (v: unknown) => {
+    const n = toNum(v);
+    if (n == null) return '—';
+    return widget.format ? fmtFormat(n, widget.format) : fmtNum(n);
+  };
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-4">
       <div style={{ height: 180, width: 180 }} className="shrink-0">
@@ -383,7 +390,7 @@ function PieWidget({ widget, rows }: { widget: Extract<Widget, { type: 'pie' }>;
                 <Cell key={s.name} fill={s.color} />
               ))}
             </Pie>
-            <Tooltip {...TOOLTIP} formatter={(v, n) => [fmtValue(toNum(v)), String(n)]} />
+            <Tooltip {...TOOLTIP} formatter={(v, n) => [fmt(v), String(n)]} />
           </PieChart>
         </ResponsiveContainer>
       </div>
@@ -398,7 +405,7 @@ function PieWidget({ widget, rows }: { widget: Extract<Widget, { type: 'pie' }>;
             <span className="min-w-0 flex-1 truncate text-si-fg" title={s.name}>
               {s.name}
             </span>
-            <span className="tabular-nums text-si-muted">{fmtNum(s.value)}</span>
+            <span className="tabular-nums text-si-muted">{fmt(s.value)}</span>
             <span className="w-10 text-right tabular-nums text-si-dim">
               {Math.round((s.value / total) * 100)}%
             </span>
@@ -418,7 +425,8 @@ function TableWidget({
   widget: Extract<Widget, { type: 'table' }>;
   rows: Row[];
 }) {
-  let columns = widget.columns?.map((c) => ({ key: c.key, label: c.label ?? c.key }));
+  let columns: { key: string; label: string; format?: ValueFormat }[] | undefined =
+    widget.columns?.map((c) => ({ key: c.key, label: c.label ?? c.key, format: c.format }));
   if (!columns?.length) {
     const keys: string[] = [];
     for (const r of rows.slice(0, 50))
@@ -454,7 +462,7 @@ function TableWidget({
                         typeof v === 'number' && 'text-right tabular-nums',
                       )}
                     >
-                      {fmtValue(v, c.key)}
+                      {fmtField(v, c.key, c.format)}
                     </td>
                   );
                 })}
