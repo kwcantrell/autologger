@@ -330,7 +330,7 @@ function MetaRow({ session: s }: { session: Session }) {
     <div className={META_ROW}>
       <span
         className={CARD_META}
-      >{`${fmtDateOnly(s.episodeDate ?? s.createdAt)} · ${s.eventCount} events`}</span>
+      >{`${fmtDateOnly(s.episodeDate ?? s.createdAt)} · ${s.eventCount} ${s.eventCount === 1 ? 'event' : 'events'}`}</span>
       <SimpleTooltip
         content={live ? 'Current timecode' : mediaOnly ? 'Audio length' : 'Total runtime'}
       >
