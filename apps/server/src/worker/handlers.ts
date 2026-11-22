@@ -2,7 +2,7 @@
 // writes attributed to the job's actor and are not recorded in the change log.
 
 import type { TranscriptRule } from '@autologger/contract';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { changeMessage, publish } from '../core/bus.ts';
 import { newId } from '../core/ids.ts';
 import { db, schema } from '../db/client.ts';
@@ -19,13 +19,23 @@ import {
 } from '../media/deepgram.ts';
 import { enqueueJob, type JobRow, toJob } from '../media/jobs.ts';
 import { applyShowRules, describeRuleCounts } from '../media/rules.ts';
-import { getObjectStream, objectKeyFor, putObjectFromFile, requireStorage } from '../media/s3.ts';
+import {
+  deleteObject,
+  getObjectStream,
+  objectKeyFor,
+  peaksKeyFor,
+  presignServerGet,
+  putObjectBody,
+  putObjectFromFile,
+  requireStorage,
+} from '../media/s3.ts';
 import { lockSession, nextSegmentSlot } from '../media/segments.ts';
+import { computePeaks, encodePeaks, ffmpegAvailable } from '../media/waveform.ts';
 import { downloadAudio } from '../media/youtube.ts';
 import { toAudioSegment } from '../ops/map.ts';
 import { setProgress } from './queue.ts';
 
-const { audioSegments, transcriptSegments, sessions, shows } = schema;
+const { audioSegments, jobs, transcriptSegments, sessions, shows } = schema;
 type SegmentRow = typeof audioSegments.$inferSelect;
 
 export interface Handler {
@@ -191,7 +201,7 @@ const youtubeImport: Handler = {
       await setProgress(job, 'Storing audio');
       const size = await putObjectFromFile(objectKey, dl.path, dl.mimeType);
 
-      const { seg, transcribeJob } = await db.transaction(async (tx) => {
+      const { seg, transcribeJob, waveformJob } = await db.transaction(async (tx) => {
         await lockSession(tx, sessionId);
         const slot = await nextSegmentSlot(tx, sessionId);
         const [seg] = await tx
@@ -231,12 +241,17 @@ const youtubeImport: Handler = {
               { after: job },
             )
           : null;
-        return { seg: seg!, transcribeJob };
+        const waveformJob = await enqueueJob(
+          tx,
+          { kind: 'waveform', sessionId, actorId: job.actorId, payload: { segmentId } },
+          { after: job },
+        );
+        return { seg: seg!, transcribeJob, waveformJob };
       });
       const topic = `session:${sessionId}` as const;
       publishSegment(seg);
-      if (transcribeJob)
-        publish(topic, changeMessage('job', 'upsert', transcribeJob.id, toJob(transcribeJob)));
+      for (const j of [transcribeJob, waveformJob])
+        if (j) publish(topic, changeMessage('job', 'upsert', j.id, toJob(j)));
       publish(topic, { type: 'invalidate', entity: 'session' });
       return transcribeJob ? 'Imported; transcription queued' : 'Imported';
     } finally {
@@ -245,7 +260,92 @@ const youtubeImport: Handler = {
   },
 };
 
+/** Segment states whose audio is in storage (waveform jobs and the backfill). */
+const STORED = ['ready', 'transcribing', 'transcribed'] as const;
+
+const waveform: Handler = {
+  async run(job) {
+    requireStorage();
+    const segmentId = segmentIdOf(job);
+    if (!segmentId) throw new PermanentError('Job payload has no segmentId.');
+    const [seg] = await db.select().from(audioSegments).where(eq(audioSegments.id, segmentId));
+    if (!seg) return 'Audio segment was deleted';
+    if (!(STORED as readonly string[]).includes(seg.status))
+      throw new PermanentError(`The audio segment is ${seg.status}, not stored audio.`);
+    if (!(await ffmpegAvailable(env.ffmpegPath))) {
+      // Not a failure of the audio: done with a note, and a worker that has ffmpeg picks the
+      // segment up again at startup (backfillWaveforms).
+      const note = `Skipped: ffmpeg not found on the worker (FFMPEG_PATH=${env.ffmpegPath})`;
+      console.warn(`job ${job.id} (waveform): ${note}`);
+      return note;
+    }
+
+    await setProgress(job, 'Computing waveform');
+    const { peaks, durationSec } = await computePeaks(
+      env.ffmpegPath,
+      await presignServerGet(seg.objectKey),
+    );
+    const key = peaksKeyFor(seg.sessionId, seg.id);
+    await putObjectBody(key, encodePeaks(peaks, durationSec), 'application/json');
+    const row = await updateSegment(seg.id, {
+      peaksKey: key,
+      ...(seg.durationSec === null && durationSec > 0 ? { durationSec } : {}),
+    });
+    if (!row) {
+      await deleteObject(key).catch(() => {});
+      return 'Audio segment was deleted';
+    }
+    return `Waveform: ${peaks.length} peaks over ${Math.round(durationSec)} s`;
+  },
+};
+
+/**
+ * Queue a waveform job for stored audio without peaks: segments from before waveforms existed,
+ * and ones whose job was skipped on a worker without ffmpeg. Segments with a queued, running or
+ * failed waveform job are left alone (a failed one is not retried on every restart). Runs at
+ * worker startup when ffmpeg is available; an advisory lock keeps simultaneous starts from
+ * queueing twice. Queues at most BACKFILL_MAX per run. Returns the number of jobs queued.
+ */
+/** Waveform jobs one backfill queues at most; the next worker start continues. */
+export const BACKFILL_MAX = 200;
+
+export async function backfillWaveforms(): Promise<number> {
+  const queued = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('autologger:waveform-backfill'))`);
+    const rows = await tx
+      .select({ id: audioSegments.id, sessionId: audioSegments.sessionId })
+      .from(audioSegments)
+      .where(
+        and(
+          isNull(audioSegments.peaksKey),
+          inArray(audioSegments.status, [...STORED]),
+          sql`not exists (select 1 from ${jobs} j where j.kind = 'waveform'
+            and j.status in ('queued', 'running', 'failed')
+            and j.payload->>'segmentId' = ${audioSegments.id})`,
+        ),
+      )
+      .orderBy(audioSegments.createdAt)
+      .limit(BACKFILL_MAX);
+    const base = Date.now();
+    const out: JobRow[] = [];
+    for (const [i, r] of rows.entries()) {
+      out.push(
+        await enqueueJob(
+          tx,
+          { kind: 'waveform', sessionId: r.sessionId, actorId: null, payload: { segmentId: r.id } },
+          { at: new Date(base + i) },
+        ),
+      );
+    }
+    return out;
+  });
+  for (const j of queued)
+    publish(`session:${j.sessionId}`, changeMessage('job', 'upsert', j.id, toJob(j)));
+  return queued.length;
+}
+
 export const handlers: Record<JobRow['kind'], Handler> = {
   transcribe,
   youtube_import: youtubeImport,
+  waveform,
 };

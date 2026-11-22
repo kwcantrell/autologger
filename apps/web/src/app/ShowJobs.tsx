@@ -18,6 +18,7 @@ import { Dialog } from '@/shared/ui/Dialog';
 const KIND_LABEL: Record<string, string> = {
   youtube_import: 'YouTube import',
   transcribe: 'Transcription',
+  waveform: 'Waveform',
 };
 const kindLabel = (kind: string) => KIND_LABEL[kind] ?? kind;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -35,6 +36,7 @@ function fmtEta(sec: number | undefined): string | null {
 function markLabel(j: Job): string {
   if (j.status === 'failed') return 'Failed';
   if (j.status === 'queued') return 'Queued';
+  if (j.kind === 'waveform') return 'Analyzing';
   return j.kind === 'youtube_import' ? 'Importing' : 'Transcribing';
 }
 
