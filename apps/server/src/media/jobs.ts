@@ -23,7 +23,7 @@ export type JobSpec =
       kind: 'youtube_import';
       sessionId: string;
       actorId: string | null;
-      /** durationSec: the video's length when known up front (playlist imports); estimates only. */
+      /** durationSec: the video's length, read at import (absent when unknown); estimates only. */
       payload: { url: string; durationSec?: number };
     }
   | {
