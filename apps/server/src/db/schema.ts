@@ -395,6 +395,33 @@ export const wikiLinks = pgTable(
   ],
 );
 
+/**
+ * Citation index: the session citations of each page's current body (wikiCitations, repeats kept),
+ * kept in step with every body write and undo like wiki_links. sessionId is as written, not a
+ * foreign key: a citation may name a session that is gone or in another show (wiki.lint reports
+ * it). Rows of a soft-deleted page stay; readers join live pages.
+ */
+export const wikiCitations = pgTable(
+  'wiki_citations',
+  {
+    fromPageId: text('from_page_id')
+      .notNull()
+      .references(() => wikiPages.id, { onDelete: 'cascade' }),
+    /** Order in the body. */
+    ord: integer('ord').notNull(),
+    sessionId: text('session_id').notNull(),
+    /** Seconds from the session start (`t`). */
+    startSec: doublePrecision('start_sec').notNull(),
+    /** `to` as written (may be <= startSec; wiki.lint flags it), null without one. */
+    endSec: doublePrecision('end_sec'),
+    label: text('label').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.fromPageId, t.ord] }),
+    index('wiki_citations_session').on(t.sessionId),
+  ],
+);
+
 // ── audit / undo ────────────────────────────────────────────
 
 export const changes = pgTable(

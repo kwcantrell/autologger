@@ -367,6 +367,7 @@ export const opInputs = {
     kind: z.enum(['person', 'topic', 'bit', 'session', 'question']).optional(),
     include: z.enum(['summary', 'body']).optional(),
     linksTo: id.optional(),
+    citesSession: id.optional(),
     limit: z.number().int().min(1).max(200).optional(),
     offset: z.number().int().min(0).optional(),
   }),

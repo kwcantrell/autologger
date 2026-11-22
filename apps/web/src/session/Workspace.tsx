@@ -1,5 +1,5 @@
-import type { Session } from '@autologger/contract';
-import { BookOpenIcon, WifiOffIcon } from 'lucide-react';
+import type { Session, WikiListItem } from '@autologger/contract';
+import { BookOpenIcon, FileTextIcon, WifiOffIcon } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'wouter';
 import type { LiveStatus } from '@/api/live';
@@ -9,14 +9,25 @@ import {
   useCategories,
   useEvents,
   useMedia,
+  useWikiCiting,
 } from '@/api/queries';
 import { errorMessage, rpc } from '@/api/rpc';
 import { isTypingTarget } from '@/lib/keys';
 import { type TransportTint, transportStatus } from '@/lib/store';
-import { eventSec, useTransportClock } from '@/lib/timecode';
+import { eventSec, fmtShort, useTransportClock } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
+import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/shared/components/ui/dropdown-menu';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui/tabs';
 import { isOverlayOpen } from '@/shared/ui/overlayOpen';
@@ -317,10 +328,22 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
   );
 }
 
-/** Opens (or creates) the session's wiki page. */
+/** Cited ranges of one page as short clock times, e.g. "12:04–12:31, 1:02:10". */
+function rangesLabel(cites: NonNullable<WikiListItem['citations']>, max = 3): string {
+  const shown = cites
+    .slice(0, max)
+    .map((c) =>
+      c.endSec != null ? `${fmtShort(c.startSec)}–${fmtShort(c.endSec)}` : fmtShort(c.startSec),
+    );
+  return cites.length > max ? `${shown.join(', ')} +${cites.length - max} more` : shown.join(', ');
+}
+
+/** Wiki menu: open (or create) the session's recap page, and the pages citing this session. */
 function SessionWikiButton({ session }: { session: Session }) {
   const [, navigate] = useLocation();
   const [busy, setBusy] = useState(false);
+  const citing = useWikiCiting(session.showId, session.id);
+  const count = citing.data?.length ?? 0;
   const open = async () => {
     setBusy(true);
     try {
@@ -352,15 +375,65 @@ function SessionWikiButton({ session }: { session: Session }) {
     }
   };
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="text-si-muted hover:text-si-fg"
-      disabled={busy}
-      onClick={() => void open()}
-    >
-      {busy ? <Spinner /> : <BookOpenIcon aria-hidden="true" />}
-      <span className="max-xl:sr-only">Wiki page</span>
-    </Button>
+    <DropdownMenu onOpenChange={(o) => o && void citing.refetch()}>
+      <DropdownMenuTrigger
+        disabled={busy}
+        render={<Button variant="ghost" size="sm" className="text-si-muted hover:text-si-fg" />}
+      >
+        {busy ? <Spinner /> : <BookOpenIcon aria-hidden="true" />}
+        <span className="max-xl:sr-only">Wiki</span>
+        {count > 0 && (
+          <Badge
+            variant="outline"
+            aria-label={`, cited in ${count} wiki ${count === 1 ? 'page' : 'pages'}`}
+          >
+            {count}
+          </Badge>
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-[320px] max-w-[calc(100vw-2rem)]">
+        <DropdownMenuItem onClick={() => void open()}>
+          <BookOpenIcon aria-hidden="true" />
+          <span>Session recap page</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Cited in{count > 0 ? ` (${count})` : ''}</DropdownMenuLabel>
+          {citing.isPending ? (
+            <div className="flex justify-center py-2">
+              <Spinner />
+            </div>
+          ) : citing.isError ? (
+            <p className="px-2 py-1.5 text-xs text-muted-foreground">
+              Could not load citing pages. {errorMessage(citing.error)}
+            </p>
+          ) : count === 0 ? (
+            <p className="px-2 py-1.5 text-xs text-muted-foreground">
+              No wiki page cites this session yet.
+            </p>
+          ) : (
+            <div className="max-h-[50svh] overflow-y-auto">
+              {citing.data.map((p) => (
+                <DropdownMenuItem
+                  key={p.id}
+                  onClick={() => navigate(`/wiki/${encodeURIComponent(p.id)}`)}
+                >
+                  <FileTextIcon aria-hidden="true" />
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate">{p.title}</span>
+                    <span
+                      className="truncate text-xs text-muted-foreground tabular-nums"
+                      title={rangesLabel(p.citations ?? [], Infinity)}
+                    >
+                      {p.kind} · {rangesLabel(p.citations ?? [])}
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </div>
+          )}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

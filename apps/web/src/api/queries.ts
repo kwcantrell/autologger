@@ -256,13 +256,19 @@ export const useChanges = (sessionId: string, via: Via | 'all') =>
     limit: 300,
   });
 /** Every page of a show's wiki (wiki.list is paged; the screens need all of it for links). */
-export async function listAllWikiPages(showId: string, kind?: WikiKind, linksTo?: string) {
+export async function listAllWikiPages(
+  showId: string,
+  kind?: WikiKind,
+  linksTo?: string,
+  citesSession?: string,
+) {
   const out: WikiListItem[] = [];
   for (let offset: number | null = 0; offset !== null; ) {
     const page: WikiList = await rpc('wiki.list', {
       showId,
       ...(kind ? { kind } : {}),
       ...(linksTo ? { linksTo } : {}),
+      ...(citesSession ? { citesSession } : {}),
       limit: 200,
       offset,
     });
@@ -286,6 +292,12 @@ export const useWikiBacklinks = (showId: string, pageId: string, enabled: boolea
         a.title.localeCompare(b.title),
       ),
     enabled,
+  });
+/** Every page citing a session, each with its cited ranges of it (wiki.list citesSession). */
+export const useWikiCiting = (showId: string, sessionId: string) =>
+  useQuery<WikiListItem[], RpcError>({
+    queryKey: [...qk.wikiList(showId), 'citesSession', sessionId],
+    queryFn: () => listAllWikiPages(showId, undefined, undefined, sessionId),
   });
 export const useWikiPage = (pageId: string | undefined) =>
   useOpQuery(
