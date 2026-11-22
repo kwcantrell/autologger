@@ -7,7 +7,7 @@ import { qk, useOpMutation, useSessions } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { LoadingVideo } from '@/components/RouteState';
 import { newSessionOpen, settingsOpen } from '@/lib/store';
-import { fmtSec, formatFrames, useTransportClock } from '@/lib/timecode';
+import { fmtSec, formatFrames, isMediaOnly, useTransportClock } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
@@ -282,8 +282,7 @@ function MetaRow({ session: s }: { session: Session }) {
   const clock = useTransportClock(s.isRolling ? s : null);
   const live = s.isRolling;
   const runtime = formatFrames(s.elapsedFrames, s.frameRate).replace(/[:;]\d{2}$/, '');
-  // Imported sessions never roll the clock: their length is the audio's.
-  const mediaOnly = !live && s.elapsedFrames === 0 && s.audioSeconds > 0;
+  const mediaOnly = isMediaOnly(s);
   return (
     <div className={META_ROW}>
       <span
@@ -299,7 +298,7 @@ function MetaRow({ session: s }: { session: Session }) {
             mediaOnly && 'inline-flex items-center gap-1',
           )}
         >
-          {mediaOnly && <AudioLines className="size-3" aria-label="Audio length" />}
+          {mediaOnly && <AudioLines className="size-3" role="img" aria-label="Audio length" />}
           {live
             ? clock.timecode.replace(/[:;]\d{2}$/, '')
             : mediaOnly

@@ -5,7 +5,7 @@ import type { Capabilities, Category, Session, SessionEvent } from '@autologger/
 import { KeyboardIcon, RotateCcw } from 'lucide-react';
 import { useMemo } from 'react';
 import { shortcutsOpen, TRANSPORT_LABEL, type TransportTint } from '@/lib/store';
-import { eventSec, fmtSec, type TransportClock } from '@/lib/timecode';
+import { eventSec, fmtSec, isMediaOnly, type TransportClock } from '@/lib/timecode';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { cn } from '@/shared/lib/utils';
@@ -304,9 +304,9 @@ export function TransportStrip({
   ];
 
   const elapsed = session.elapsedFrames > 0 || rolling;
-  // Imported sessions never roll the clock (take 0): show the audio length, or the play-head
-  // while playing. A clock that was rolled and reset keeps showing timecode.
-  const mediaOnly = !elapsed && session.take === 0 && session.audioSeconds > 0;
+  // Imported sessions never roll the clock: show the audio length, or the play-head while
+  // playing. A clock that was rolled and reset keeps showing timecode.
+  const mediaOnly = isMediaOnly(session);
   const mediaLabel = player.isPlaying ? 'Play-head' : 'Audio length';
   const display = mediaOnly
     ? fmtSec(player.isPlaying ? playheadSec : session.audioSeconds)
