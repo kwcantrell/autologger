@@ -115,10 +115,10 @@ describe('show transcript rules', () => {
     expect(seg!.text).toBe('Ask the dr about ds dt.');
     expect(seg!.edited).toBe(false);
     expect(seg!.words.slice(0, 4)).toEqual([
-      { w: 'Ask', s: 100, e: 100.3 },
-      { w: 'the', s: 100.4, e: 100.7 },
-      { w: 'dr', s: 100.8, e: 101.1 },
-      { w: 'about', s: 101.2, e: 101.5 },
+      { w: 'Ask', s: 100, e: 100.3, sp: 0 },
+      { w: 'the', s: 100.4, e: 100.7, sp: 0 },
+      { w: 'dr', s: 100.8, e: 101.1, sp: 0 },
+      { w: 'about', s: 101.2, e: 101.5, sp: 0 },
     ]);
     // "dsdt." became two words sharing the original word's time.
     expect(seg!.words.slice(4)).toEqual([

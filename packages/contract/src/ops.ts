@@ -21,6 +21,7 @@ import type {
   Team,
   TeamDetail,
   Topic,
+  TranscriptFindId,
   TranscriptFindLine,
   TranscriptLine,
   TranscriptReplaceResult,
@@ -218,7 +219,13 @@ export const opInputs = {
 
   // ── transcript ────────────────────────────────────────────
   'transcript.get': z.object({ sessionId: id, fromSec: sec.optional(), toSec: sec.optional() }),
-  'transcript.text': z.object({ sessionId: id, fromSec: sec.optional(), toSec: sec.optional() }),
+  'transcript.text': z.object({
+    sessionId: id,
+    fromSec: sec.optional(),
+    toSec: sec.optional(),
+    format: z.enum(['lines', 'compact']).default('lines'),
+    ids: z.boolean().default(false),
+  }),
   'transcript.updateSegment': z.object({
     segmentId: id,
     text: z.string().max(20000).optional(),
@@ -234,9 +241,14 @@ export const opInputs = {
       toSec: sec.optional(),
       limit: z.number().int().min(1).max(2000).default(500),
       context: z.number().int().min(0).max(3).default(0),
+      countOnly: z.boolean().default(false),
+      idsOnly: z.boolean().default(false),
     })
     .refine((v) => (v.pattern === undefined) !== (v.patterns === undefined), {
       message: 'Pass exactly one of pattern or patterns',
+    })
+    .refine((v) => !(v.countOnly && v.idsOnly), {
+      message: 'Pass at most one of countOnly or idsOnly',
     }),
   'transcript.updateSegments': z.object({
     sessionId: id,
@@ -252,21 +264,36 @@ export const opInputs = {
       .max(500),
     compact,
   }),
-  'transcript.renameSpeaker': z.object({
-    sessionId: id,
-    from: z.string().max(80),
-    to: z.string().trim().min(1).max(80),
-  }),
+  'transcript.renameSpeaker': z
+    .object({
+      sessionId: id,
+      from: z.string().max(80).optional(),
+      to: z.string().trim().min(1).max(80),
+      fromSec: sec.optional(),
+      toSec: sec.optional(),
+    })
+    .refine((v) => v.from !== undefined || v.fromSec !== undefined || v.toSec !== undefined, {
+      message: 'Pass from, or a fromSec/toSec range to relabel every speaker in it',
+    })
+    .refine((v) => v.fromSec === undefined || v.toSec === undefined || v.fromSec <= v.toSec, {
+      message: 'fromSec must not be after toSec',
+    }),
   // Segment structure fixes (merge / split).
   'transcript.mergeSegments': z.object({
     segmentIds: z.array(id).min(2).max(50),
     speaker: z.string().trim().max(80).optional(),
   }),
-  'transcript.splitSegment': z.object({
-    segmentId: id,
-    atWord: z.number().int().min(1).max(100000),
-    speaker: z.string().trim().max(80).optional(),
-  }),
+  'transcript.splitSegment': z
+    .object({
+      segmentId: id,
+      atWord: z.number().int().min(1).max(100000).optional(),
+      atText: z.string().trim().min(1).max(500).optional(),
+      atSec: sec.optional(),
+      speaker: z.string().trim().max(80).optional(),
+    })
+    .refine((v) => [v.atWord, v.atText, v.atSec].filter((x) => x !== undefined).length === 1, {
+      message: 'Pass exactly one of atWord, atText or atSec',
+    }),
   'transcript.replace': z.object({
     sessionId: id,
     rules: z.array(TranscriptRuleInput).min(1).max(MAX_TRANSCRIPT_RULES).optional(),
@@ -487,9 +514,21 @@ export interface OpOutputs {
   'events.delete': { deleted: true };
   'events.importCsv': { imported: number; skipped: { line: number; reason: string }[] };
   'transcript.get': TranscriptSegment[];
-  'transcript.text': { text: string; segments: number };
+  'transcript.text': {
+    text: string;
+    segments: number;
+    /** Characters in `text`. */
+    chars: number;
+    /** Segments in the whole session, regardless of fromSec/toSec. */
+    totalSegments: number;
+    /** End of the last segment in the session, seconds from session start. */
+    durationSec: number;
+  };
   'transcript.updateSegment': TranscriptSegment;
-  'transcript.find': TranscriptFindLine[];
+  'transcript.find':
+    | { total: number; lines: TranscriptFindLine[] }
+    | { total: number; counts: number[] }
+    | { total: number; lines: TranscriptFindId[] };
   'transcript.updateSegments':
     | { updated: number; segments: TranscriptLine[] }
     | { updated: number; ids: string[] };
