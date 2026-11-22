@@ -607,7 +607,7 @@ export interface OpOutputs {
   'wiki.get': WikiPage;
   'wiki.upsert': WikiPage;
   // The page summary (WikiPageSummary), spelled via WikiPage so it doesn't depend on that import.
-  'wiki.patch': Omit<WikiPage, 'bodyMd' | 'backlinks'>;
+  'wiki.patch': Omit<WikiPage, 'bodyMd' | 'backlinks' | 'backlinkCount'>;
   'wiki.delete': { deleted: true };
   'wiki.revisions': WikiRevision[];
   'wiki.restore': WikiPage;
