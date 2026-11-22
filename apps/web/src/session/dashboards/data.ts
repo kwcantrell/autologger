@@ -72,6 +72,11 @@ export function fmtFormat(v: Scalar | undefined, format: ValueFormat): string {
   }
 }
 
+/** A cell or slice value: the spec `format` when given, else the default for its field name. */
+export function fmtField(v: Scalar | undefined, key: string, format?: ValueFormat): string {
+  return format ? fmtFormat(v, format) : fmtValue(v, key);
+}
+
 /** Shorten a label to at most `max` characters, ending in an ellipsis when cut. */
 export function truncateLabel(s: string, max?: number): string {
   if (!max || s.length <= max) return s;

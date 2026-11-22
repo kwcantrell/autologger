@@ -137,7 +137,7 @@ defineOp({
 defineOp({
   name: 'sessions.create',
   description:
-    "Create a session in a show. Title defaults from the show code and date or episode number. `keyTerms`: names and jargon to favour when this session's audio is transcribed (e.g. the guest's name), at most 50 terms of up to 50 characters and 1000 characters in total. They are sent before the show's key terms; if the two lists together exceed those limits, the show terms that don't fit are dropped. Prefer session terms for anything that is not said in every session: the transcriber pushes key terms into audio that doesn't contain them.",
+    "Create a session in a show. Title defaults from the show code and date or episode number. Omit `episode` to take the show's next episode number; the counter is advanced atomically, so parallel calls get distinct numbers. An explicit whole-number `episode` (e.g. \"19\") at or above the counter moves it past that number (next default becomes 20); non-numeric episodes (e.g. \"12b\") leave it alone. `keyTerms`: names and jargon to favour when this session's audio is transcribed (e.g. the guest's name), at most 50 terms of up to 50 characters and 1000 characters in total. They are sent before the show's key terms; if the two lists together exceed those limits, the show terms that don't fit are dropped. Prefer session terms for anything that is not said in every session: the transcriber pushes key terms into audio that doesn't contain them.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
@@ -150,7 +150,22 @@ defineOp({
       startOffsetFrames = f;
     }
     const date = input.episodeDate ?? new Date().toISOString().slice(0, 10);
-    const episode = input.episode ?? String(show.nextEpisode);
+    // Advance the show's counter atomically in this transaction: the row lock serializes parallel
+    // creates, so each default number is handed out once.
+    let episode = input.episode;
+    if (!episode) {
+      const [row] = await ctx.db
+        .update(shows)
+        .set({ nextEpisode: sql`${shows.nextEpisode} + 1` })
+        .where(eq(shows.id, show.id))
+        .returning({ next: shows.nextEpisode });
+      episode = String(row!.next - 1);
+    } else if (/^\d{1,9}$/.test(episode)) {
+      await ctx.db
+        .update(shows)
+        .set({ nextEpisode: sql`greatest(${shows.nextEpisode}, ${Number(episode) + 1})` })
+        .where(eq(shows.id, show.id));
+    }
     const id = newId('ses');
     await ctx.db.insert(sessions).values({
       id,
@@ -164,11 +179,6 @@ defineOp({
       startOffsetFrames,
       createdBy: ctx.actor.user.id,
     });
-    if (!input.episode)
-      await ctx.db
-        .update(shows)
-        .set({ nextEpisode: show.nextEpisode + 1 })
-        .where(eq(shows.id, show.id));
     ctx.publish(`show:${show.id}`, { type: 'show_changed', showId: show.id, entity: 'show' });
     return getSession(ctx, id);
   },
