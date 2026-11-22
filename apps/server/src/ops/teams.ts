@@ -6,8 +6,9 @@ import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp } from '../core/op.ts';
 import { schema } from '../db/client.ts';
 import { iso } from './map.ts';
+import { deleteSessionMedia } from './sessions.ts';
 
-const { teams, teamMembers, teamInvites, users, showGrants, shows } = schema;
+const { teams, teamMembers, teamInvites, users, showGrants, shows, sessions } = schema;
 const normEmail = (e: string) => e.trim().toLowerCase();
 
 async function myTeams(ctx: Ctx): Promise<Team[]> {
@@ -168,7 +169,8 @@ defineOp({
 
 defineOp({
   name: 'teams.delete',
-  description: 'Delete a team and all its shows and sessions (owner only).',
+  description:
+    'Delete a team and all its shows and sessions (owner only), including their stored audio and waveforms.',
   kind: 'write',
   surfaces: ['web'],
   async run(ctx, { teamId }) {
@@ -177,7 +179,16 @@ defineOp({
       .select({ userId: teamMembers.userId })
       .from(teamMembers)
       .where(eq(teamMembers.teamId, teamId));
+    const doomed = await ctx.db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .innerJoin(shows, eq(shows.id, sessions.showId))
+      .where(eq(shows.teamId, teamId));
     await ctx.db.delete(teams).where(eq(teams.id, teamId));
+    deleteSessionMedia(
+      ctx,
+      doomed.map((s) => s.id),
+    );
     for (const m of members)
       ctx.publish(`user:${m.userId}`, { type: 'access_changed', userId: m.userId });
     return { deleted: true };
