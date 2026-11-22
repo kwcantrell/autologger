@@ -151,6 +151,40 @@ describe('wiki lint and bulk read', () => {
     await failsWith(call(stranger, 'wiki.lint', { showId: show.id }), 'not_found');
   });
 
+  it('finds backlinks and titles the way links resolve', async () => {
+    const { owner, team, show } = await pageWithHistory();
+    const mark = await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'person',
+      title: 'Mark Manson',
+      aliases: ['Marky  Mark'],
+      bodyMd: 'Guest.',
+    });
+    const link = (title: string, bodyMd: string) =>
+      call(owner, 'wiki.upsert', { showId: show.id, kind: 'topic', title, bodyMd });
+    await link('Code only', 'Literal `[[Mark Manson]]` and\n```\n[[Mark Manson]]\n```');
+    await link('Table', '| Ep | Guest |\n| -- | -- |\n| 1 | [[Mark   manson\\|Mark]] |');
+    await link('Alias', 'Hi [[ marky mark ]].');
+    await link('Mentions', 'Mark Manson, no [[link]].');
+
+    const viewer = await makeUser('viewer@example.com');
+    await call(owner, 'teams.invite', { teamId: team.id, email: 'viewer@example.com' });
+    await call(owner, 'teams.setGrant', {
+      teamId: team.id,
+      userId: viewer.user.id,
+      showId: show.id,
+      access: 'read',
+    });
+    // An alias with double spaces resolves by normTitle, like a [[link]].
+    const page = await call(viewer, 'wiki.get', { showId: show.id, title: 'MARKY mark' });
+    expect(page.id).toBe(mark.id);
+    expect(page.backlinks.map((b) => b.title)).toEqual(['Alias', 'Table']);
+    expect(page.backlinkCount).toBe(2);
+
+    const stranger = await makeUser('stranger@example.com');
+    await failsWith(call(stranger, 'wiki.get', { pageId: mark.id }), 'not_found');
+  });
+
   it('lists pages in pages with summaries or bodies', async () => {
     const { owner, team, show } = await pageWithHistory();
     await call(owner, 'wiki.upsert', {

@@ -11,7 +11,7 @@ import { ensureBucket } from '../media/s3.ts';
 import { handlers } from './handlers.ts';
 import { claimJob, completeJob, failJob, recoverStuckJobs, releaseJob } from './queue.ts';
 
-const CONCURRENCY = Math.max(1, Number(process.env.WORKER_CONCURRENCY ?? 2));
+const CONCURRENCY = env.workerConcurrency;
 const POLL_MS = 5000;
 const RECOVER_MS = 60_000;
 const HEARTBEAT_MS = 60_000;

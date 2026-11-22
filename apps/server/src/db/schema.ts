@@ -510,11 +510,15 @@ export const jobs = pgTable(
     attempts: integer('attempts').notNull().default(0),
     runAfter: ts('run_after').notNull().defaultNow(),
     lockedAt: ts('locked_at'),
+    /** When the current (or last) attempt was claimed; cleared when the job is requeued. */
+    startedAt: ts('started_at'),
     createdAt: created(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
   (t) => [
     index('jobs_queue').on(t.status, t.runAfter),
     index('jobs_session').on(t.sessionId, t.createdAt),
+    // Recent finished jobs per kind (duration estimates in jobs.list).
+    index('jobs_finished').on(t.kind, t.status, t.updatedAt),
   ],
 );

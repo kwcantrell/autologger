@@ -81,29 +81,42 @@ function firstParagraph(bodyMd: string): string {
   return '';
 }
 
+/** At most this many backlinks are listed on a page; backlinkCount has the full number. */
+const BACKLINK_LIMIT = 50;
+
 async function fullPage(ctx: Ctx, row: PageRow): Promise<WikiPage> {
   const [summary] = await summaries(ctx, [row]);
-  // Matches [[Title]], [[Title|label]] and the same for every alias (case-insensitive).
-  const names = [row.title, ...row.aliases].flatMap((n) => {
-    const esc = n.replace(/[%_\\]/g, '\\$&');
-    return [`%[[${esc}]]%`, `%[[${esc}|%`];
-  });
-  const backlinks = await ctx.db
-    .select({ id: pages.id, title: pages.title, kind: pages.kind })
+  // Links resolve as in the renderer and wiki.lint: [[targets]] outside code, by normTitle, titles
+  // winning over aliases. SQL narrows to bodies that mention one of this page's names (whitespace
+  // collapsed, case-insensitive); the shared link parser confirms.
+  const byName = await wikiNames(ctx.db, row.showId);
+  const names = [...byName].filter(([, id]) => id === row.id).map(([n]) => n);
+  if (!names.length) return { ...summary!, bodyMd: row.bodyMd, backlinks: [], backlinkCount: 0 };
+  const candidates = await ctx.db
+    .select({ id: pages.id, title: pages.title, kind: pages.kind, bodyMd: pages.bodyMd })
     .from(pages)
     .where(
       and(
         live,
         eq(pages.showId, row.showId),
         sql`${pages.id} <> ${row.id}`,
-        sql`${pages.bodyMd} ilike any(array[${sql.join(
-          names.map((n) => sql`${n}`),
+        sql`${pages.bodyMd} like '%[[%'`,
+        sql`regexp_replace(${pages.bodyMd}, ${'\\s+'}, ' ', 'g') ilike any(array[${sql.join(
+          names.map((n) => sql`${`%${n.replace(/[%_\\]/g, '\\$&')}%`}`),
           sql`, `,
         )}]::text[])`,
       ),
     )
     .orderBy(asc(pages.title));
-  return { ...summary!, bodyMd: row.bodyMd, backlinks };
+  const linking = candidates.filter((c) =>
+    wikiLinkTargets(c.bodyMd).some((t) => byName.get(normTitle(t)) === row.id),
+  );
+  return {
+    ...summary!,
+    bodyMd: row.bodyMd,
+    backlinks: linking.slice(0, BACKLINK_LIMIT).map(({ id, title, kind }) => ({ id, title, kind })),
+    backlinkCount: linking.length,
+  };
 }
 
 async function loadPage(ctx: Ctx, pageId: string, need: 'read' | 'write') {
@@ -141,19 +154,14 @@ async function nextRevision(ctx: Ctx, row: PageRow): Promise<number> {
   return Math.max(row.revision, r?.max ?? 0) + 1;
 }
 
-/** Find a live page by title or alias (case-insensitive) within a show. */
+/** Find a live page by title or alias within a show, resolved like a [[link]] (normTitle). */
 async function findByTitle(ctx: Ctx, showId: string, title: string): Promise<PageRow | undefined> {
-  const n = normTitle(title);
+  const id = (await wikiNames(ctx.db, showId)).get(normTitle(title));
+  if (!id) return undefined;
   const [row] = await ctx.db
     .select()
     .from(pages)
-    .where(
-      and(
-        live,
-        eq(pages.showId, showId),
-        sql`(${pages.titleNorm} = ${n} or exists (select 1 from jsonb_array_elements_text(${pages.aliases}) a where lower(a) = ${n}))`,
-      ),
-    );
+    .where(and(live, eq(pages.id, id)));
   return row;
 }
 
@@ -240,7 +248,7 @@ defineOp({
 defineOp({
   name: 'wiki.get',
   description:
-    'Read a wiki page by pageId, or by showId + title (aliases match too). Includes backlinks. To read many pages in one call use wiki_list with include "summary" or "body".',
+    'Read a wiki page by pageId, or by showId + title (aliases match too; case and extra spaces are ignored, as in [[links]]). Includes backlinkCount and backlinks (the pages linking here, first 50 by title). To read many pages in one call use wiki_list with include "summary" or "body".',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { pageId, showId, title }) {

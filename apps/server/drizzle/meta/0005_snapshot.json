@@ -1,5 +1,5 @@
 {
-  "id": "458b4b37-c76e-4626-b29f-e25006151bf8",
+  "id": "8f4d2066-cc62-496e-b8ef-82609f45e52c",
   "prevId": "b234d37d-6d26-43ec-b4ef-941f34161224",
   "version": "7",
   "dialect": "postgresql",
@@ -605,12 +605,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "group_id": {
-          "name": "group_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -673,21 +667,6 @@
             },
             {
               "expression": "at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "changes_group": {
-          "name": "changes_group",
-          "columns": [
-            {
-              "expression": "group_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1279,6 +1258,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1327,6 +1312,33 @@
             },
             {
               "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "jobs_finished": {
+          "name": "jobs_finished",
+          "columns": [
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "updated_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

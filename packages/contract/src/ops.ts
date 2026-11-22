@@ -16,6 +16,7 @@ import type {
   Me,
   SearchHit,
   Session,
+  SessionDetail,
   SessionEvent,
   Show,
   Team,
@@ -559,7 +560,7 @@ export interface OpOutputs {
   'categories.list': Category[];
   'categories.save': Category[];
   'sessions.list': Session[];
-  'sessions.get': Session;
+  'sessions.get': SessionDetail;
   'sessions.create': Session;
   'sessions.update': Session;
   'sessions.archive': Session;
@@ -610,7 +611,7 @@ export interface OpOutputs {
   'wiki.get': WikiPage;
   'wiki.upsert': WikiPage;
   // The page summary (WikiPageSummary), spelled via WikiPage so it doesn't depend on that import.
-  'wiki.patch': Omit<WikiPage, 'bodyMd' | 'backlinks'>;
+  'wiki.patch': Omit<WikiPage, 'bodyMd' | 'backlinks' | 'backlinkCount'>;
   'wiki.delete': { deleted: true };
   'wiki.revisions': WikiRevision[];
   'wiki.restore': WikiPage;
