@@ -73,6 +73,8 @@ export async function publishSession(ctx: Ctx, sessionId: string): Promise<Sessi
   const s = await getSession(ctx, sessionId);
   ctx.publish(`session:${sessionId}`, { type: 'transport', session: s });
   ctx.publish(`session:${sessionId}`, changeMessage('session', 'upsert', sessionId, s));
+  // Companion devices following the show pick the live/newest session from show-level changes.
+  ctx.publish(`show:${s.showId}`, { type: 'show_changed', showId: s.showId, entity: 'show' });
   return s;
 }
 
@@ -137,6 +139,7 @@ defineOp({
       createdBy: ctx.actor.user.id,
     });
     if (!input.episode) await ctx.db.update(shows).set({ nextEpisode: show.nextEpisode + 1 }).where(eq(shows.id, show.id));
+    ctx.publish(`show:${show.id}`, { type: 'show_changed', showId: show.id, entity: 'show' });
     return getSession(ctx, id);
   },
 });

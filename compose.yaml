@@ -1,0 +1,81 @@
+# Production-style deployment on one host:
+#   docker compose up -d --build
+# Configure via .env next to this file (see .env.example; DATABASE_URL / S3_* are set here).
+
+x-app-env: &app-env
+  NODE_ENV: production
+  DATABASE_URL: postgres://autologger:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/autologger
+  PUBLIC_URL: ${PUBLIC_URL:?set PUBLIC_URL, e.g. https://autologger.example.com}
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  SUPERADMIN_EMAILS: ${SUPERADMIN_EMAILS:-}
+  S3_ENDPOINT: http://s3:8333
+  S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-${PUBLIC_URL}}
+  S3_REGION: us-east-1
+  S3_BUCKET: autologger
+  S3_ACCESS_KEY_ID: autologger
+  S3_SECRET_ACCESS_KEY: ${S3_PASSWORD:?set S3_PASSWORD}
+  S3_FORCE_PATH_STYLE: '1'
+  DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      s3: { condition: service_started }
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 15s
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ['node', 'src/worker/main.ts']
+    environment: *app-env
+    depends_on:
+      app: { condition: service_healthy }
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: autologger
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: autologger
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U autologger']
+      interval: 5s
+
+  s3:
+    # S3-compatible object storage (SeaweedFS). Any S3 service works: point S3_* at it instead.
+    image: chrislusf/seaweedfs:latest
+    restart: unless-stopped
+    environment:
+      S3_SECRET: ${S3_PASSWORD}
+    entrypoint: ['/bin/sh', '-c']
+    # Write the S3 credentials file from env, then start SeaweedFS with its S3 gateway on :8333.
+    command:
+      - >-
+        printf '{"identities":[{"name":"autologger","credentials":[{"accessKey":"autologger","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' "$$S3_SECRET" > /tmp/s3.json
+        && exec /entrypoint.sh server -s3 -s3.config=/tmp/s3.json -dir=/data
+    volumes: [media:/data]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ['80:80', '443:443']
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+    depends_on: [app, s3]
+
+volumes:
+  pgdata:
+  media:
+  caddy:

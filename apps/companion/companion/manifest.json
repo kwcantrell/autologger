@@ -1,0 +1,22 @@
+{
+  "type": "connection",
+  "id": "autologger",
+  "name": "autologger",
+  "shortname": "autologger",
+  "description": "Drive an AutoLogger live session from Bitfocus Companion: roll/stop the transport, log events with the show's buttons, and show timecode, take and last event on your keys.",
+  "version": "3.0.0",
+  "license": "MIT",
+  "repository": "https://github.com/local/autologger",
+  "bugs": "https://github.com/local/autologger/issues",
+  "maintainers": [{ "name": "AutoLogger" }],
+  "legacyIds": [],
+  "runtime": {
+    "type": "node22",
+    "api": "nodejs-ipc",
+    "apiVersion": "1.14.1",
+    "entrypoint": "../dist/main.js"
+  },
+  "manufacturer": "AutoLogger",
+  "products": ["AutoLogger"],
+  "keywords": ["logging", "production", "timecode"]
+}

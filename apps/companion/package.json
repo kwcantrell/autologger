@@ -8,8 +8,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --passWithNoTests",
-    "package": "companion-module-build"
+    "test": "vitest run",
+    "smoke": "node scripts/smoke.mjs",
+    "package": "npm run build && companion-module-build"
   },
   "dependencies": {
     "@companion-module/base": "~1.14.0",

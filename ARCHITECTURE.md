@@ -23,12 +23,12 @@ in the change log, and can be undone from the session's **Agents** tab.
 | Auth (agents) | OAuth 2.1 authorization server (DCR + PKCE + refresh) **and** personal access tokens. Both act as the user |
 | Auth (Companion) | Device tokens created in Settings, bound to a user + show |
 | Tenancy | Teams → Shows → Sessions. Team roles `owner` / `admin` / `member`; members reach shows only via grants; owner/admin see all team shows |
-| Media | S3-compatible object storage (MinIO in compose) via presigned URLs |
+| Media | S3-compatible object storage (SeaweedFS in compose) via presigned URLs |
 | Transcription | Deepgram pre-recorded (batch), run by the worker |
 | Jobs | Postgres `jobs` table, `FOR UPDATE SKIP LOCKED` |
 | Realtime | In-process bus + Postgres `LISTEN/NOTIFY` so worker writes reach WebSocket clients |
 | Dashboards | Declarative JSON spec (validated by Zod). No agent code ever runs; markdown rendered without HTML |
-| Deploy | Docker Compose on one host: `app`, `worker`, `postgres`, `minio`, `caddy` |
+| Deploy | Docker Compose on one host: `app`, `worker`, `postgres`, `s3` (SeaweedFS), `caddy` |
 | Tests | Lean: ops-layer tests against real Postgres + a few E2E smoke tests |
 
 ## Layout

@@ -1,0 +1,28 @@
+# Local development dependencies only (run the app with `npm run dev:server` / `dev:web`):
+#   docker compose -f compose.dev.yaml up -d
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: autologger
+      POSTGRES_PASSWORD: autologger
+      POSTGRES_DB: autologger
+    ports: ['127.0.0.1:54329:5432']
+    volumes: [pgdata:/var/lib/postgresql/data]
+
+  s3:
+    image: chrislusf/seaweedfs:latest
+    environment:
+      S3_SECRET: autologger-secret
+    entrypoint: ['/bin/sh', '-c']
+    # Write the S3 credentials file from env, then start SeaweedFS with its S3 gateway on :8333.
+    command:
+      - >-
+        printf '{"identities":[{"name":"autologger","credentials":[{"accessKey":"autologger","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' "$$S3_SECRET" > /tmp/s3.json
+        && exec /entrypoint.sh server -s3 -s3.config=/tmp/s3.json -dir=/data
+    ports: ['127.0.0.1:9000:8333']
+    volumes: [media:/data]
+
+volumes:
+  pgdata:
+  media:

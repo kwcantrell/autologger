@@ -1,0 +1,20 @@
+# SITE_ADDRESS is your domain (automatic HTTPS) or ":80" for plain HTTP behind another proxy.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# Presigned media uploads/downloads go straight to the S3 service under the same origin.
+	# Set S3_PUBLIC_ENDPOINT to PUBLIC_URL so presigned URLs point here.
+	@media path /autologger/*
+	handle @media {
+		request_body {
+			max_size 5GB
+		}
+		reverse_proxy s3:8333 {
+			header_up Host {upstream_hostport}
+		}
+	}
+
+	handle {
+		reverse_proxy app:8080
+	}
+}
