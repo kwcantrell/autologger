@@ -614,4 +614,73 @@ describe('question pages and citations', () => {
       'not_found',
     );
   });
+
+  it('indexes and lints short citations against the page session', async () => {
+    const { owner, show, session } = await studio();
+    await db.insert(schema.audioSegments).values({
+      id: 'aud_short',
+      sessionId: session.id,
+      ordinal: 0,
+      startSec: 0,
+      durationSec: 600,
+      mimeType: 'audio/mpeg',
+      origin: 'file',
+      objectKey: 'test/aud_short',
+      status: 'ready',
+    });
+    const other = await call(owner, 'sessions.create', { showId: show.id });
+    const citing = async (id: string) =>
+      (await call(owner, 'wiki.list', { showId: show.id, citesSession: id })).pages.map((p) => [
+        p.title,
+        p.citations,
+      ]);
+    const recap = await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'session',
+      title: 'Recap',
+      sessionId: session.id,
+      bodyMd: `Opens [a](@10-20), then [@550-700] and [b](@${other.id}:5) [c](@ses_gone:1-2).`,
+    });
+    expect(await citing(session.id)).toEqual([
+      [
+        'Recap',
+        [
+          { startSec: 10, endSec: 20, label: 'a' },
+          { startSec: 550, endSec: 700, label: '' },
+        ],
+      ],
+    ]);
+    expect(await citing(other.id)).toEqual([['Recap', [{ startSec: 5, label: 'b' }]]]);
+    const lint = await call(owner, 'wiki.lint', { showId: show.id });
+    expect(lint.badCitations[0]?.citations.map((c) => [c.sessionId, c.problem])).toEqual([
+      [session.id, 'past_end'],
+      ['ses_gone', 'unknown_session'],
+    ]);
+
+    // A page without a session takes only short forms that name one.
+    const q = await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'question',
+      title: 'Q',
+      bodyMd: `[x](@${session.id}:30)`,
+    });
+    await failsWith(
+      call(owner, 'wiki.patch', { pageId: q.id, append: 'and [y](@40-50)' }),
+      'bad_request',
+    );
+    await failsWith(
+      call(owner, 'wiki.upsert', { showId: show.id, kind: 'bit', title: 'B', bodyMd: '[@1-2]' }),
+      'bad_request',
+    );
+    expect((await citing(session.id)).map(([t]) => t)).toEqual(['Q', 'Recap']);
+
+    // Undoing a patch re-resolves the restored body against the page session.
+    await call(owner, 'wiki.patch', {
+      pageId: recap.id,
+      edits: [{ find: '[a](@10-20)', replace: 'x' }],
+    });
+    const [patch] = await call(owner, 'changes.list', { showId: show.id });
+    await call(owner, 'changes.revert', { changeId: patch!.id });
+    expect((await citing(session.id)).find(([t]) => t === 'Recap')?.[1]).toHaveLength(2);
+  });
 });

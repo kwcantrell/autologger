@@ -98,13 +98,16 @@ function PageBody({ page }: { page: WikiPage }) {
   const otherShow = !!activeShow && activeShow.id !== page.showId;
   const isSession = page.kind === 'session';
   const { resolve } = useWikiResolver(page.showId);
-  const sessionTitle = useSessionTitles(page.showId, page.bodyMd);
+  const sessionTitle = useSessionTitles(page.showId, page.bodyMd, page.sessionId);
   const upsert = useWikiUpsert();
   const del = useWikiDelete(page.showId);
   const { confirm, confirmElement } = useConfirm();
   const [history, setHistory] = useState(false);
   const [makeVideo, setMakeVideo] = useState(false);
-  const citations = useMemo(() => citationCandidates(page.bodyMd), [page.bodyMd]);
+  const citations = useMemo(
+    () => citationCandidates(page.bodyMd, page.sessionId),
+    [page.bodyMd, page.sessionId],
+  );
   // The same cached sessions.list the citation titles use.
   const citedSessions = useSessions(citations.length ? page.showId : undefined);
   const noVideo =
@@ -274,6 +277,7 @@ function PageBody({ page }: { page: WikiPage }) {
             showAliases={!isSession}
             resolve={resolve}
             showId={page.showId}
+            sessionId={page.sessionId}
           />
           {edit.error && (
             <p role="alert" className="m-0 text-sm text-si-danger">
@@ -291,7 +295,12 @@ function PageBody({ page }: { page: WikiPage }) {
           </div>
         </section>
       ) : page.bodyMd.trim() ? (
-        <WikiMarkdown body={page.bodyMd} resolve={resolve} sessionTitle={sessionTitle} />
+        <WikiMarkdown
+          body={page.bodyMd}
+          resolve={resolve}
+          sessionTitle={sessionTitle}
+          sessionId={page.sessionId}
+        />
       ) : (
         <p className="m-0 text-sm text-si-muted">This page is empty.</p>
       )}

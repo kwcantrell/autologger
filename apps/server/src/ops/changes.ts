@@ -53,7 +53,8 @@ const TABLES: Record<
     table: schema.wikiPages,
     live: null,
     softDelete: true,
-    reindex: (db, row) => indexWikiLinks(db, row.id as string, row.bodyMd as string),
+    reindex: (db, row) =>
+      indexWikiLinks(db, row.id as string, row.bodyMd as string, row.sessionId as string | null),
   },
   category: { table: schema.categories, live: null },
   // Here only for typing and `live`: clock changes snapshot just the clock fields and are undone

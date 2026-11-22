@@ -72,4 +72,35 @@ describe('wiki citations', () => {
     expect(html).toContain('Unknown session');
     expect(html).toContain('00:00:05');
   });
+
+  it('renders short citations as the same chips, resolved to the page session', () => {
+    const body = [
+      'Dana [she said](@61.5-3725) and [@5] then [other](@ses_9:7-8).',
+      '| t | [@10-20] |',
+      '|---|---|',
+      '`[@1-2]` [@nope] [@3](https://example.com)',
+    ].join('\n');
+    const render = (sessionId?: string) =>
+      renderToStaticMarkup(
+        <Router ssrPath="/wiki">
+          <WikiMarkdown
+            body={body}
+            resolve={resolve}
+            sessionId={sessionId}
+            sessionTitle={(id) => (id === 'ses_1' ? 'Episode 12' : null)}
+          />
+        </Router>,
+      );
+    const html = render('ses_1');
+    expect(html.match(/data-slot="wiki-citation"/g)).toHaveLength(4);
+    expect(html).toContain('href="/sessions/ses_1?t=61.5&amp;to=3725"');
+    expect(html).toContain('href="/sessions/ses_1?t=5"');
+    expect(html).toContain('href="/sessions/ses_9?t=7&amp;to=8"');
+    expect(html).toContain('href="/sessions/ses_1?t=10&amp;to=20"');
+    expect(html).toContain('<code>[@1-2]</code>');
+    expect(html).toContain('[@nope]');
+    expect(html).toContain('href="https://example.com"');
+    // Without a page session only the form naming its session is a chip.
+    expect(render().match(/data-slot="wiki-citation"/g)).toHaveLength(1);
+  });
 });
