@@ -348,7 +348,7 @@ function ShowDetails({
               htmlFor="settings-show-key-terms"
               description={
                 keyTermsError ??
-                `Names and jargon the transcriber should listen for, one per line (up to ${MAX_KEY_TERMS}; ${plural(charsLeft, 'character')} left). Applies to new transcriptions.`
+                `Names and jargon the transcriber should listen for, one per line (up to ${MAX_KEY_TERMS}; ${plural(charsLeft, 'character')} left). Applies to new transcriptions. Only names and jargon said in every session; put guest names on the session (Audio → Key terms), or they can turn up in other episodes’ transcripts.`
               }
               disabled={!canEdit}
             >
