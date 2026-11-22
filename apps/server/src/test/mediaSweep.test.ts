@@ -104,7 +104,15 @@ describe('media sweep', () => {
     bucket.set(`sessions/${recent}/new.wav`, ago(1));
     bucket.set(`shows/${show.id}/compilations/cmp_new.mp4`, ago(1));
 
+    const log = vi.spyOn(console, 'log');
     const r = await sweepMedia({ orphanGraceMs: 24 * HOUR, dryRun: false, liveSessionsPerRun: 0 });
+    expect(log).toHaveBeenLastCalledWith(
+      expect.stringMatching(
+        /^media sweep: 0 stuck uploads, 2 orphan prefixes, 1 compilation object, 0 unreferenced live-session objects removed; 2 orphans within grace; checked 0 of \d+ live sessions?; \d+ s$/,
+      ),
+    );
+    log.mockRestore();
+    expect(r.withinGrace).toBe(2);
     expect(r.prefixes.sort()).toEqual([`sessions/${goneSession}/`, `shows/${goneShow}/`].sort());
     expect(r.objects).toEqual([`shows/${show.id}/compilations/cmp_deleted.mp4`]);
     expect([...bucket.keys()].sort()).toEqual(
@@ -162,7 +170,14 @@ describe('media sweep', () => {
     bucket.set(gone, ago(48));
     const before = [...bucket.keys()].sort();
 
+    const log = vi.spyOn(console, 'log');
     const r = await sweepMedia({ dryRun: true });
+    expect(log).toHaveBeenLastCalledWith(
+      expect.stringMatching(
+        /^media sweep \(dry run\): 1 stuck upload, 1 orphan prefix, 0 compilation objects, 0 unreferenced live-session objects would be removed; 0 orphans within grace; checked 1 of 1 live session; \d+ s$/,
+      ),
+    );
+    log.mockRestore();
     expect(r).toMatchObject({
       dryRun: true,
       uploads: [stale.id],
@@ -174,10 +189,15 @@ describe('media sweep', () => {
 
   it('skips while another worker holds the sweep lock', async () => {
     bucket.set(`sessions/${newId('ses')}/a.wav`, ago(48));
+    const log = vi.spyOn(console, 'log');
     const r = await db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext('autologger:media-sweep'))`);
       return sweepMedia({ dryRun: false });
     });
+    expect(log).toHaveBeenLastCalledWith(
+      'media sweep: skipped, another worker holds the sweep lock',
+    );
+    log.mockRestore();
     expect(r.ran).toBe(false);
     expect(bucket.size).toBe(1);
   });

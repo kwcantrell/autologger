@@ -264,6 +264,70 @@ describe('compilations ops', () => {
     });
     expect(await db.select().from(jobs)).toHaveLength(2);
   });
+  it('logs a Compilation event per clip in each session; undo, delete and retry handle them', async () => {
+    const { owner, show, session } = await studio();
+    await youtubeSession(session.id);
+    const second = await call(owner, 'sessions.create', { showId: show.id });
+    await youtubeSession(second.id);
+    const agent = asAgent(owner);
+    const clips = [
+      { sessionId: session.id, startSec: 10, endSec: 52, label: 'Tom bombs in Austin' },
+      { sessionId: second.id, startSec: 100, endSec: 130 },
+    ];
+    const logged = async (sessionId: string) =>
+      call(owner, 'events.list', { sessionId, compact: true });
+
+    const c = await call(agent, 'compilations.create', { showId: show.id, title: 'Bombs', clips });
+    expect(await logged(session.id)).toEqual([
+      {
+        id: c.clips[0]!.eventId,
+        atSec: 10,
+        category: 'Compilation',
+        message: 'Compilation "Bombs" · clip 1: Tom bombs in Austin (0:42)',
+      },
+    ]);
+    expect(await logged(second.id)).toEqual([
+      {
+        id: c.clips[1]!.eventId,
+        atSec: 100,
+        category: 'Compilation',
+        message: 'Compilation "Bombs" · clip 2 (0:30)',
+      },
+    ]);
+
+    // Undoing the create's group removes the events in both sessions; the compilation stays.
+    const [change] = await call(owner, 'changes.list', { sessionId: second.id });
+    const undo = await call(owner, 'changes.revertGroup', { groupId: change!.groupId! });
+    expect(undo.reverted).toBe(2);
+    expect([...(await logged(session.id)), ...(await logged(second.id))]).toEqual([]);
+    await call(owner, 'changes.revertGroup', { groupId: undo.groupId });
+    expect(await logged(second.id)).toHaveLength(1);
+
+    // Retry logs nothing new.
+    await db.update(compilations).set({ status: 'failed' }).where(eq(compilations.id, c.id));
+    await call(agent, 'compilations.retry', { compilationId: c.id });
+    expect([...(await logged(session.id)), ...(await logged(second.id))]).toHaveLength(2);
+
+    // Delete removes them in one recorded group, which undo restores.
+    await call(agent, 'events.create', { sessionId: session.id, category: 'Laugh', atSec: 5 });
+    await call(agent, 'compilations.delete', { compilationId: c.id });
+    expect((await logged(session.id)).map((e) => e.category)).toEqual(['Laugh']);
+    expect(await logged(second.id)).toEqual([]);
+    const [del] = await call(owner, 'changes.list', { sessionId: second.id });
+    expect(del).toMatchObject({ entity: 'event', kind: 'delete' });
+    expect((await call(owner, 'changes.revertGroup', { groupId: del!.groupId! })).reverted).toBe(2);
+    expect(await logged(second.id)).toHaveLength(1);
+
+    // logEvents: false logs nothing.
+    const quiet = await call(agent, 'compilations.create', {
+      showId: show.id,
+      title: 'Quiet',
+      clips,
+      logEvents: false,
+    });
+    expect(quiet.clips.map((x) => x.eventId)).toEqual([undefined, undefined]);
+    expect(await logged(second.id)).toHaveLength(1);
+  });
 });
 
 describe('compile jobs in jobs.list and compilation estimates', () => {

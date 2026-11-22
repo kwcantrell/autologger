@@ -91,6 +91,27 @@ export function describeKeyTermCounts(counts: { term: string; count: number }[])
   return `key terms: ${shown.join(', ')}${more > 0 ? `, +${more} more` : ''}`;
 }
 
+/**
+ * Job-result note naming the diarizer and transcription model Deepgram reports it ran, e.g.
+ * "diarizer v2 · nova-3 2025-04-17" (#208), so a transcript with merged or swapped speakers can be
+ * traced to the diarizer that produced it. The model is `metadata.models[0]` looked up in
+ * `metadata.model_info` (keyed by model uuid); its version drops Deepgram's ".<build>" suffix.
+ * Either part is left out when Deepgram doesn't report it; '' when neither is.
+ */
+export function describeTranscriber(resp: DeepgramResponse): string {
+  const meta = resp.metadata;
+  const arch = meta?.diarize_info?.arch;
+  const info = meta?.model_info ?? {};
+  const uuid =
+    meta?.models?.find((id) => info[id]) ??
+    Object.keys(info).find((id) => id !== meta?.diarize_info?.model_uuid);
+  const model = uuid ? info[uuid] : undefined;
+  const modelName = [model?.arch ?? model?.name, model?.version?.split('.')[0]]
+    .filter(Boolean)
+    .join(' ');
+  return [arch && `diarizer ${arch}`, modelName].filter(Boolean).join(' · ');
+}
+
 export interface DeepgramWord {
   word: string;
   punctuated_word?: string;
@@ -112,6 +133,10 @@ export interface DeepgramResponse {
     duration?: number;
     /** Present only when a diarizer ran; `arch` is the family `diarize_model` resolved to ("v1", "v2"). */
     diarize_info?: { model_uuid?: string; arch?: string };
+    /** uuids of the transcription models that ran, keys into `model_info`. */
+    models?: string[];
+    /** Per model uuid, e.g. { name: "general-nova-3", version: "2025-04-17.21547", arch: "nova-3" }. */
+    model_info?: Record<string, { name?: string; version?: string; arch?: string }>;
   };
   results?: {
     utterances?: DeepgramUtterance[];

@@ -22,6 +22,7 @@ import {
   countKeyTerms,
   DEFAULT_TRANSCRIPTION_OPTIONS,
   describeKeyTermCounts,
+  describeTranscriber,
   mapDeepgram,
   PermanentError,
   selectKeyTerms,
@@ -178,6 +179,7 @@ const transcribe: Handler = {
           selectKeyTerms(opts.keyTerms),
         ),
       ),
+      describeTranscriber(resp),
     ].filter(Boolean);
     return `Transcribed ${mapped.length} segment${mapped.length === 1 ? '' : 's'}${notes.map((n) => `; ${n}`).join('')}`;
   },

@@ -61,6 +61,10 @@ export interface SweepResult {
   liveObjects: string[];
   /** Last live session checked ('' after wrapping around); the next run continues after it. */
   liveCursor: string;
+  /** Orphan prefixes and objects kept because something under them is newer than the grace. */
+  withinGrace: number;
+  /** Live sessions there were to check (the rotation's length). */
+  liveSessionsTotal: number;
 }
 
 /** Where the previous run of this process stopped in the live-session rotation. */
@@ -88,7 +92,10 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
     liveSessionsChecked: 0,
     liveObjects: [],
     liveCursor: opts.liveCursor ?? lastLiveCursor,
+    liveSessionsTotal: 0,
+    withinGrace: 0,
   };
+  const started = Date.now();
   const removed: { id: string; sessionId: string }[] = [];
 
   await db.transaction(async (tx) => {
@@ -138,7 +145,10 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
     };
     const removePrefix = async (prefix: string, why: string): Promise<void> => {
       const { old, count } = await settled(prefix);
-      if (!old) return;
+      if (!old) {
+        if (count > 0) result.withinGrace++;
+        return;
+      }
       if (!dryRun) {
         try {
           await deletePrefix(prefix);
@@ -167,6 +177,7 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
     // 2b. Objects under live sessions that no segment row points at, for the next
     //     `livePerRun` sessions of the rotation.
     liveSessionIds.sort();
+    result.liveSessionsTotal = liveSessionIds.length;
     const after = liveSessionIds.filter((id) => id > result.liveCursor);
     const turn = (after.length ? after : liveSessionIds).slice(0, livePerRun);
     if (turn.length) {
@@ -195,9 +206,6 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
       }
       result.liveSessionsChecked = turn.length;
       result.liveCursor = turn.at(-1) === liveSessionIds.at(-1) ? '' : turn.at(-1)!;
-      console.log(
-        `media sweep${dryRun ? ' (dry run)' : ''}: checked ${turn.length} of ${liveSessionIds.length} live session(s), ${result.liveObjects.length} unreferenced object(s) ${dryRun ? 'would be removed' : 'removed'}`,
-      );
     }
 
     // 3. Show prefixes: the whole prefix of a deleted show; under a live show, compilation
@@ -232,7 +240,11 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
           ).map((r) => r.id),
         );
         for (const [id, o] of byId) {
-          if (kept.has(id) || o.lastModified.getTime() >= cutoff) continue;
+          if (kept.has(id)) continue;
+          if (o.lastModified.getTime() >= cutoff) {
+            result.withinGrace++;
+            continue;
+          }
           if (!dryRun) {
             try {
               await deleteObject(o.key);
@@ -249,9 +261,39 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
   });
 
   if (result.ran) lastLiveCursor = result.liveCursor;
+  console.log(summaryLine(result, Date.now() - started));
   for (const seg of removed)
     publish(`session:${seg.sessionId}`, changeMessage('audio_segment', 'delete', seg.id));
   return result;
+}
+
+/**
+ * One line per run, so an operator can tell the sweep ran even when it found nothing:
+ * `media sweep (dry run): 0 stuck uploads, 1 orphan prefix, 0 compilation objects would be
+ * removed; 1 orphan within grace; 12 s`.
+ */
+export function summaryLine(r: SweepResult, elapsedMs: number): string {
+  const head = r.dryRun ? 'media sweep (dry run)' : 'media sweep';
+  if (!r.ran) return `${head}: skipped, another worker holds the sweep lock`;
+  const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+  return `${head}: ${[
+    n(r.uploads.length, 'stuck upload', 'stuck uploads'),
+    n(r.prefixes.length, 'orphan prefix', 'orphan prefixes'),
+    n(r.objects.length, 'compilation object', 'compilation objects'),
+    n(
+      r.liveObjects.length,
+      'unreferenced live-session object',
+      'unreferenced live-session objects',
+    ),
+  ].join(', ')} ${r.dryRun ? 'would be removed' : 'removed'}; ${n(
+    r.withinGrace,
+    'orphan',
+    'orphans',
+  )} within grace; checked ${r.liveSessionsChecked} of ${n(
+    r.liveSessionsTotal,
+    'live session',
+    'live sessions',
+  )}; ${Math.round(elapsedMs / 1000)} s`;
 }
 
 /** `sessions/<id>/` → `<id>`; anything not shaped like an id folder is ignored. */

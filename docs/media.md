@@ -127,7 +127,11 @@ In production: `node src/worker/main.ts` with the same environment as the app (c
   `media.deleteSegment`, peaks stored for a segment deleted meanwhile) are removed once the object
   itself is older than the grace period. Listing every live session is a full bucket scan, so each
   run checks only `MEDIA_SWEEP_LIVE_SESSIONS` of them, in id order after the last one that worker
-  process checked, wrapping around (a restart starts over), and logs `checked N of M live
-  session(s), K unreferenced object(s) removed`.
+  process checked, wrapping around (a restart starts over).
+  Each run ends with one summary line, also when nothing was found (`media sweep (dry run): 0 stuck
+  uploads, 1 orphan prefix, 0 compilation objects, 0 unreferenced live-session objects would be
+  removed; 1 orphan within grace; checked 49 of 49 live sessions; 12 s`),
+  and a worker that finds the lock held logs `media sweep: skipped, another worker holds the sweep
+  lock`.
 - Realtime: the worker publishes `audio_segment` / `job` changes and `transcript_segment` /
   `session` invalidations through the bus (Postgres NOTIFY), so open session pages update live.
