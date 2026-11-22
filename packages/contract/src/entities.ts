@@ -330,7 +330,9 @@ export type ChangeEntity =
   | 'transcript_segment'
   | 'dashboard'
   | 'wiki_page'
-  | 'category';
+  | 'category'
+  /** A session clock change (frameRate, startOffsetFrames) from sessions.update. */
+  | 'session';
 
 export interface Change {
   id: string;

@@ -68,6 +68,7 @@ const ENTITY_LABEL: Record<Change['entity'], string> = {
   dashboard: 'dashboard',
   wiki_page: 'wiki page',
   category: 'category',
+  session: 'session clock',
 };
 const LIMIT = 300;
 

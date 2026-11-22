@@ -1,11 +1,12 @@
 import {
+  formatFrames,
   parseTimecode,
   type Session,
   type SessionDetail,
   type TranscriptJob,
   transportElapsed,
 } from '@autologger/contract';
-import { and, desc, eq, inArray, isNull, type SQL, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, type SQL, sql } from 'drizzle-orm';
 import {
   readableShowCondition,
   requireSession,
@@ -15,12 +16,12 @@ import {
 import { changeMessage } from '../core/bus.ts';
 import { badRequest, conflict } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
-import { type Ctx, defineOp } from '../core/op.ts';
+import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
 import { toJob, withJobEstimates } from '../media/jobs.ts';
 import { iso, userRefs } from './map.ts';
 
-const { jobs, sessions, shows } = schema;
+const { events, jobs, sessions, shows } = schema;
 
 const aggregates = {
   eventCount: sql<number>`(select count(*)::int from events e where e.session_id = ${sessions.id})`,
@@ -226,13 +227,19 @@ defineOp({
   },
 });
 
+/** The session clock as the change log stores it; undo restores exactly these fields. */
+export const clockOf = (s: { frameRate: number; startOffsetFrames: number }) => ({
+  frameRate: s.frameRate,
+  startOffsetFrames: s.startOffsetFrames,
+});
+
 defineOp({
   name: 'sessions.update',
   description:
-    "Edit session metadata; only the fields you pass change. Frame rate and start timecode can only change while the transport is stopped. `keyTerms` replaces this session's transcription key terms (same limits as in sessions_create; [] clears them); they apply to transcriptions that run from now on, so re-transcribe (media_retranscribe) to use them on audio already transcribed. Metadata and key-term changes are not in the change log and cannot be undone from it.",
+    "Edit session metadata; only the fields you pass change. Frame rate and start timecode can only change while the transport is stopped (else conflict). With `frameRate`, also pass `startTimecode` to keep the start timecode; without it the start offset keeps its frame count. `retime` says what happens to logged events when the clock changes: 'keep_seconds' (default) keeps every event at the same atSec (seconds from the session start, lined up with audio and transcript) by converting its stored frames, so event timecodes are re-read on the new clock; 'keep_frames' keeps the stored frame counts and timecodes, so atSec shifts (use it only when event timecodes were typed from an external timecode source and the session clock was set wrong). Either way the recorded clock (elapsed time) keeps its seconds; topics and transcript are in seconds and never move. A clock change is recorded in the change log together with each retimed event as one group: undo it with changes_revertGroup (groupId from changes_list). `keyTerms` replaces this session's transcription key terms (same limits as in sessions_create; [] clears them); they apply to transcriptions that run from now on, so re-transcribe (media_retranscribe) to use them on audio already transcribed. Other metadata and key-term changes are not in the change log and cannot be undone from it.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, startTimecode, ...patch }) {
+  async run(ctx, { sessionId, startTimecode, retime = 'keep_seconds', ...patch }) {
     const { session } = await requireSession(ctx, sessionId, 'write');
     const set: Partial<typeof sessions.$inferInsert> = Object.fromEntries(
       Object.entries(patch).filter(([, v]) => v !== undefined),
@@ -246,13 +253,80 @@ defineOp({
       if (f === null) throw badRequest('Start timecode is not valid for this frame rate.');
       set.startOffsetFrames = f;
     }
+    const before = clockOf(session);
+    const after = clockOf({ ...session, ...set });
+    const clockMoved =
+      after.frameRate !== before.frameRate || after.startOffsetFrames !== before.startOffsetFrames;
+    if (clockMoved) {
+      // The recorded clock keeps its seconds (elapsed frames exclude the start offset).
+      set.elapsedFrames = Math.round((session.elapsedFrames / before.frameRate) * after.frameRate);
+      if (retime === 'keep_seconds') await retimeEvents(ctx, session, before, after);
+    }
     await ctx.db
       .update(sessions)
       .set({ ...set, updatedAt: new Date() })
       .where(eq(sessions.id, sessionId));
+    if (clockMoved) {
+      // Recorded last, so the change log's folded row for this call names the clock change.
+      await ctx.record({
+        entity: 'session',
+        entityId: sessionId,
+        kind: 'update',
+        summary: `Changed session clock (${clockLabel(before)} → ${clockLabel(after)})`,
+        showId: session.showId,
+        sessionId,
+        before,
+        after,
+      });
+      // Every event's atSec (keep_frames) or timecode (keep_seconds) changed.
+      ctx.publish(`session:${sessionId}`, { type: 'invalidate', entity: 'event' });
+    }
     return publishSession(ctx, sessionId);
   },
 });
+
+export type Clock = ReturnType<typeof clockOf>;
+
+const clockLabel = (c: Clock) =>
+  `${c.frameRate} fps from ${formatFrames(c.startOffsetFrames, c.frameRate)}`;
+
+/**
+ * Convert every timed event of the session from clock `from` to clock `to` so it keeps its
+ * seconds from the session start; each event is recorded (before/after) for undo.
+ */
+async function retimeEvents(
+  ctx: Ctx,
+  session: { id: string; showId: string },
+  from: Clock,
+  to: Clock,
+): Promise<void> {
+  const rows = await ctx.db
+    .select()
+    .from(events)
+    .where(and(eq(events.sessionId, session.id), isNotNull(events.timecodeFrames)));
+  const now = new Date();
+  for (const row of rows) {
+    const frames =
+      to.startOffsetFrames +
+      Math.round(((row.timecodeFrames! - from.startOffsetFrames) / from.frameRate) * to.frameRate);
+    if (frames === row.timecodeFrames) continue;
+    const [updated] = await ctx.db
+      .update(events)
+      .set({ timecodeFrames: frames, updatedAt: now })
+      .where(eq(events.id, row.id))
+      .returning();
+    await ctx.record({
+      entity: 'event',
+      entityId: row.id,
+      kind: 'update',
+      summary: `Retimed ${row.category} event to the new session clock`,
+      showId: session.showId,
+      sessionId: session.id,
+      before: snapshot(row),
+      after: snapshot(updated),
+    });
+  }
+}
 
 defineOp({
   name: 'sessions.archive',

@@ -381,7 +381,15 @@ export const changes = pgTable(
     tokenId: text('token_id'),
     op: text('op').notNull(),
     entity: text('entity', {
-      enum: ['event', 'topic', 'transcript_segment', 'dashboard', 'wiki_page', 'category'],
+      enum: [
+        'event',
+        'topic',
+        'transcript_segment',
+        'dashboard',
+        'wiki_page',
+        'category',
+        'session',
+      ],
     }).notNull(),
     entityId: text('entity_id').notNull(),
     kind: text('kind', { enum: ['create', 'update', 'delete'] }).notNull(),

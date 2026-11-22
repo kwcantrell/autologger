@@ -12,6 +12,7 @@ import {
   eq,
   getTableColumns,
   gt,
+  isNotNull,
   isNull,
   ne,
   not,
@@ -25,6 +26,7 @@ import { conflict, notFound } from '../core/errors.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
 import { iso, userRefs } from './map.ts';
+import { type Clock, clockOf, publishSession } from './sessions.ts';
 
 const { changes } = schema;
 
@@ -41,6 +43,8 @@ const TABLES: Record<
   dashboard: { table: schema.dashboards, live: 'dashboard' },
   wiki_page: { table: schema.wikiPages, live: null, softDelete: true },
   category: { table: schema.categories, live: null },
+  // Only clock fields are snapshotted; undone by undoClockChange.
+  session: { table: schema.sessions, live: 'session' },
 };
 
 const isUniqueViolation = (e: unknown) =>
@@ -205,6 +209,20 @@ defineOp({
       .limit(1);
     if (latest?.id !== c.id)
       throw conflict('This item changed again since; undo the newer change first.');
+    if (c.entity === 'session' && c.groupId) {
+      // Undoing the clock alone would move the events the same call retimed.
+      const [retimed] = await ctx.db
+        .select({ id: changes.id })
+        .from(changes)
+        .where(
+          and(eq(changes.groupId, c.groupId), ne(changes.id, c.id), isNull(changes.revertedAt)),
+        )
+        .limit(1);
+      if (retimed)
+        throw conflict(
+          'This clock change also retimed the session’s events; undo the whole call with changes_revertGroup.',
+        );
+    }
 
     const revertId = await undoChange(ctx, c);
     const [out] = await toChanges(
@@ -277,6 +295,7 @@ async function requireRevertAccess(ctx: Ctx, c: ChangeRow): Promise<void> {
 
 /** Restore the item to `c.before`, mark `c` undone and record the undo; returns its change id. */
 async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
+  if (c.entity === 'session') return undoClockChange(ctx, c);
   const { table, live, softDelete } = TABLES[c.entity];
   const idCol = table.id;
   const [current] = (await ctx.db.select().from(table).where(eq(idCol, c.entityId))) as
@@ -348,5 +367,57 @@ async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
       showId: c.showId,
       entity: 'category',
     });
+  return revertId;
+}
+
+/**
+ * Undo a session clock change (sessions.update frameRate / start timecode): restore the clock
+ * fields only, keeping the recorded clock's seconds. Retimed events are their own changes in
+ * the same group. Events logged after the change would move, so that is a conflict.
+ */
+async function undoClockChange(ctx: Ctx, c: ChangeRow): Promise<string> {
+  const { sessions, events } = schema;
+  const [current] = await ctx.db.select().from(sessions).where(eq(sessions.id, c.entityId));
+  if (!current) throw conflict('That session no longer exists.');
+  if (current.isRolling) throw conflict('Stop the transport before undoing a clock change.');
+  const [later] = await ctx.db
+    .select({ id: events.id })
+    .from(events)
+    .where(
+      and(
+        eq(events.sessionId, current.id),
+        isNotNull(events.timecodeFrames),
+        gt(events.createdAt, sql`(select at from changes where id = ${c.id})`),
+      ),
+    )
+    .limit(1);
+  if (later)
+    throw conflict(
+      'Events were logged after this clock change and would move; set the frame rate and start timecode back with sessions_update instead.',
+    );
+  const target = clockOf(c.before as Clock);
+  await ctx.db
+    .update(sessions)
+    .set({
+      ...target,
+      elapsedFrames: Math.round((current.elapsedFrames / current.frameRate) * target.frameRate),
+      updatedAt: new Date(),
+    })
+    .where(eq(sessions.id, current.id));
+  await ctx.db.update(changes).set({ revertedAt: new Date() }).where(eq(changes.id, c.id));
+  const revertId = await ctx.record({
+    entity: 'session',
+    entityId: current.id,
+    kind: 'update',
+    summary: `Undid: ${c.summary}`,
+    showId: c.showId,
+    sessionId: current.id,
+    before: clockOf(current),
+    after: target,
+    revertOf: c.id,
+  });
+  // Event atSec values depend on the clock.
+  ctx.publish(`session:${current.id}`, { type: 'invalidate', entity: 'event' });
+  await publishSession(ctx, current.id);
   return revertId;
 }

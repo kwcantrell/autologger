@@ -54,7 +54,7 @@ export function SessionDetailsDialog({
     : [...FRAME_RATES, base.frameRate].sort((a, b) => a - b);
   const clockEdited = clockChanged(base, form);
   const clockLocked = s.isRolling;
-  // Logged events and the elapsed clock are stored as frames on the session clock.
+  // Logged events and the elapsed clock are retimed by the server to keep their seconds.
   const clockInUse = s.eventCount > 0 || s.elapsedFrames > 0;
   const patch = buildPatch(base, form);
   const changed = Object.keys(patch).length > 1;
@@ -182,7 +182,7 @@ export function SessionDetailsDialog({
           <FieldDescription className="-mt-2">
             {clockLocked
               ? 'Stop the transport to change the frame rate or start timecode.'
-              : `Logged times are stored as frames, so ${s.eventCount ? `the ${plural(s.eventCount, 'event')}` : 'the recorded clock'} will move against the audio and transcript at the new setting.`}
+              : `${s.eventCount ? `The ${plural(s.eventCount, 'event')} keep their place` : 'The recorded clock keeps its time'} against the audio and transcript; ${s.eventCount ? 'their timecodes are' : 'it is'} re-read on the new clock. You can undo this from the Agents tab.`}
           </FieldDescription>
         )}
 

@@ -179,6 +179,8 @@ export const opInputs = {
     notes: z.string().max(10000).optional(),
     frameRate: z.number().positive().max(120).optional(),
     startTimecode: timecode.optional(),
+    /** How logged events follow a frame rate / start timecode change (default keep_seconds). */
+    retime: z.enum(['keep_seconds', 'keep_frames']).optional(),
     keyTerms: keyTermList.optional(),
   }),
   'sessions.archive': z.object({ sessionId: id, archived: z.boolean() }),
