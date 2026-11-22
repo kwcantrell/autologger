@@ -4,6 +4,8 @@
 // Job and session changes are published on `session:<id>` topics (by ops and by the worker, which
 // only knows the job's session), so the socket watches every topic and keeps the messages of the
 // show's sessions; session-list changes made by ops also arrive as `show_changed` on `show:<id>`.
+// Event changes only move a rail card's event count, so they become a throttled session-list hint:
+// live logging refetches each open rail's list at most once per EVENT_HINT_MS, not per event.
 
 import type { Job, ShowClientMessage, ShowServerMessage } from '@autologger/contract';
 import { eq } from 'drizzle-orm';
@@ -20,6 +22,8 @@ const sessionShow = new Map<string, Promise<string | null>>();
 const SESSION_SHOW_MAX = 50_000;
 /** A client this far behind (bytes queued) is closed with 1013 rather than buffered forever. */
 const MAX_BUFFERED = 1024 * 1024;
+/** Event changes refresh the rail's event counts at most this often (first one at once). */
+export const EVENT_HINT_MS = 3000;
 
 export function showOfSession(sessionId: string): Promise<string | null> {
   const cached = sessionShow.get(sessionId);
@@ -55,6 +59,10 @@ export function showMessageFor(m: BusMessage): ShowServerMessage | null {
   return null;
 }
 
+/** An event of the session was logged, edited or deleted (its rail card's count may change). */
+const isEventChange = (m: BusMessage) =>
+  (m.type === 'change' || m.type === 'invalidate') && m.entity === 'event';
+
 registerWs(
   '/ws/show/',
   async (ws, req, url) => {
@@ -74,6 +82,23 @@ registerWs(
     const push = (step: () => void | Promise<void>) => {
       queue = queue.then(step).catch(() => {});
     };
+    // Leading + trailing throttle of event-count hints (see EVENT_HINT_MS).
+    let hintTimer: ReturnType<typeof setTimeout> | undefined;
+    let hintAgain = false;
+    const hintEvents = () => {
+      if (hintTimer) {
+        hintAgain = true;
+        return;
+      }
+      send({ type: 'invalidate', entity: 'session' });
+      hintTimer = setTimeout(() => {
+        hintTimer = undefined;
+        if (hintAgain) {
+          hintAgain = false;
+          hintEvents();
+        }
+      }, EVENT_HINT_MS);
+    };
     const stopBeat = heartbeat(ws);
     const offAll = subscribeAll((topic: Topic, m: BusMessage) => {
       if (topic === `show:${showId}`) {
@@ -90,7 +115,7 @@ registerWs(
         return;
       }
       if (!topic.startsWith('session:')) return;
-      const out = showMessageFor(m);
+      const out = isEventChange(m) ? 'events' : showMessageFor(m);
       if (!out) return;
       const lookup = showOfSession(topic.slice('session:'.length));
       push(async () => {
@@ -103,7 +128,9 @@ registerWs(
           send({ type: 'invalidate', entity: 'session' });
           return;
         }
-        if (owner === showId) send(out);
+        if (owner !== showId) return;
+        if (out === 'events') hintEvents();
+        else send(out);
       });
     });
     // Re-check access whenever the user's grants or roles change.
@@ -117,6 +144,7 @@ registerWs(
     });
     ws.on('close', () => {
       stopBeat();
+      clearTimeout(hintTimer);
       offAll();
       offUser();
     });

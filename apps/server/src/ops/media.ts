@@ -311,6 +311,7 @@ defineOp({
           record: () => Promise.reject(new Error('read-only')),
           recordMany: () => Promise.reject(new Error('read-only')),
           publish: () => {},
+          afterCommit: () => {},
         },
         showId,
         'write',
@@ -500,14 +501,16 @@ defineOp({
         ),
       );
     if (storageConfigured) {
-      for (const key of [row.objectKey, row.peaksKey]) {
-        if (!key) continue;
-        try {
-          await deleteObject(key);
-        } catch (e) {
-          console.warn(`could not delete object ${key}: ${(e as Error).message}`);
+      ctx.afterCommit(async () => {
+        for (const key of [row.objectKey, row.peaksKey]) {
+          if (!key) continue;
+          try {
+            await deleteObject(key);
+          } catch (e) {
+            console.warn(`could not delete object ${key}: ${(e as Error).message}`);
+          }
         }
-      }
+      });
     }
     ctx.publish(`session:${session.id}`, changeMessage('audio_segment', 'delete', segmentId));
     ctx.publish(`session:${session.id}`, { type: 'invalidate', entity: 'transcript_segment' });

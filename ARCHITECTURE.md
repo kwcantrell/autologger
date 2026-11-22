@@ -71,7 +71,8 @@ export const createEvent = defineOp({
   description and JSON Schema straight from the op.
 - **Companion WS**: ops with `'companion'` in `surfaces`.
 - `ctx` carries `actor` (`{ userId, via: 'web'|'mcp'|'companion'|'worker', clientName, tokenId }`),
-  `db` (the transaction), `record()` (change-log writer) and `publish()` (realtime, flushed after commit).
+  `db` (the transaction), `record()` (change-log writer), `publish()` (realtime, flushed after commit)
+  and `afterCommit()` (best-effort slow cleanup such as S3 deletes, run after commit, skipped on failure).
 - Long-poll ops (`jobs.list` with `waitSec`) define `watch`: it starts listening on the realtime bus
   before the transaction, waits after commit (no DB connection held; ends early on client
   disconnect via the request's AbortSignal), then the op runs again in a new transaction.

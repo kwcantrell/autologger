@@ -42,7 +42,8 @@ export type ShowServerMessage =
   | { type: 'change'; entity: 'job'; op: 'upsert' | 'delete'; id: string; data?: Job }
   /**
    * `job`: jobs of the show changed, refetch them. `session`: the show's session list changed
-   * (a session was created, deleted, renamed, archived, imported into or started rolling).
+   * (a session was created, deleted, renamed, archived, imported into or started rolling), or
+   * its events changed (event counts; at most one such hint every few seconds per socket).
    */
   | { type: 'invalidate'; entity: 'job' | 'session' }
   | { type: 'closed'; reason: 'access_revoked' | 'deleted' }

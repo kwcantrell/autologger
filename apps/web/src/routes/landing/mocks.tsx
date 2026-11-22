@@ -233,7 +233,7 @@ export function LoggingMock() {
         <div className="grid grid-cols-5 gap-1.5">
           {keys.map((k) => (
             <span
-              key={k.label}
+              key={`${k.sub}-${k.label}`}
               className={cn(
                 'flex aspect-square min-w-0 flex-col items-center justify-center gap-1 rounded-ctl border border-si-line bg-si-panel-2 px-0.5 text-center',
                 k.lit && LIVE_PILL,
