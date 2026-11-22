@@ -71,6 +71,19 @@ export interface OpDef<N extends OpName, P = undefined> {
    */
   prepare?(actor: Actor, input: OpParsed<N>): Promise<P>;
   run(ctx: Ctx, input: OpParsed<N>, prepared: P): Promise<OpResult<N, OpParsed<N>>>;
+  /**
+   * Optional long-poll. Called before the transaction, so it can start listening and miss
+   * nothing. After commit, `wait(result)` returns a promise that resolves when the answer may
+   * have changed, on timeout or on `signal` abort, and the op runs again in a fresh transaction
+   * (unless aborted); null answers at once. Waiting must not touch the database, so a waiting
+   * request holds no transaction or pooled connection. `cancel` is always called at the end.
+   */
+  watch?(input: OpParsed<N>, signal?: AbortSignal): OpWatch<OpResult<N, OpParsed<N>>> | null;
+}
+
+export interface OpWatch<R> {
+  wait(result: R): Promise<void> | null;
+  cancel(): void;
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: heterogeneous registry
@@ -103,6 +116,7 @@ export async function executeOp<N extends OpName, I = unknown>(
   rawInput: I,
   actor: Actor,
   surface: Surface,
+  signal?: AbortSignal,
 ): Promise<OpResult<N, I>> {
   const op = registry.get(name) as OpDef<N, unknown> | undefined;
   if (!op?.surfaces.includes(surface)) throw new AppError('not_found', `Unknown op ${name}.`);
@@ -113,6 +127,27 @@ export async function executeOp<N extends OpName, I = unknown>(
   const input = opInputs[name].parse(rawInput ?? {}) as OpParsed<N>;
   const prepared = op.prepare ? await op.prepare(actor, input) : undefined;
 
+  const watch = op.watch?.(input, signal);
+  try {
+    const result = await runInTransaction(op, input, actor, prepared);
+    // The op returned the shape its parsed input asked for, which is the one `I` names.
+    const waiting = watch?.wait(result);
+    if (!waiting) return result as OpResult<N, I>;
+    await waiting;
+    if (signal?.aborted) return result as OpResult<N, I>;
+    return (await runInTransaction(op, input, actor, prepared)) as OpResult<N, I>;
+  } finally {
+    watch?.cancel();
+  }
+}
+
+async function runInTransaction<N extends OpName>(
+  op: OpDef<N, unknown>,
+  input: OpParsed<N>,
+  actor: Actor,
+  prepared: unknown,
+): Promise<OpResult<N, OpParsed<N>>> {
+  const name = op.name;
   const outbox: [Topic, BusMessage][] = [];
   const result = await db.transaction(async (tx) => {
     const ctx: Ctx = {
@@ -154,8 +189,7 @@ export async function executeOp<N extends OpName, I = unknown>(
     sent.add(key);
     publish(topic, message);
   }
-  // The op returned the shape its parsed input asked for, which is the one `I` names.
-  return result as OpResult<N, I>;
+  return result;
 }
 
 /** Ops register themselves on import. */

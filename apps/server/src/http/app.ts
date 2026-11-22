@@ -79,7 +79,13 @@ export function createApp(): Hono<Env> {
     // Bearer callers (agents using plain HTTP) get the MCP surface; browsers get the web surface.
     const surface = actor.via === 'mcp' ? 'mcp' : 'web';
     try {
-      const data = await executeOp(c.req.param('op') as OpName, input, actor, surface);
+      const data = await executeOp(
+        c.req.param('op') as OpName,
+        input,
+        actor,
+        surface,
+        c.req.raw.signal,
+      );
       return c.json({ ok: true, data });
     } catch (e) {
       const error = toRpcError(e);

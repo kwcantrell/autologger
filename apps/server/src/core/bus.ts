@@ -17,6 +17,7 @@ export type BusMessage =
 const CHANNEL = 'autologger';
 const ORIGIN = randomUUID();
 const MAX_NOTIFY = 7000;
+const ANY = Symbol('any topic');
 
 const emitter = new EventEmitter();
 emitter.setMaxListeners(0);
@@ -27,8 +28,20 @@ export function subscribe(topic: Topic, fn: (m: BusMessage) => void): () => void
   return () => emitter.off(topic, fn);
 }
 
-export function publish(topic: Topic, message: BusMessage): void {
+/** Every message on every topic (local and remote). Used by long-poll ops to watch before they
+ * know which topics matter, so nothing published meanwhile is missed. */
+export function subscribeAll(fn: (topic: Topic, m: BusMessage) => void): () => void {
+  emitter.on(ANY, fn);
+  return () => emitter.off(ANY, fn);
+}
+
+function emit(topic: Topic, message: BusMessage): void {
   emitter.emit(topic, message);
+  emitter.emit(ANY, topic, message);
+}
+
+export function publish(topic: Topic, message: BusMessage): void {
+  emit(topic, message);
   let payload = JSON.stringify({ o: ORIGIN, t: topic, m: message });
   if (payload.length > MAX_NOTIFY && message.type === 'change') {
     const slim: SessionServerMessage = { type: 'invalidate', entity: message.entity };
@@ -55,7 +68,7 @@ export async function listenForRemote(): Promise<void> {
   await sqlClient.listen(CHANNEL, (raw) => {
     try {
       const { o, t, m } = JSON.parse(raw) as { o: string; t: Topic; m: BusMessage };
-      if (o !== ORIGIN) emitter.emit(t, m);
+      if (o !== ORIGIN) emit(t, m);
     } catch {
       /* ignore malformed */
     }
