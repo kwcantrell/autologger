@@ -1,15 +1,17 @@
 // Video compilations: one MP4 the worker builds from ranges of a show's YouTube-sourced sessions
 // (media/compilations.ts, worker `compile` job). Compilations are show-level output, not session
-// content, so they are not in the change log; deleting one removes its video for good.
+// content, so they are not in the change log; deleting one removes its video for good. The
+// "Compilation" events create logs in the source sessions are content: recorded and undoable.
 
 import type { Compilation } from '@autologger/contract';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { requireShow } from '../core/authz.ts';
+import { requireSession, requireShow, type SessionRow } from '../core/authz.ts';
 import { type BusMessage, changeMessage, subscribeAll, type Topic } from '../core/bus.ts';
 import { badRequest, conflict, notFound, unavailable } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp, type OpWatch } from '../core/op.ts';
 import { schema } from '../db/client.ts';
+import type { CompilationClipRow } from '../db/schema.ts';
 import { env, storageConfigured } from '../env.ts';
 import { compilationMessage, resolveClipSources } from '../media/compilations.ts';
 import { enqueueJob, toJob, withJobEstimates } from '../media/jobs.ts';
@@ -19,10 +21,13 @@ import {
   presignPlayback,
   requireStorage,
 } from '../media/s3.ts';
+import { deleteEvent, insertEvent, publishEvents } from './events.ts';
 import { toCompilation, userRefs } from './map.ts';
+import { publishSession } from './sessions.ts';
 
-const { compilations, jobs, sessions } = schema;
+const { compilations, events, jobs, sessions } = schema;
 type Row = typeof compilations.$inferSelect;
+type EventRow = typeof events.$inferSelect;
 
 /** compilations.list returns at most this many (newest first). */
 const LIST_MAX = 200;
@@ -54,6 +59,60 @@ async function toEntities(ctx: Ctx, rows: Row[]): Promise<Compilation[]> {
       };
     }),
   );
+}
+
+/** Clip length as m:ss (h:mm:ss from an hour), for the event message. */
+function clipLength(sec: number): string {
+  const t = Math.round(sec);
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const ss = String(t % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
+/**
+ * Log one "Compilation" event per clip at its startSec in the clip's session (the events.create
+ * path: recorded in this op's change group, published to each session). Returns the event ids in
+ * clip order.
+ */
+async function logClipEvents(
+  ctx: Ctx,
+  title: string,
+  clips: { sessionId: string; startSec: number; endSec: number; label?: string }[],
+): Promise<string[]> {
+  const ids: string[] = [];
+  const bySession = new Map<string, { session: SessionRow; rows: EventRow[] }>();
+  for (const [i, c] of clips.entries()) {
+    let s = bySession.get(c.sessionId);
+    if (!s) {
+      const { session } = await requireSession(ctx, c.sessionId, 'write', 'share');
+      s = { session, rows: [] };
+      bySession.set(c.sessionId, s);
+    }
+    const row = await insertEvent(ctx, s.session, {
+      category: 'Compilation',
+      message: `Compilation "${title}" · clip ${i + 1}${c.label ? `: ${c.label}` : ''} (${clipLength(c.endSec - c.startSec)})`,
+      atSec: c.startSec,
+    });
+    s.rows.push(row);
+    ids.push(row.id);
+  }
+  for (const { session, rows } of bySession.values()) await publishEvents(ctx, session, rows);
+  return ids;
+}
+
+/** Delete the clip events of a compilation that still exist (each delete recorded, undoable). */
+async function deleteClipEvents(ctx: Ctx, clips: CompilationClipRow[]): Promise<void> {
+  const ids = clips.flatMap((c) => (c.eventId ? [c.eventId] : []));
+  if (!ids.length) return;
+  const rows = await ctx.db.select().from(events).where(inArray(events.id, ids));
+  const bySession = new Map<string, EventRow[]>();
+  for (const r of rows) bySession.set(r.sessionId, [...(bySession.get(r.sessionId) ?? []), r]);
+  for (const [sessionId, list] of bySession) {
+    const { session } = await requireSession(ctx, sessionId, 'write', 'share');
+    for (const row of list) await deleteEvent(ctx, session, row);
+    await publishSession(ctx, session.id);
+  }
 }
 
 /**
@@ -130,12 +189,13 @@ async function requireCompilable(
 defineOp({
   name: 'compilations.create',
   description:
-    'Build one MP4 video from ranges of a show\'s sessions that were imported from YouTube (sessions_get: sourceKind "youtube" with a sourceUrl; media_importYoutube / media_importPlaylist). showId from shows_list; needs write access to the show. clips: 1–100 ranges in play order, each {sessionId, startSec, endSec, label?} in SECONDS FROM THE SESSION START — the same @seconds as transcript_text, search hits and topics — each 1 s to 20 min long, together at most 3 hours. Every session must belong to this show and its range must lie within the session\'s stored YouTube audio; otherwise the call fails with bad_request listing the offending clips (e.g. "clip 2 (sessionId …): the session was not imported from YouTube") and nothing is created. Sessions recorded or uploaded in the app have no video and cannot be compiled. The server then downloads just those sections of the YouTube videos (≤720p), re-encodes them to one H.264/AAC MP4 (1280×720, 30 fps) and stores it; this runs in the background and takes roughly a few seconds per clip-minute plus download time. Returns the Compilation with status "queued". Wait for it with compilations_get {compilationId, waitSec: 55} in a loop until status is "ready" (then url is a presigned download link valid about 1 hour — call compilations_get again for a fresh one, do not store it) or "failed" (error says why; compilations_retry builds it again when the cause was temporary). progress reads like "clip 3/12" meanwhile. Users see and play compilations in the web app\'s Compilations page.',
+    'Build one MP4 video from ranges of a show\'s sessions that were imported from YouTube (sessions_get: sourceKind "youtube" with a sourceUrl; media_importYoutube / media_importPlaylist). showId from shows_list; needs write access to the show. clips: 1–100 ranges in play order, each {sessionId, startSec, endSec, label?} in SECONDS FROM THE SESSION START — the same @seconds as transcript_text, search hits and topics — each 1 s to 20 min long, together at most 3 hours. Every session must belong to this show and its range must lie within the session\'s stored YouTube audio; otherwise the call fails with bad_request listing the offending clips (e.g. "clip 2 (sessionId …): the session was not imported from YouTube") and nothing is created. Sessions recorded or uploaded in the app have no video and cannot be compiled. The server then downloads just those sections of the YouTube videos (≤720p), re-encodes them to one H.264/AAC MP4 (1280×720, 30 fps) and stores it; this runs in the background and takes roughly a few seconds per clip-minute plus download time. Returns the Compilation with status "queued". Wait for it with compilations_get {compilationId, waitSec: 55} in a loop until status is "ready" (then url is a presigned download link valid about 1 hour — call compilations_get again for a fresh one, do not store it) or "failed" (error says why; compilations_retry builds it again when the cause was temporary). progress reads like "clip 3/12" meanwhile. Users see and play compilations in the web app\'s Compilations page. Side effect: unless logEvents is false, it also logs one event per clip in the clip\'s session — category "Compilation" (a free label, grey marker), at the clip\'s startSec, message like `Compilation "Best bits" · clip 3: label (0:42)` (clip length) — so operators and agents see which moments were already clipped (events_list; each clip\'s eventId in the result). These events are in the change log as one group with this call: changes_revertGroup on it removes them (the compilation itself stays; delete it with compilations_delete). compilations_retry does not log them again. Pass logEvents: false to skip them (e.g. for a throwaway draft).',
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { showId, title, clips }) {
+  async run(ctx, { showId, title, clips, logEvents }) {
     await requireShow(ctx, showId, 'write');
     const sources = await requireCompilable(ctx, clips, showId);
+    const eventIds = logEvents ? await logClipEvents(ctx, title, clips) : [];
     const id = newId('cmp');
     const [row] = await ctx.db
       .insert(compilations)
@@ -151,6 +211,7 @@ defineOp({
             startSec: c.startSec,
             endSec: c.endSec,
             ...(c.label ? { label: c.label } : {}),
+            ...(eventIds[i] ? { eventId: eventIds[i] } : {}),
           };
         }),
         durationSec: clips.reduce((n, c) => n + (c.endSec - c.startSec), 0),
@@ -247,11 +308,12 @@ defineOp({
 defineOp({
   name: 'compilations.delete',
   description:
-    'Delete a video compilation and its stored MP4 (compilationId from compilations_list). A compilation still being built is cancelled. This cannot be undone (the sessions and their media are not affected; create it again with compilations_create). Needs write access to the show. Returns {ok: true}.',
+    'Delete a video compilation and its stored MP4 (compilationId from compilations_list). A compilation still being built is cancelled. Deleting the video cannot be undone (the sessions and their media are not affected; create it again with compilations_create). It also deletes the "Compilation" events compilations_create logged in the source sessions (those still there; events moved or edited since are deleted too). Those event deletes are in the change log as one group: changes_revertGroup on it restores the events, not the video. Needs write access to the show. Returns {ok: true}.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { compilationId }) {
     const row = await loadCompilation(ctx, compilationId, 'write');
+    await deleteClipEvents(ctx, row.clips);
     await ctx.db.delete(compilations).where(eq(compilations.id, row.id));
     // A queued build has nothing left to do; a running one finds the row gone and cleans up.
     // Its failures (and this cancellation) are dismissed: nothing is left to retry.

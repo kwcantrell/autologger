@@ -564,6 +564,11 @@ export interface CompilationClipRow {
   startSec: number;
   endSec: number;
   label?: string;
+  /**
+   * The "Compilation" event compilations.create logged for this clip in its session (absent
+   * with logEvents: false); compilations.delete deletes it if it still exists.
+   */
+  eventId?: string;
 }
 
 /**

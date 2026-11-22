@@ -85,7 +85,8 @@ type EventInput = {
   atSec?: number;
 };
 
-async function insertEvent(
+/** Insert one event and record its creation (undo deletes it). Also used by compilations.create. */
+export async function insertEvent(
   ctx: Ctx,
   session: SessionRow,
   input: EventInput,
@@ -118,7 +119,8 @@ async function insertEvent(
   return row!;
 }
 
-async function publishEvents(
+/** Publish created or updated events to the session's socket (after commit). */
+export async function publishEvents(
   ctx: Ctx,
   session: SessionRow,
   rows: EventRow[],
@@ -281,6 +283,24 @@ defineOp({
   },
 });
 
+/**
+ * Delete one event, record it (undo restores it) and publish the deletion. The caller publishes
+ * the session summary (publishSession) once. Also used by compilations.delete.
+ */
+export async function deleteEvent(ctx: Ctx, session: SessionRow, row: EventRow): Promise<void> {
+  await ctx.db.delete(events).where(eq(events.id, row.id));
+  await ctx.record({
+    entity: 'event',
+    entityId: row.id,
+    kind: 'delete',
+    summary: `Deleted ${row.category} event`,
+    showId: session.showId,
+    sessionId: session.id,
+    before: snapshot(row),
+  });
+  ctx.publish(`session:${session.id}`, changeMessage('event', 'delete', row.id));
+}
+
 defineOp({
   name: 'events.delete',
   description: 'Delete an event (it can be restored from the change log).',
@@ -288,17 +308,7 @@ defineOp({
   surfaces: ['web', 'mcp'],
   async run(ctx, { eventId }) {
     const { row, session } = await loadEvent(ctx, eventId, 'write');
-    await ctx.db.delete(events).where(eq(events.id, eventId));
-    await ctx.record({
-      entity: 'event',
-      entityId: eventId,
-      kind: 'delete',
-      summary: `Deleted ${row.category} event`,
-      showId: session.showId,
-      sessionId: session.id,
-      before: snapshot(row),
-    });
-    ctx.publish(`session:${session.id}`, changeMessage('event', 'delete', eventId));
+    await deleteEvent(ctx, session, row);
     await publishSession(ctx, session.id);
     return { deleted: true };
   },
