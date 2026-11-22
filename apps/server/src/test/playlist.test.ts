@@ -177,6 +177,32 @@ describe('media.importPlaylist', () => {
     expect(s.episodeDate).toBe('2023-01-01');
   });
 
+  it('records the video length of a single import for the transcript estimate', async () => {
+    const { owner, session } = await studio();
+    const url = 'https://youtu.be/fffffffffff';
+    await writeFile(jsonFile, JSON.stringify({ id: 'fffffffffff', duration: 2700 }));
+    const job = await call(owner, 'media.importYoutube', { sessionId: session.id, url });
+    const payload = async (id: string) =>
+      (await db.select().from(schema.jobs).where(eq(schema.jobs.id, id)))[0]!.payload;
+    expect(await payload(job.id)).toEqual({ url, durationSec: 2700 });
+
+    // yt-dlp failing to read it does not block the import: the length is just unknown.
+    const saved = env.ytDlpPath;
+    env.ytDlpPath = '/nonexistent/yt-dlp';
+    try {
+      const again = await call(owner, 'media.importYoutube', { sessionId: session.id, url });
+      expect(await payload(again.id)).toEqual({ url });
+    } finally {
+      env.ytDlpPath = saved;
+    }
+
+    const outsider = asAgent(await makeUser('outsider@example.com'));
+    await failsWith(
+      call(outsider, 'media.importYoutube', { sessionId: session.id, url }),
+      'not_found',
+    );
+  });
+
   it('rejects bad URLs and callers without write access', async () => {
     const { owner, show, session } = await studio();
     await playlist([entry('aaaaaaaaaaa', 'Talk')]);

@@ -31,6 +31,11 @@ export const env = {
   },
   /** Dev-only email login without Google. Never enable in production. */
   devLogin: str('DEV_LOGIN') === '1',
+  /**
+   * Public landing page for signed-out visitors at `/` (default on). LANDING_PAGE=0 sends them
+   * straight to sign-in instead, e.g. for a private self-hosted instance.
+   */
+  landingPage: str('LANDING_PAGE', '1') === '1',
   /** Emails that become active superadmins on first sign-in. */
   superadminEmails: list('SUPERADMIN_EMAILS'),
 

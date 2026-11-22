@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { lazy, Suspense, useEffect } from 'react';
 import { Redirect, useLocation } from 'wouter';
-import { qk, useMe } from '@/api/queries';
+import { qk, useCapabilities, useMe } from '@/api/queries';
 import { auth } from '@/api/rpc';
 import { GATE_PAGE, LoadingVideo, PANEL, RouteState } from '@/components/RouteState';
 import { Button } from '@/shared/components/ui/button';
@@ -9,8 +9,8 @@ import { Card } from '@/shared/components/ui/card';
 import { AppShell } from './AppShell';
 import { Onboarding } from './Onboarding';
 
-// Signed-out visitors to `/` see the public landing page; loaded on demand so it never weighs on
-// the signed-in app's bundle.
+// Signed-out visitors to `/` see the public landing page (unless the server turned it off with
+// LANDING_PAGE=0); loaded on demand so it never weighs on the signed-in app's bundle.
 const LandingPage = lazy(() =>
   import('@/routes/landing/LandingPage').then((m) => ({ default: m.LandingPage })),
 );
@@ -21,6 +21,7 @@ export function currentPath() {
 
 export function RootGate() {
   const me = useMe();
+  const caps = useCapabilities();
   const qc = useQueryClient();
   const [path] = useLocation();
 
@@ -51,6 +52,9 @@ export function RootGate() {
     );
   }
   if (!me.data && path === '/') {
+    if (caps.isPending) return loading;
+    // Off only when the server says so; if capabilities can't load, keep the default (on).
+    if (caps.data?.landingPage === false) return <Redirect to="/login" replace />;
     return (
       <Suspense fallback={loading}>
         <LandingPage />
