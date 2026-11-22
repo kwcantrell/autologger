@@ -3,7 +3,7 @@
 
 FROM node:24-slim AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/contract/package.json packages/contract/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
@@ -25,7 +25,7 @@ RUN apt-get update \
 WORKDIR /app
 ENV NODE_ENV=production WEB_DIST=/app/apps/web/dist PORT=8080
 COPY --from=deps /app/node_modules node_modules
-COPY package.json ./
+COPY package.json tsconfig.base.json ./
 COPY packages/contract packages/contract
 COPY apps/server apps/server
 COPY --from=web /app/apps/web/dist apps/web/dist

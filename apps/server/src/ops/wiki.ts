@@ -29,7 +29,11 @@ async function summaries(ctx: Ctx, rows: PageRow[]): Promise<WikiPageSummary[]> 
 
 async function fullPage(ctx: Ctx, row: PageRow): Promise<WikiPage> {
   const [summary] = await summaries(ctx, [row]);
-  const names = [row.title, ...row.aliases].map((n) => `%[[${n.replace(/[%_]/g, '\\$&')}]]%`);
+  // Matches [[Title]], [[Title|label]] and the same for every alias (case-insensitive).
+  const names = [row.title, ...row.aliases].flatMap((n) => {
+    const esc = n.replace(/[%_\\]/g, '\\$&');
+    return [`%[[${esc}]]%`, `%[[${esc}|%`];
+  });
   const backlinks = await ctx.db
     .select({ id: pages.id, title: pages.title, kind: pages.kind })
     .from(pages)
@@ -107,7 +111,7 @@ defineOp({
 defineOp({
   name: 'wiki.upsert',
   description:
-    'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated, otherwise a new one is created. Body is Markdown; link other pages with [[Title]]. Kind "session" pages are recaps tied to sessionId. Every save keeps a revision.',
+    'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated (keeping its title), otherwise a new one is created; pass pageId to rename. Body is Markdown; link other pages with [[Title]]. Kind "session" pages are recaps tied to sessionId. Every save keeps a revision.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
@@ -121,10 +125,12 @@ defineOp({
     if (existing && existing.showId !== input.showId) throw badRequest('That page belongs to another show.');
     const clash = await findByTitle(ctx, input.showId, input.title);
     if (clash && clash.id !== existing?.id) throw conflict(`A page titled “${clash.title}” already exists.`);
+    // Matched by title/alias (no pageId): keep the canonical title; renaming needs an explicit pageId.
+    const title = existing && !input.pageId ? existing.title : input.title;
     const values = {
       kind: input.kind,
-      title: input.title,
-      titleNorm: normTitle(input.title),
+      title,
+      titleNorm: normTitle(title),
       bodyMd: input.bodyMd,
       aliases: input.aliases ?? existing?.aliases ?? [],
       sessionId: input.sessionId ?? existing?.sessionId ?? null,

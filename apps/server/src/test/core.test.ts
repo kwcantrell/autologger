@@ -149,7 +149,8 @@ describe('dashboards and wiki', () => {
     expect(q.id).toBe(p.id);
     expect(q.revision).toBe(2);
     await call(owner, 'wiki.upsert', { showId: show.id, kind: 'bit', title: 'Cold Open', bodyMd: 'With [[Dana]].' });
-    expect((await call(owner, 'wiki.get', { pageId: p.id })).backlinks.map((b) => b.title)).toEqual(['Cold Open']);
+    await call(owner, 'wiki.upsert', { showId: show.id, kind: 'topic', title: 'Recap', bodyMd: 'Thanks [[Dana Ruiz|our host]].' });
+    expect((await call(owner, 'wiki.get', { pageId: p.id })).backlinks.map((b) => b.title)).toEqual(['Cold Open', 'Recap']);
     expect(await call(owner, 'wiki.revisions', { pageId: p.id })).toHaveLength(2);
   });
 });
