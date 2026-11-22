@@ -95,6 +95,7 @@ export type SettingsSection =
   | 'admin';
 
 export const settingsOpen = createStore<SettingsSection | null>(null);
-export const newSessionOpen = createStore<boolean>(false);
+/** The New session dialog: closed, opened to create a session, or opened from Import. */
+export const newSessionOpen = createStore<false | 'session' | 'import'>(false);
 export const shortcutsOpen = createStore<boolean>(false);
 export const paletteOpen = createStore<boolean>(false);

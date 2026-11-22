@@ -11,10 +11,9 @@ import { type BusMessage, changeMessage, subscribeAll, type Topic } from '../cor
 import { badRequest, conflict, notFound, unavailable } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp, type OpWatch } from '../core/op.ts';
-import type { Tx } from '../db/client.ts';
 import { db, schema } from '../db/client.ts';
 import { env, storageConfigured, transcriptionConfigured } from '../env.ts';
-import { enqueueJob, type JobRow, toJob } from '../media/jobs.ts';
+import { enqueueJob, type JobRow, toJob, withJobEstimates } from '../media/jobs.ts';
 import {
   deleteObject,
   extForMime,
@@ -269,6 +268,7 @@ defineOp({
           actor,
           db: tx,
           op: 'media.importPlaylist',
+          groupId: '',
           record: () => Promise.reject(new Error('read-only')),
           publish: () => {},
         },
@@ -471,29 +471,6 @@ defineOp({
 });
 
 /**
- * Fill `queuePosition` on runnable queued jobs: how many runnable queued jobs (any show) the
- * worker claims first, 0 = next. Mirrors claimJob's order (run_after, transcriptions first,
- * created_at, id); `kind <> 'transcribe'` is false for transcriptions, so they sort first. Jobs
- * waiting out a retry backoff (run_after in the future) get no position.
- */
-async function withQueuePositions<T extends Job>(tx: Tx, list: T[]): Promise<T[]> {
-  const ids = list.filter((j) => j.status === 'queued').map((j) => j.id);
-  if (!ids.length) return list;
-  const rows = await tx
-    .select({
-      id: jobs.id,
-      ahead: sql<number>`(select count(*)::int from jobs a
-        where a.status = 'queued' and a.run_after <= now()
-          and (a.run_after, a.kind <> 'transcribe', a.created_at, a.id)
-            < (jobs.run_after, jobs.kind <> 'transcribe', jobs.created_at, jobs.id))`,
-    })
-    .from(jobs)
-    .where(and(inArray(jobs.id, ids), sql`${jobs.runAfter} <= now()`));
-  const ahead = new Map(rows.map((r) => [r.id, r.ahead]));
-  return list.map((j) => (ahead.has(j.id) ? { ...j, queuePosition: ahead.get(j.id)! } : j));
-}
-
-/**
  * Long-poll for jobs.list. Starts listening on the realtime bus before the op's transaction (so
  * a change committed meanwhile isn't missed); `wait` then resolves when a listed unfinished job
  * changes status or is deleted, or a job is queued in one of their sessions — or on timeout or
@@ -552,7 +529,7 @@ function watchJobs(ms: number, signal?: AbortSignal): OpWatch<Job[]> {
 defineOp({
   name: 'jobs.list',
   description:
-    'Background jobs (transcription, YouTube import), newest first, with status, progress and errors. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"). Optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Queued jobs include queuePosition: how many jobs the worker will start before this one, 0 = next. It counts every runnable queued job on the server (all teams and shows; only the number is exposed); a job waiting to retry after a failure has no queuePosition until its retry time. The worker runs a couple of jobs at a time and each usually takes under a minute or two. To wait for jobs, pass waitSec (1–55): if any listed job is queued or running, the call holds until one of them changes status (starts, finishes, fails) or a new job is queued in one of their sessions, then returns the fresh list — or returns after waitSec seconds when nothing changed. Call it again in a loop until the result is empty / all done; no separate sleep is needed. Without waitSec the call returns at once; do not poll it in a tight loop.',
+    'Background jobs (transcription, YouTube import), newest first, with status, progress and errors. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"). Optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Queued jobs include queuePosition: how many jobs the worker will start before this one, 0 = next. It counts every runnable queued job on the server (all teams and shows; only the number is exposed); a job waiting to retry after a failure has no queuePosition until its retry time. startedAt is when the current attempt started (null while queued). Queued (with a queuePosition) and running jobs include etaSec: a rough estimate of seconds until the job finishes, from the median duration of the last 20 finished jobs of the same kind (transcriptions scaled by their audio length), the jobs ahead in the queue and the worker\'s parallelism; 0 on a running job means it is taking longer than usual. It is absent when there is no finished history to estimate from. Use it to choose waitSec, not as a deadline. To wait for jobs, pass waitSec (1–55): if any listed job is queued or running, the call holds until one of them changes status (starts, finishes, fails) or a new job is queued in one of their sessions, then returns the fresh list — or returns after waitSec seconds when nothing changed. Call it again in a loop until the result is empty / all done; no separate sleep is needed. Without waitSec the call returns at once; do not poll it in a tight loop.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   watch: ({ waitSec }, signal) => (waitSec ? watchJobs(waitSec * 1000, signal) : null),
@@ -566,7 +543,7 @@ defineOp({
         .where(and(eq(jobs.sessionId, sessionId), statusCond))
         .orderBy(desc(jobs.createdAt))
         .limit(limit);
-      return withQueuePositions(ctx.db, rows.map(toJob));
+      return withJobEstimates(ctx.db, rows.map(toJob));
     }
     // Read access is per show, so every session of a readable show is readable.
     await requireShow(ctx, showId!, 'read');
@@ -577,7 +554,7 @@ defineOp({
       .where(and(eq(sessions.showId, showId!), statusCond))
       .orderBy(desc(jobs.createdAt))
       .limit(limit);
-    return withQueuePositions(
+    return withJobEstimates(
       ctx.db,
       rows.map((r) => ({ ...toJob(r.job), sessionTitle: r.sessionTitle })),
     );

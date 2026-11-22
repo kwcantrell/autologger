@@ -9,6 +9,7 @@ import {
   opInputs,
   type Via,
 } from '@autologger/contract';
+import { sql } from 'drizzle-orm';
 import { db, schema, type Tx } from '../db/client.ts';
 import { type BusMessage, publish, type Topic } from './bus.ts';
 import { AppError, forbidden } from './errors.ts';
@@ -50,6 +51,8 @@ export interface Ctx {
   actor: Actor;
   db: Tx;
   op: OpName;
+  /** Shared by every change this op call records; `changes.revertGroup` undoes them together. */
+  groupId: string;
   /** Append to the change log in the current transaction. */
   record(change: RecordChange): Promise<string>;
   /** Queue a realtime message; delivered only after the transaction commits. */
@@ -149,16 +152,20 @@ async function runInTransaction<N extends OpName>(
 ): Promise<OpResult<N, OpParsed<N>>> {
   const name = op.name;
   const outbox: [Topic, BusMessage][] = [];
+  const groupId = newId('grp');
   const result = await db.transaction(async (tx) => {
     const ctx: Ctx = {
       actor,
       db: tx,
       op: name,
+      groupId,
       publish: (topic, message) => outbox.push([topic, message]),
       async record(c) {
         const id = newId('chg');
         await tx.insert(schema.changes).values({
           id,
+          // Wall clock, not now(): changes in one transaction keep their order (undo relies on it).
+          at: sql`clock_timestamp()`,
           actorId: actor.user.id,
           via: actor.via,
           clientName: actor.clientName,
@@ -173,6 +180,7 @@ async function runInTransaction<N extends OpName>(
           before: c.before ?? null,
           after: c.after ?? null,
           revertOf: c.revertOf ?? null,
+          groupId,
         });
         if (c.sessionId)
           outbox.push([`session:${c.sessionId}`, { type: 'invalidate', entity: 'change' }]);
