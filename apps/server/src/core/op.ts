@@ -55,6 +55,8 @@ export interface Ctx {
   groupId: string;
   /** Append to the change log in the current transaction. */
   record(change: RecordChange): Promise<string>;
+  /** `record` for many changes in a few INSERTs (bulk writes); returns their ids in order. */
+  recordMany(changes: RecordChange[]): Promise<string[]>;
   /** Queue a realtime message; delivered only after the transaction commits. */
   publish(topic: Topic, message: BusMessage): void;
 }
@@ -161,9 +163,12 @@ async function runInTransaction<N extends OpName>(
       groupId,
       publish: (topic, message) => outbox.push([topic, message]),
       async record(c) {
-        const id = newId('chg');
-        await tx.insert(schema.changes).values({
-          id,
+        const [id] = await ctx.recordMany([c]);
+        return id!;
+      },
+      async recordMany(list) {
+        const rows = list.map((c) => ({
+          id: newId('chg'),
           // Wall clock, not now(): changes in one transaction keep their order (undo relies on it).
           at: sql`clock_timestamp()`,
           actorId: actor.user.id,
@@ -181,10 +186,14 @@ async function runInTransaction<N extends OpName>(
           after: c.after ?? null,
           revertOf: c.revertOf ?? null,
           groupId,
-        });
-        if (c.sessionId)
-          outbox.push([`session:${c.sessionId}`, { type: 'invalidate', entity: 'change' }]);
-        return id;
+        }));
+        // Chunked to stay under the Postgres bind-parameter limit.
+        for (let i = 0; i < rows.length; i += 1000)
+          await tx.insert(schema.changes).values(rows.slice(i, i + 1000));
+        for (const c of list)
+          if (c.sessionId)
+            outbox.push([`session:${c.sessionId}`, { type: 'invalidate', entity: 'change' }]);
+        return rows.map((r) => r.id);
       },
     };
     return op.run(ctx, input, prepared);

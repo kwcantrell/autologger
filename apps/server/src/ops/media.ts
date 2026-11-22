@@ -270,6 +270,7 @@ defineOp({
           op: 'media.importPlaylist',
           groupId: '',
           record: () => Promise.reject(new Error('read-only')),
+          recordMany: () => Promise.reject(new Error('read-only')),
           publish: () => {},
         },
         showId,
