@@ -36,6 +36,14 @@ export const env = {
    * straight to sign-in instead, e.g. for a private self-hosted instance.
    */
   landingPage: str('LANDING_PAGE', '1') === '1',
+  /**
+   * Base URL of this instance's own docs (DOCS_URL, http(s) only, trailing slash dropped). The
+   * landing page's doc links become `<docsUrl>/<file>.md` instead of the upstream repo's
+   * `blob/main/docs/<file>.md`; null keeps the upstream links.
+   */
+  docsUrl: /^https?:\/\//i.test(str('DOCS_URL') ?? '')
+    ? str('DOCS_URL')!.replace(/\/+$/, '')
+    : null,
   /** Emails that become active superadmins on first sign-in. */
   superadminEmails: list('SUPERADMIN_EMAILS'),
 
