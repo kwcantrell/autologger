@@ -368,7 +368,7 @@ describe('job timing', () => {
     const get = () => call(agent, 'sessions.get', { sessionId: session.id });
     expect((await get()).transcriptJob).toMatchObject({ id: imp.id, etaSec: 150 });
 
-    // Unknown length (media.importYoutube): the download only.
+    // Unknown length (YouTube did not say): the download only.
     await db
       .update(schema.jobs)
       .set({ payload: { url: 'https://youtu.be/y' } })
