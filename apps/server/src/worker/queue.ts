@@ -5,7 +5,7 @@ import { changeMessage, publish } from '../core/bus.ts';
 import { db, schema } from '../db/client.ts';
 import { type JobRow, toJob } from '../media/jobs.ts';
 
-const { jobs } = schema;
+const { jobs, workers } = schema;
 
 export const MAX_ATTEMPTS = 3;
 export const STUCK_AFTER_MIN = 15;
@@ -23,14 +23,23 @@ function publishJob(job: JobRow): void {
  * A follow-up transcription is queued with run_after = its import's created_at (enqueueJob
  * `after`), so it takes its parent's place; the kind tie-break keeps it ahead of sibling imports
  * inserted in the same transaction (identical now() timestamps). id makes the order total.
+ *
+ * `skipKinds`: kinds this worker has no free slot for (per-kind concurrency); the next job of
+ * another kind is claimed instead.
  */
-export async function claimJob(): Promise<JobRow | null> {
+export async function claimJob(skipKinds: readonly JobRow['kind'][] = []): Promise<JobRow | null> {
+  const skip = skipKinds.length
+    ? sql`and kind not in (${sql.join(
+        skipKinds.map((k) => sql`${k}`),
+        sql`, `,
+      )})`
+    : sql``;
   const rows = await db.execute<{ id: string }>(sql`
     update jobs set status = 'running', locked_at = now(), started_at = now(), updated_at = now(),
       attempts = attempts + 1, progress = 'Starting'
     where id = (
       select id from jobs
-      where status = 'queued' and run_after <= now()
+      where status = 'queued' and run_after <= now() ${skip}
       order by run_after, (kind = 'transcribe') desc, created_at, id
       limit 1
       for update skip locked
@@ -126,4 +135,26 @@ export async function recoverStuckJobs(): Promise<JobRow[]> {
     }
   }
   return rows;
+}
+
+/**
+ * Announce (or keep announcing) a running worker and its slots; withJobEstimates sums the live
+ * rows. An upsert, so a row removed by hand comes back on the next beat.
+ */
+export async function beatWorker(
+  id: string,
+  concurrency: number,
+  kindConcurrency: Record<string, number>,
+): Promise<void> {
+  await db
+    .insert(workers)
+    .values({ id, concurrency, kindConcurrency })
+    .onConflictDoUpdate({ target: workers.id, set: { lastSeenAt: sql`now()` } });
+  // Rows of crashed workers stop counting after WORKER_STALE_SEC; drop them after a day.
+  await db.delete(workers).where(sql`${workers.lastSeenAt} < now() - interval '1 day'`);
+}
+
+/** Clean shutdown: stop counting this worker's slots right away. */
+export async function removeWorker(id: string): Promise<void> {
+  await db.delete(workers).where(eq(workers.id, id));
 }
