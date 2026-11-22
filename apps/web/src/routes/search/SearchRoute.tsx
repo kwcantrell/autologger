@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from '@/shared/components/ui/select';
 import { Spinner } from '@/shared/components/ui/spinner';
+import { fmtDateOnly } from '@/shared/utils/fmtDateOnly';
 import { SearchSnippet } from './SearchSnippet';
 import {
   groupHits,
@@ -29,6 +30,7 @@ import {
   momentLabel,
   SEARCH_DEBOUNCE_MS,
   sessionHref,
+  showAndDate,
   untitled,
 } from './searchLinks';
 
@@ -83,10 +85,12 @@ function MomentItem({ h }: { h: MomentHit }) {
 function SessionMoments({
   sessionId,
   title,
+  date,
   moments,
 }: {
   sessionId: string;
   title: string;
+  date: string | null;
   moments: MomentHit[];
 }) {
   const id = useId();
@@ -100,6 +104,9 @@ function SessionMoments({
         className="m-0 flex min-w-0 items-baseline gap-2 px-3 pt-1 text-sm font-medium text-si-fg"
       >
         <span className="truncate">{untitled(title)}</span>
+        {date && (
+          <span className="shrink-0 text-xs font-normal text-si-dim">{fmtDateOnly(date)}</span>
+        )}
         <Link
           href={sessionHref(sessionId)}
           className="shrink-0 text-xs font-normal text-si-dim underline-offset-2 hover:text-si-fg hover:underline"
@@ -139,6 +146,7 @@ function MomentsBySession({ moments }: { moments: MomentHit[] }) {
       sessionId,
       list,
       title: list[0]?.sessionTitle ?? '',
+      date: list[0]?.sessionDate ?? null,
     }));
   }, [moments]);
   return (
@@ -148,6 +156,7 @@ function MomentsBySession({ moments }: { moments: MomentHit[] }) {
           key={g.sessionId}
           sessionId={g.sessionId}
           title={g.title}
+          date={g.date}
           moments={g.list}
         />
       ))}
@@ -239,7 +248,7 @@ export function SearchRoute() {
                 <ResultLink href={hitHref(h)}>
                   <span className="flex w-full min-w-0 items-baseline gap-2">
                     <span className="truncate font-medium text-si-fg">{untitled(h.title)}</span>
-                    <span className="ml-auto shrink-0 text-xs text-si-dim">{h.showName}</span>
+                    <span className="ml-auto shrink-0 text-xs text-si-dim">{showAndDate(h)}</span>
                   </span>
                   {h.snippet && <SearchSnippet text={h.snippet} className="text-sm" />}
                 </ResultLink>
