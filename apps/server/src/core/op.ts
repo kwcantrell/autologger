@@ -145,7 +145,14 @@ export async function executeOp<N extends OpName>(
     };
     return op.run(ctx, input, prepared);
   });
-  for (const [topic, message] of outbox) publish(topic, message);
+  // Bulk writes record one change per row; send each identical message (e.g. invalidate) once.
+  const sent = new Set<string>();
+  for (const [topic, message] of outbox) {
+    const key = `${topic} ${JSON.stringify(message)}`;
+    if (sent.has(key)) continue;
+    sent.add(key);
+    publish(topic, message);
+  }
   return result;
 }
 
