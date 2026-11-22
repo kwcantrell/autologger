@@ -1,0 +1,14 @@
+{
+  "name": "@autologger/importer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AutoLogger local import helper: yt-dlp and ffmpeg on your computer, uploads to AutoLogger",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  }
+}
