@@ -340,6 +340,7 @@ export const opInputs = {
         .max(4)
         .optional(),
       limit: z.number().int().min(1).max(500).default(100),
+      waitSec: z.number().int().min(1).max(55).optional(),
     })
     .refine((v) => (v.sessionId === undefined) !== (v.showId === undefined), {
       message: 'Pass exactly one of sessionId or showId.',

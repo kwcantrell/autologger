@@ -4,13 +4,14 @@
 // bytes straight to S3 → media.completeUpload (verifies the object, status 'ready', enqueues
 // `transcribe`). The worker (src/worker) does the Deepgram and yt-dlp work.
 
-import type { AudioSegment } from '@autologger/contract';
+import type { AudioSegment, Job } from '@autologger/contract';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { requireSession, requireShow } from '../core/authz.ts';
-import { changeMessage } from '../core/bus.ts';
+import { type BusMessage, changeMessage, subscribe } from '../core/bus.ts';
 import { badRequest, conflict, notFound, unavailable } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp } from '../core/op.ts';
+import type { Tx } from '../db/client.ts';
 import { schema } from '../db/client.ts';
 import { env, storageConfigured, transcriptionConfigured } from '../env.ts';
 import { enqueueJob, type JobRow, toJob } from '../media/jobs.ts';
@@ -197,7 +198,7 @@ defineOp({
 defineOp({
   name: 'media.importYoutube',
   description:
-    'Import the audio of a YouTube video into the session. Runs in the background: the worker downloads the audio, stores it and transcribes it. Returns the job; poll jobs.list for progress.',
+    'Import the audio of a YouTube video into the session. Runs in the background: the worker downloads the audio, stores it and transcribes it. Returns the job; wait for it with jobs.list (waitSec).',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, url }) {
@@ -281,12 +282,59 @@ defineOp({
   },
 });
 
+/** Fill `queuePosition` on queued jobs: queued jobs the worker will claim first, 0 = next. */
+async function withQueuePositions<T extends Job>(tx: Tx, list: T[]): Promise<T[]> {
+  const ids = list.filter((j) => j.status === 'queued').map((j) => j.id);
+  if (!ids.length) return list;
+  const rows = await tx
+    .select({
+      id: jobs.id,
+      ahead: sql<number>`(select count(*)::int from jobs a where a.status = 'queued'
+        and (a.run_after, a.created_at) < (jobs.run_after, jobs.created_at))`,
+    })
+    .from(jobs)
+    .where(inArray(jobs.id, ids));
+  const ahead = new Map(rows.map((r) => [r.id, r.ahead]));
+  return list.map((j) => (ahead.has(j.id) ? { ...j, queuePosition: ahead.get(j.id)! } : j));
+}
+
+/**
+ * Resolve when a listed unfinished job changes status, is deleted, or a new job appears in one of
+ * their sessions — or after `ms`. Listens on the in-process bus (fed by Postgres NOTIFY from the
+ * worker), so it holds no database connection while waiting.
+ */
+function waitForJobChange(list: Job[], ms: number): Promise<void> | null {
+  const pending = new Map(
+    list.filter((j) => j.status === 'queued' || j.status === 'running').map((j) => [j.id, j]),
+  );
+  const sessionIds = new Set([...pending.values()].flatMap((j) => j.sessionId ?? []));
+  if (!sessionIds.size) return null;
+  return new Promise((resolve) => {
+    const unsubs: (() => void)[] = [];
+    const done = () => {
+      clearTimeout(timer);
+      for (const u of unsubs) u();
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    const onMessage = (m: BusMessage) => {
+      if (m.type === 'invalidate' && m.entity === 'job') return done();
+      if (m.type !== 'change' || m.entity !== 'job') return;
+      const status = (m.data as Job | undefined)?.status;
+      if (m.op === 'upsert' && status && pending.get(m.id)?.status === status) return; // progress only
+      done();
+    };
+    for (const id of sessionIds) unsubs.push(subscribe(`session:${id}`, onMessage));
+  });
+}
+
 defineOp({
   name: 'jobs.list',
   description:
-    'Background jobs (transcription, YouTube import), newest first, with status, progress and errors. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"). Optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Jobs take seconds to minutes: when waiting, poll every 15–30 seconds, not in a tight loop.',
+    'Background jobs (transcription, YouTube import), newest first, with status, progress and errors. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"). Optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Queued jobs include queuePosition: how many queued jobs (from any show) the worker will start before this one, 0 = next; the worker runs a couple of jobs at a time and each usually takes under a minute or two. To wait for jobs, pass waitSec (1–55): if any listed job is queued or running, the call holds until one of them changes status (starts, finishes, fails) or a new job is queued in one of their sessions, then returns the fresh list — or returns after waitSec seconds when nothing changed. Call it again in a loop until the result is empty / all done; no separate sleep is needed. Without waitSec the call returns at once; do not poll it in a tight loop.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
+  waitForChange: ({ waitSec }, list) => (waitSec ? waitForJobChange(list, waitSec * 1000) : null),
   async run(ctx, { sessionId, showId, status, limit }) {
     const statusCond = status ? inArray(jobs.status, status) : undefined;
     if (sessionId) {
@@ -297,7 +345,7 @@ defineOp({
         .where(and(eq(jobs.sessionId, sessionId), statusCond))
         .orderBy(desc(jobs.createdAt))
         .limit(limit);
-      return rows.map(toJob);
+      return withQueuePositions(ctx.db, rows.map(toJob));
     }
     // Read access is per show, so every session of a readable show is readable.
     await requireShow(ctx, showId!, 'read');
@@ -308,6 +356,9 @@ defineOp({
       .where(and(eq(sessions.showId, showId!), statusCond))
       .orderBy(desc(jobs.createdAt))
       .limit(limit);
-    return rows.map((r) => ({ ...toJob(r.job), sessionTitle: r.sessionTitle }));
+    return withQueuePositions(
+      ctx.db,
+      rows.map((r) => ({ ...toJob(r.job), sessionTitle: r.sessionTitle })),
+    );
   },
 });

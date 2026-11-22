@@ -324,6 +324,8 @@ export interface Job {
   sessionId: string | null;
   /** Set when listing a whole show (jobs.list with showId). */
   sessionTitle?: string;
+  /** Queued jobs only (jobs.list): jobs ahead of this one in the worker queue, 0 = next. */
+  queuePosition?: number;
   error: string | null;
   progress: string | null;
   createdAt: string;

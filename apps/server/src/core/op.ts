@@ -65,6 +65,13 @@ export interface OpDef<N extends OpName> {
   /** When true, pending (unapproved) users may call it. */
   allowPending?: boolean;
   run(ctx: Ctx, input: OpParsed<N>): Promise<OpOutputs[N]>;
+  /**
+   * Optional long-poll. Called after the transaction has committed, with the result; return a
+   * promise that resolves when the answer may have changed (or on its own timeout) and the op
+   * runs again in a fresh transaction. Return null to answer at once. The wait must not touch
+   * the database, so a waiting request holds no transaction or pooled connection.
+   */
+  waitForChange?(input: OpParsed<N>, result: OpOutputs[N]): Promise<void> | null;
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: heterogeneous registry
@@ -105,6 +112,19 @@ export async function executeOp<N extends OpName>(
   }
   const input = opInputs[name].parse(rawInput ?? {}) as OpParsed<N>;
 
+  const result = await runInTransaction(op, input, actor);
+  const waiting = op.waitForChange?.(input, result);
+  if (!waiting) return result;
+  await waiting;
+  return runInTransaction(op, input, actor);
+}
+
+async function runInTransaction<N extends OpName>(
+  op: OpDef<N>,
+  input: OpParsed<N>,
+  actor: Actor,
+): Promise<OpOutputs[N]> {
+  const name = op.name;
   const outbox: [Topic, BusMessage][] = [];
   const result = await db.transaction(async (tx) => {
     const ctx: Ctx = {
