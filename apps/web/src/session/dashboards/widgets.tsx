@@ -1,7 +1,7 @@
 // Widget renderers for a declarative DashboardSpec. Every value is rendered as text or coerced to
 // a number; nothing from a spec is executed.
 
-import type { DashboardRows, Widget } from '@autologger/contract';
+import type { DashboardRows, ValueFormat, Widget } from '@autologger/contract';
 import { TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import {
@@ -26,6 +26,7 @@ import { FEED_CELL, FEED_TH } from '@/session/feed';
 import { Skeleton } from '@/shared/components/ui/skeleton';
 import { cn } from '@/shared/lib/utils';
 import {
+  fmtFormat,
   fmtNum,
   fmtValue,
   isSecondsKey,
@@ -33,6 +34,7 @@ import {
   safeColor,
   sumBy,
   toNum,
+  truncateLabel,
   useReducedMotion,
   VIZ,
 } from './data';
@@ -187,11 +189,20 @@ function WidgetBody({ widget, rows }: { widget: DataWidgetT; rows: DashboardRows
 function StatWidget({ widget, rows }: { widget: Extract<Widget, { type: 'stat' }>; rows: Row[] }) {
   let text: string;
   if (widget.value != null) {
-    text = typeof widget.value === 'number' ? fmtNum(widget.value) : widget.value;
+    text = widget.format
+      ? fmtFormat(widget.value, widget.format)
+      : typeof widget.value === 'number'
+        ? fmtNum(widget.value)
+        : widget.value;
   } else {
     const first = rows[0];
     const key = widget.field ?? (first ? Object.keys(first)[0] : undefined);
-    text = first && key ? fmtValue(first[key], key) : '—';
+    text =
+      !first || !key
+        ? '—'
+        : widget.format
+          ? fmtFormat(first[key], widget.format)
+          : fmtValue(first[key], key);
   }
   return (
     <div className="flex min-w-0 flex-col gap-1">
@@ -211,8 +222,9 @@ function StatWidget({ widget, rows }: { widget: Extract<Widget, { type: 'stat' }
 
 // ── bar / line ──────────────────────────────────────────────────────
 
-const tickFor = (key: string) => (v: unknown) => {
+const tickFor = (key: string, format?: ValueFormat) => (v: unknown) => {
   const n = toNum(v);
+  if (n != null && format) return fmtFormat(n, format);
   return n != null && isSecondsKey(key) ? fmtShort(n) : n != null ? fmtNum(n) : String(v);
 };
 
@@ -220,7 +232,8 @@ function BarWidget({ widget, rows }: { widget: Extract<Widget, { type: 'bar' }>;
   const rm = useReducedMotion();
   const data = sumBy(rows, widget.x, widget.y);
   const xTick = tickFor(widget.x);
-  const yTick = tickFor(widget.y);
+  const xLabel = (v: unknown) => truncateLabel(xTick(v), widget.labelMaxChars);
+  const yTick = tickFor(widget.y, widget.format);
   const h = widget.horizontal ? Math.max(CHART_H, Math.min(data.length * 28 + 30, 600)) : CHART_H;
   return (
     <div style={{ height: h }} className="w-full">
@@ -238,10 +251,14 @@ function BarWidget({ widget, rows }: { widget: Extract<Widget, { type: 'bar' }>;
               dataKey="x"
               {...AXIS}
               width={110}
-              tickFormatter={xTick}
+              tickFormatter={xLabel}
               interval={0}
             />
-            <Tooltip {...TOOLTIP} formatter={(v) => [yTick(v), widget.y]} />
+            <Tooltip
+              {...TOOLTIP}
+              labelFormatter={(l) => xTick(l)}
+              formatter={(v) => [yTick(v), widget.y]}
+            />
             <Bar
               dataKey="y"
               name={widget.y}
@@ -254,9 +271,13 @@ function BarWidget({ widget, rows }: { widget: Extract<Widget, { type: 'bar' }>;
         ) : (
           <BarChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
             <CartesianGrid stroke={C.line} vertical={false} />
-            <XAxis dataKey="x" {...AXIS} tickFormatter={xTick} />
+            <XAxis dataKey="x" {...AXIS} tickFormatter={xLabel} />
             <YAxis {...AXIS} width={44} tickFormatter={yTick} />
-            <Tooltip {...TOOLTIP} formatter={(v) => [yTick(v), widget.y]} />
+            <Tooltip
+              {...TOOLTIP}
+              labelFormatter={(l) => xTick(l)}
+              formatter={(v) => [yTick(v), widget.y]}
+            />
             <Bar
               dataKey="y"
               name={widget.y}
@@ -280,7 +301,7 @@ function LineWidget({ widget, rows }: { widget: Extract<Widget, { type: 'line' }
     ? summed.map((d) => ({ ...d, xn: toNum(d.raw) as number })).sort((a, b) => a.xn - b.xn)
     : summed.map((d) => ({ ...d, xn: 0 }));
   const xTick = tickFor(widget.x);
-  const yTick = tickFor(widget.y);
+  const yTick = tickFor(widget.y, widget.format);
   return (
     <div style={{ height: CHART_H }} className="w-full">
       <ResponsiveContainer width="100%" height="100%">

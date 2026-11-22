@@ -37,6 +37,13 @@ const DataSource = {
   query: DashboardQuery.optional(),
 };
 
+/**
+ * How a numeric value is displayed: duration = seconds as H:MM:SS / M:SS, minutes = seconds as
+ * minutes with one decimal, number = plain number, percent = a 0–1 ratio as a percentage.
+ */
+export const ValueFormat = z.enum(['duration', 'minutes', 'number', 'percent']);
+export type ValueFormat = z.infer<typeof ValueFormat>;
+
 const Base = {
   id: z.string().min(1).max(64),
   title: z.string().max(200).default(''),
@@ -54,6 +61,7 @@ export const Widget = z.discriminatedUnion('type', [
     caption: z.string().max(200).optional(),
     ...DataSource,
     field: z.string().optional(),
+    format: ValueFormat.optional(),
   }),
   z.object({
     ...Base,
@@ -62,8 +70,20 @@ export const Widget = z.discriminatedUnion('type', [
     x: z.string(),
     y: z.string(),
     horizontal: z.boolean().default(false),
+    /** Format of the value (y) axis and tooltip. */
+    format: ValueFormat.optional(),
+    /** Truncate category labels to this many characters (with …); the tooltip shows the full label. */
+    labelMaxChars: z.number().int().min(4).max(200).optional(),
   }),
-  z.object({ ...Base, type: z.literal('line'), ...DataSource, x: z.string(), y: z.string() }),
+  z.object({
+    ...Base,
+    type: z.literal('line'),
+    ...DataSource,
+    x: z.string(),
+    y: z.string(),
+    /** Format of the value (y) axis and tooltip. */
+    format: ValueFormat.optional(),
+  }),
   z.object({
     ...Base,
     type: z.literal('pie'),

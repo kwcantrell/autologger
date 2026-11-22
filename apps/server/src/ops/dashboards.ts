@@ -170,6 +170,7 @@ speaker_talk_time → {speaker,seconds,turns}; topics {maxLevel?} → {atSec,dur
 events {categories?,limit} → {atSec,label,category,message,value,color}; summary_stats → {events,topics,speakers,words,audioSec,speechSec,wpm}
 (speechSec = last transcript segment end − first segment start, 0 without a transcript; wpm = words per minute
 over speechSec, rounded, null when speechSec is 0 — use it for speaking pace).
+Optional format on stat and bar/line values: duration (s → M:SS/H:MM:SS) | minutes (s → min, 1 decimal) | number | percent (0–1 ratio); bar labelMaxChars truncates labels (full text in tooltip).
 Prefer live queries for counts so the dashboard stays current. Markdown is rendered without HTML.`,
   kind: 'write',
   surfaces: ['web', 'mcp'],
