@@ -183,6 +183,33 @@ describe('dashboards and wiki', () => {
     );
   });
 
+  it('filters the topics query by maxLevel', async () => {
+    const { owner, session } = await studio();
+    await call(owner, 'topics.replace', {
+      sessionId: session.id,
+      topics: [
+        { startSec: 0, title: 'Intro' },
+        { startSec: 30, title: 'Detail', level: 2 },
+        { startSec: 60, title: 'Main' },
+      ],
+    });
+    const query = (maxLevel?: number) =>
+      call(owner, 'dashboards.query', {
+        sessionId: session.id,
+        query: { name: 'topics', maxLevel },
+      });
+    expect((await query(1)).map((r) => r.label)).toEqual(['Intro', 'Main']);
+    expect(await query()).toHaveLength(3);
+    const outsider = await makeUser('outsider@example.com');
+    await failsWith(
+      call(outsider, 'dashboards.query', {
+        sessionId: session.id,
+        query: { name: 'topics', maxLevel: 1 },
+      }),
+      'not_found',
+    );
+  });
+
   it('upserts wiki pages by title or alias and keeps revisions', async () => {
     const { owner, show } = await studio();
     const p = await call(owner, 'wiki.upsert', {
