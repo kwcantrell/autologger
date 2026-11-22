@@ -330,9 +330,10 @@ export const opInputs = {
   'media.importYoutube': z.object({ sessionId: id, url: z.url() }),
   'media.importPlaylist': z.object({
     showId: id,
-    url: z.url(),
+    url: z.url().max(2048),
     order: z.enum(['playlist', 'reverse']).default('playlist'),
     titleTemplate: z.string().trim().min(1).max(200).optional(),
+    dryRun: z.boolean().default(false),
   }),
   'media.retranscribe': z.object({ sessionId: id, segmentId: id.optional() }),
   'media.delete': z.object({ segmentId: id }),
@@ -424,14 +425,16 @@ export type DashboardRows = Record<string, string | number | boolean | null>[];
 
 export interface PlaylistImport {
   playlistTitle: string | null;
+  /** True when nothing was written (dryRun): sessionId and jobId are then null. */
+  dryRun: boolean;
   /** One new session per video, in episode order, each with its queued youtube_import job. */
   created: {
-    sessionId: string;
+    sessionId: string | null;
     title: string;
     episode: string;
     videoId: string;
     durationSec: number | null;
-    jobId: string;
+    jobId: string | null;
   }[];
   /** Videos not imported: already in the show (sessionId set) or private/deleted. */
   skipped: {

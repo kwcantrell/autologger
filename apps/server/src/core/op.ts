@@ -56,7 +56,7 @@ export interface Ctx {
   publish(topic: Topic, message: BusMessage): void;
 }
 
-export interface OpDef<N extends OpName> {
+export interface OpDef<N extends OpName, P = undefined> {
   name: N;
   /** Written for humans and agents alike; becomes the MCP tool description. */
   description: string;
@@ -64,13 +64,19 @@ export interface OpDef<N extends OpName> {
   surfaces: readonly Surface[];
   /** When true, pending (unapproved) users may call it. */
   allowPending?: boolean;
-  run(ctx: Ctx, input: OpParsed<N>): Promise<OpOutputs[N]>;
+  /**
+   * Slow external work (e.g. running yt-dlp) done BEFORE the op's transaction opens, so no
+   * connection or lock is held meanwhile. Authorize here too; `run` must re-authorize.
+   * The result is passed to `run` as its third argument.
+   */
+  prepare?(actor: Actor, input: OpParsed<N>): Promise<P>;
+  run(ctx: Ctx, input: OpParsed<N>, prepared: P): Promise<OpOutputs[N]>;
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: heterogeneous registry
-const registry = new Map<OpName, OpDef<any>>();
+const registry = new Map<OpName, OpDef<any, any>>();
 
-export function defineOp<N extends OpName>(def: OpDef<N>): OpDef<N> {
+export function defineOp<N extends OpName, P = undefined>(def: OpDef<N, P>): OpDef<N, P> {
   if (registry.has(def.name)) throw new Error(`duplicate op ${def.name}`);
   registry.set(def.name, def);
   return def;
@@ -97,13 +103,14 @@ export async function executeOp<N extends OpName>(
   actor: Actor,
   surface: Surface,
 ): Promise<OpOutputs[N]> {
-  const op = registry.get(name) as OpDef<N> | undefined;
+  const op = registry.get(name) as OpDef<N, unknown> | undefined;
   if (!op?.surfaces.includes(surface)) throw new AppError('not_found', `Unknown op ${name}.`);
   if (actor.user.status === 'disabled') throw forbidden('This account is disabled.');
   if (actor.user.status === 'pending' && !op.allowPending) {
     throw forbidden('This account is waiting for approval by an administrator.');
   }
   const input = opInputs[name].parse(rawInput ?? {}) as OpParsed<N>;
+  const prepared = op.prepare ? await op.prepare(actor, input) : undefined;
 
   const outbox: [Topic, BusMessage][] = [];
   const result = await db.transaction(async (tx) => {
@@ -136,7 +143,7 @@ export async function executeOp<N extends OpName>(
         return id;
       },
     };
-    return op.run(ctx, input);
+    return op.run(ctx, input, prepared);
   });
   for (const [topic, message] of outbox) publish(topic, message);
   return result;

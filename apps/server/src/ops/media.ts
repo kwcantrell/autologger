@@ -11,7 +11,7 @@ import { changeMessage } from '../core/bus.ts';
 import { badRequest, conflict, notFound, unavailable } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp } from '../core/op.ts';
-import { schema } from '../db/client.ts';
+import { db, schema } from '../db/client.ts';
 import { env, storageConfigured, transcriptionConfigured } from '../env.ts';
 import { enqueueJob, type JobRow, toJob } from '../media/jobs.ts';
 import {
@@ -28,6 +28,7 @@ import { activeTranscribeJob, lockSession, nextSegmentSlot } from '../media/segm
 import {
   isYoutubeUrl,
   listPlaylist,
+  type Playlist,
   watchUrl,
   youtubePlaylistId,
   youtubeVideoId,
@@ -237,22 +238,48 @@ defineOp({
   },
 });
 
+/** Concurrent yt-dlp playlist resolutions allowed per server process. */
+const MAX_PLAYLIST_RESOLUTIONS = 2;
+let playlistResolutions = 0;
+
+/** One-pass template fill, so `{…}` or `$&` inside a video title is never re-expanded. */
+export function fillTitle(template: string, vars: { title: string; episode: string }): string {
+  return template
+    .replace(/\{(title|episode)\}/g, (_, k: 'title' | 'episode') => vars[k])
+    .slice(0, 200);
+}
+
 defineOp({
   name: 'media.importPlaylist',
   description:
-    'Import a whole YouTube playlist into a show in one call: one new session per video, each with a queued youtube_import job (download + transcription run in the background; poll jobs.list with showId and status ["queued","running"] until empty). showId comes from shows.list (needs write access). url is a YouTube URL with a list= parameter. Videos already in the show (a session whose sourceUrl is the same video, or one with a queued/running import of it) and private/deleted videos are skipped, so calling it again later imports only new videos. Session titles come from titleTemplate (placeholders {title} = video title, {episode} = episode number; default "{title}"); episode numbers are taken from the show counter in import order. order "playlist" (default) keeps the playlist order; "reverse" imports the last video first (use it when the playlist lists newest first, so episode 1 is the oldest). episodeDate is set to each video\'s YouTube upload date when its import job runs. Up to 200 videos per playlist. A session whose import job fails stays in the show (and is skipped on re-runs): retry it with media.importYoutube on that sessionId. Returns created [{sessionId, title, episode, videoId, durationSec, jobId}] and skipped [{videoId, title, reason, sessionId}]; durationSec is in seconds (null if YouTube did not say).',
+    'Import a whole YouTube playlist into a show in one call: one new session per video, each with a queued youtube_import job (download + transcription run in the background; poll jobs.list with showId and status ["queued","running"] until empty). showId comes from shows.list (needs write access). url is a YouTube URL with a list= parameter. Videos already in the show (a session whose sourceUrl is the same video, or one with a queued/running import of it) and private/deleted videos are skipped, so calling it again later imports only new videos. Session titles come from titleTemplate (placeholders {title} = video title, {episode} = episode number; default "{title}"); episode numbers are taken from the show counter in import order. order "playlist" (default) keeps the playlist order; "reverse" imports the last video first (use it when the playlist lists newest first, so episode 1 is the oldest). episodeDate is set to each video\'s YouTube upload date when its import job runs. Up to 200 videos per playlist. Agents cannot delete sessions (deleting is web-only), so for an unfamiliar playlist call it first with dryRun: true: it returns the same created/skipped lists (dryRun true, sessionId and jobId null) without writing anything. A session whose import job fails stays in the show (and is skipped on re-runs): retry it with media.importYoutube on that sessionId. Returns {playlistTitle, dryRun, created [{sessionId, title, episode, videoId, durationSec, jobId}], skipped [{videoId, title, reason, sessionId}]}; durationSec is in seconds (null if YouTube did not say). Fails with unavailable when the server is busy reading other playlists: retry shortly.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { showId, url, order, titleTemplate }): Promise<PlaylistImport> {
+  // Authorize, then run yt-dlp, before the op's transaction opens.
+  async prepare(actor, { showId, url }): Promise<Playlist> {
+    await db.transaction((tx) =>
+      requireShow(
+        {
+          actor,
+          db: tx,
+          op: 'media.importPlaylist',
+          record: () => Promise.reject(new Error('read-only')),
+          publish: () => {},
+        },
+        showId,
+        'write',
+      ),
+    );
     requireYoutube();
     const listId = youtubePlaylistId(url);
     if (!listId)
       throw badRequest(
         'That is not a YouTube playlist URL (it needs a list= parameter). Use media.importYoutube for a single video.',
       );
-    const { show } = await requireShow(ctx, showId, 'write');
-
-    let playlist: Awaited<ReturnType<typeof listPlaylist>>;
+    if (playlistResolutions >= MAX_PLAYLIST_RESOLUTIONS)
+      throw unavailable('The server is busy reading other playlists. Retry in a few seconds.');
+    playlistResolutions++;
+    let playlist: Playlist;
     try {
       playlist = await listPlaylist(
         env.ytDlpPath,
@@ -260,11 +287,22 @@ defineOp({
         { maxEntries: MAX_PLAYLIST_VIDEOS + 1, timeoutMs: PLAYLIST_TIMEOUT_MS },
       );
     } catch (e) {
-      throw unavailable(`Could not read the playlist: ${(e as Error).message}`);
+      console.warn(`playlist ${listId}: ${(e as Error).message}`);
+      throw unavailable(
+        'Could not read the playlist. Check that it exists and is public or unlisted, then retry.',
+      );
+    } finally {
+      playlistResolutions--;
     }
     if (playlist.entries.length > MAX_PLAYLIST_VIDEOS)
       throw badRequest(`The playlist has more than ${MAX_PLAYLIST_VIDEOS} videos.`);
     if (playlist.entries.length === 0) throw badRequest('The playlist is empty or not public.');
+    return playlist;
+  },
+  async run(ctx, { showId, order, titleTemplate, dryRun }, playlist): Promise<PlaylistImport> {
+    const { show } = await requireShow(ctx, showId, 'write');
+    // Serialize imports into one show, so concurrent calls cannot both import a video.
+    await ctx.db.execute(sql`select pg_advisory_xact_lock(hashtext(${show.id}))`);
 
     // Videos the show already has: finished imports (sourceUrl) and imports still in the queue.
     const known = new Map<string, string>();
@@ -315,20 +353,28 @@ defineOp({
 
     const created: PlaylistImport['created'] = [];
     if (todo.length) {
-      const first = await reserveEpisodes(ctx, show.id, todo.length);
+      const first = dryRun ? show.nextEpisode : await reserveEpisodes(ctx, show.id, todo.length);
       const today = new Date().toISOString().slice(0, 10);
+      // Rows of one transaction share now(): stagger created_at/run_after to keep playlist order.
+      const base = Date.now();
       for (const [i, e] of todo.entries()) {
         const episode = String(first + i);
-        const title = (titleTemplate ?? '{title}')
-          .replaceAll('{title}', e.title)
-          .replaceAll('{episode}', episode)
-          .slice(0, 200);
+        const item: PlaylistImport['created'][number] = {
+          sessionId: null,
+          title: fillTitle(titleTemplate ?? '{title}', { title: e.title, episode }),
+          episode,
+          videoId: e.videoId,
+          durationSec: e.durationSec,
+          jobId: null,
+        };
+        created.push(item);
+        if (dryRun) continue;
         const sessionId = newId('ses');
         const videoUrl = watchUrl(e.videoId);
         await ctx.db.insert(sessions).values({
           id: sessionId,
           showId: show.id,
-          title,
+          title: item.title,
           episode,
           // Replaced by the upload date when the import job runs.
           episodeDate: today,
@@ -337,24 +383,23 @@ defineOp({
           sourceUrl: videoUrl,
           createdBy: ctx.actor.user.id,
         });
-        const job = await enqueueJob(ctx.db, {
-          kind: 'youtube_import',
-          sessionId,
-          actorId: ctx.actor.user.id,
-          payload: { url: videoUrl },
-        });
-        created.push({
-          sessionId,
-          title,
-          episode,
-          videoId: e.videoId,
-          durationSec: e.durationSec,
-          jobId: job.id,
-        });
+        const job = await enqueueJob(
+          ctx.db,
+          {
+            kind: 'youtube_import',
+            sessionId,
+            actorId: ctx.actor.user.id,
+            payload: { url: videoUrl },
+          },
+          new Date(base + i),
+        );
+        item.sessionId = sessionId;
+        item.jobId = job.id;
       }
-      ctx.publish(`show:${show.id}`, { type: 'show_changed', showId: show.id, entity: 'show' });
+      if (!dryRun)
+        ctx.publish(`show:${show.id}`, { type: 'show_changed', showId: show.id, entity: 'show' });
     }
-    return { playlistTitle: playlist.title, created, skipped };
+    return { playlistTitle: playlist.title, dryRun, created, skipped };
   },
 });
 

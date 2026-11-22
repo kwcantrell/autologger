@@ -186,11 +186,13 @@ export async function listPlaylist(
   const { stdout } = await run(
     ytDlpPath,
     [
+      '--ignore-config',
       '--flat-playlist',
       '--dump-single-json',
       '--no-warnings',
       '--playlist-end',
       String(opts.maxEntries),
+      '--',
       url,
     ],
     opts.timeoutMs,

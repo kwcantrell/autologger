@@ -70,12 +70,24 @@ describe('media.importPlaylist', () => {
       entry('ccccccccccc', 'Oldest talk', 4200),
     ]);
 
-    const first = await call(agent, 'media.importPlaylist', {
+    const input = {
       showId: show.id,
       url: PLAYLIST,
-      order: 'reverse',
+      order: 'reverse' as const,
       titleTemplate: 'Tom Talks #{episode}: {title}',
-    });
+    };
+    // dryRun previews the same lists and writes nothing.
+    const preview = await call(agent, 'media.importPlaylist', { ...input, dryRun: true });
+    expect(preview.dryRun).toBe(true);
+    expect(preview.created.map((c) => [c.title, c.sessionId, c.jobId])).toEqual([
+      ['Tom Talks #2: Oldest talk', null, null],
+      ['Tom Talks #3: Newest talk', null, null],
+    ]);
+    expect(await call(agent, 'jobs.list', { showId: show.id })).toHaveLength(0);
+    expect(await call(agent, 'sessions.list', { showId: show.id })).toHaveLength(1);
+
+    const first = await call(agent, 'media.importPlaylist', input);
+    expect(first.dryRun).toBe(false);
     expect(first.playlistTitle).toBe('Tom Talks');
     expect(first.created).toMatchObject([
       {
@@ -93,14 +105,22 @@ describe('media.importPlaylist', () => {
     expect(jobs.map((j) => j.id).sort()).toEqual(first.created.map((c) => c.jobId).sort());
     const [shw] = await db.select().from(schema.shows).where(eq(schema.shows.id, show.id));
     expect(shw!.nextEpisode).toBe(4);
+    // Jobs of one batch get distinct, increasing timestamps in import order.
+    const rows = await db
+      .select()
+      .from(schema.jobs)
+      .orderBy(schema.jobs.runAfter, schema.jobs.createdAt);
+    expect(rows.map((r) => r.id)).toEqual(first.created.map((c) => c.jobId));
+    expect(rows[1]!.createdAt.getTime()).toBeGreaterThan(rows[0]!.createdAt.getTime());
+    expect(rows[1]!.runAfter.getTime()).toBeGreaterThan(rows[0]!.runAfter.getTime());
 
     // The import job sets the session date from the YouTube upload date.
     const [jobRow] = await db
       .select()
       .from(schema.jobs)
-      .where(eq(schema.jobs.id, first.created[0]!.jobId));
+      .where(eq(schema.jobs.id, first.created[0]!.jobId!));
     await handlers.youtube_import.run(jobRow!);
-    const s = await call(agent, 'sessions.get', { sessionId: first.created[0]!.sessionId });
+    const s = await call(agent, 'sessions.get', { sessionId: first.created[0]!.sessionId! });
     expect(s).toMatchObject({
       episodeDate: '2024-03-05',
       sourceKind: 'youtube',
@@ -128,6 +148,18 @@ describe('media.importPlaylist', () => {
       ['ddddddddddd', 'already_imported', manual.id],
       ['ccccccccccc', 'already_imported', first.created[0]!.sessionId],
     ]);
+  });
+
+  it('fills the title template in one pass', async () => {
+    const { owner, show } = await studio();
+    await playlist([entry('aaaaaaaaaaa', 'Cost: $& and {episode} $1')]);
+    const out = await call(owner, 'media.importPlaylist', {
+      showId: show.id,
+      url: PLAYLIST,
+      titleTemplate: '{episode}. {title}',
+      dryRun: true,
+    });
+    expect(out.created[0]!.title).toBe('2. Cost: $& and {episode} $1');
   });
 
   it('keeps a date the user chose when importing a single video', async () => {
