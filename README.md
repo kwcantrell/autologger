@@ -66,6 +66,11 @@ docker compose up -d --build
 
 Google OAuth redirect URI: `$PUBLIC_URL/auth/google/callback`.
 
+YouTube often bot-checks downloads from server IPs ("Sign in to confirm you're not a bot"). If
+imports fail that way, give yt-dlp cookies of a signed-in throwaway account (`YTDLP_COOKIES_FILE`,
+mounted into `app` and `worker`) and/or a proxy (`YTDLP_PROXY`); see
+[docs/media.md](docs/media.md#youtube-bot-check). Cookies expire, so expect to refresh them.
+
 Signed-out visitors at `/` see a public landing page about AutoLogger. For a private instance, set
 `LANDING_PAGE=0` to send them straight to sign-in instead (read at startup; restart the app to apply).
 Its doc links (the Docs menu, "Connect an agent", "Read the docs") point at this repo's `docs/` on
