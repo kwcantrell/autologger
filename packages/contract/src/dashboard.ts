@@ -52,8 +52,13 @@ const Base = {
   span: z.number().int().min(1).max(4).default(2),
 };
 
+/**
+ * Widgets, columns and the spec itself are strict: an unknown field is rejected (with its path,
+ * e.g. `spec.widgets[4].format`) instead of being silently dropped. Stored specs are never
+ * re-parsed, so dashboards saved before this keep loading; only saving validates.
+ */
 export const Widget = z.discriminatedUnion('type', [
-  z.object({
+  z.strictObject({
     ...Base,
     type: z.literal('stat'),
     value: z.union([z.string(), z.number()]).optional(),
@@ -63,7 +68,7 @@ export const Widget = z.discriminatedUnion('type', [
     field: z.string().optional(),
     format: ValueFormat.optional(),
   }),
-  z.object({
+  z.strictObject({
     ...Base,
     type: z.literal('bar'),
     ...DataSource,
@@ -75,7 +80,7 @@ export const Widget = z.discriminatedUnion('type', [
     /** Truncate category labels to this many characters (with …); the tooltip shows the full label. */
     labelMaxChars: z.number().int().min(4).max(200).optional(),
   }),
-  z.object({
+  z.strictObject({
     ...Base,
     type: z.literal('line'),
     ...DataSource,
@@ -84,23 +89,32 @@ export const Widget = z.discriminatedUnion('type', [
     /** Format of the value (y) axis and tooltip. */
     format: ValueFormat.optional(),
   }),
-  z.object({
+  z.strictObject({
     ...Base,
     type: z.literal('pie'),
     ...DataSource,
     label: z.string(),
     value: z.string(),
+    /** Format of the slice values (legend and tooltip). */
+    format: ValueFormat.optional(),
   }),
-  z.object({
+  z.strictObject({
     ...Base,
     type: z.literal('table'),
     ...DataSource,
     columns: z
-      .array(z.object({ key: z.string(), label: z.string().optional() }))
+      .array(
+        z.strictObject({
+          key: z.string(),
+          label: z.string().optional(),
+          /** Format of this column's numeric values. */
+          format: ValueFormat.optional(),
+        }),
+      )
       .max(12)
       .optional(),
   }),
-  z.object({
+  z.strictObject({
     ...Base,
     type: z.literal('timeline'),
     ...DataSource,
@@ -109,11 +123,11 @@ export const Widget = z.discriminatedUnion('type', [
     label: z.string().default('label'),
     duration: z.string().optional(),
   }),
-  z.object({ ...Base, type: z.literal('markdown'), markdown: z.string().max(20000) }),
+  z.strictObject({ ...Base, type: z.literal('markdown'), markdown: z.string().max(20000) }),
 ]);
 export type Widget = z.infer<typeof Widget>;
 
-export const DashboardSpec = z.object({
+export const DashboardSpec = z.strictObject({
   version: z.literal(1).default(1),
   title: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
