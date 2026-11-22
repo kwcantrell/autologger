@@ -88,42 +88,106 @@ const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
 const speakerLabel = (s: number | undefined) => (typeof s === 'number' ? `Speaker ${s + 1}` : '');
 
-/** Map Deepgram utterances to transcript rows, offset to session time by `offsetSec`. */
+/** A word-level speaker run this short (≤ 2 words and under 0.3 s) is a diarization blip. */
+const BLIP_MAX_WORDS = 2;
+const BLIP_MAX_SEC = 0.3;
+
+interface SpeakerRun {
+  speaker: number | undefined;
+  words: DeepgramWord[];
+}
+
+/**
+ * Split a word list into runs of one speaker each. Deepgram utterances can span a speaker change
+ * (a question and its answer in one utterance) while every word still carries its own `speaker`.
+ * Short runs (≤ 2 words under 0.3 s) take the previous run's speaker (the next run's at the
+ * start), so one mislabelled word doesn't cut a sentence in three.
+ */
+export function speakerRuns(words: DeepgramWord[], fallback: number | undefined): SpeakerRun[] {
+  const raw: SpeakerRun[] = [];
+  for (const w of words) {
+    const sp = w.speaker ?? fallback;
+    const last = raw.at(-1);
+    if (last && last.speaker === sp) last.words.push(w);
+    else raw.push({ speaker: sp, words: [w] });
+  }
+  if (raw.length < 2) return raw;
+  const isBlip = (r: SpeakerRun) =>
+    r.words.length <= BLIP_MAX_WORDS && r.words.at(-1)!.end - r.words[0]!.start < BLIP_MAX_SEC;
+  const out: SpeakerRun[] = [];
+  raw.forEach((r, i) => {
+    const sp = isBlip(r) ? (out.at(-1)?.speaker ?? raw[i + 1]!.speaker) : r.speaker;
+    const last = out.at(-1);
+    if (last && last.speaker === sp) last.words.push(...r.words);
+    else out.push({ speaker: sp, words: [...r.words] });
+  });
+  return out;
+}
+
+/**
+ * Map Deepgram utterances to transcript rows, offset to session time by `offsetSec`. An utterance
+ * whose words change speaker becomes one row per speaker run (see speakerRuns).
+ */
 export function mapDeepgram(resp: DeepgramResponse, offsetSec: number): MappedSegment[] {
-  const mapWords = (ws: DeepgramWord[] | undefined): TranscriptWord[] =>
-    (ws ?? []).map((w) => ({
+  const mapWords = (ws: DeepgramWord[]): TranscriptWord[] =>
+    ws.map((w) => ({
       w: w.punctuated_word ?? w.word,
       s: r3(w.start + offsetSec),
       e: r3(w.end + offsetSec),
+      ...(typeof w.speaker === 'number' ? { sp: w.speaker } : {}),
     }));
+
+  // Without a speaker change a row keeps the utterance's own span, speaker and transcript text
+  // (Deepgram's smart-format spacing for numbers and currency stays intact). Only split rows
+  // rebuild their text by joining punctuated words, and take their words' span (the outer edges
+  // keep the utterance bounds).
+  const toRows = (
+    start: number,
+    end: number,
+    text: string,
+    speaker: number | undefined,
+    words: DeepgramWord[],
+  ): MappedSegment[] => {
+    const runs = speakerRuns(words, speaker);
+    if (runs.length < 2)
+      return [
+        {
+          startSec: r3(start + offsetSec),
+          endSec: r3(end + offsetSec),
+          speaker: speakerLabel(speaker ?? runs[0]?.speaker),
+          text,
+          words: mapWords(words),
+        },
+      ];
+    return runs.map((run, i) => ({
+      startSec: r3((i === 0 ? start : run.words[0]!.start) + offsetSec),
+      endSec: r3((i === runs.length - 1 ? end : run.words.at(-1)!.end) + offsetSec),
+      speaker: speakerLabel(run.speaker),
+      text: run.words.map((w) => w.punctuated_word ?? w.word).join(' '),
+      words: mapWords(run.words),
+    }));
+  };
 
   const utterances = resp.results?.utterances ?? [];
   if (utterances.length > 0) {
     return utterances
       .filter((u) => u.transcript.trim().length > 0)
       .sort((a, b) => a.start - b.start)
-      .map((u) => ({
-        startSec: r3(u.start + offsetSec),
-        endSec: r3(u.end + offsetSec),
-        speaker: speakerLabel(u.speaker),
-        text: u.transcript.trim(),
-        words: mapWords(u.words),
-      }));
+      .flatMap((u) => toRows(u.start, u.end, u.transcript.trim(), u.speaker, u.words ?? []));
   }
-  // No utterances (e.g. silence or an older response shape): fall back to one segment per channel.
+  // No utterances (e.g. silence or an older response shape): fall back to the channel transcript,
+  // also split where the word-level speaker changes.
   const alt = resp.results?.channels?.[0]?.alternatives?.[0];
   const text = alt?.transcript?.trim();
   if (!alt || !text) return [];
   const words = alt.words ?? [];
-  return [
-    {
-      startSec: r3((words[0]?.start ?? 0) + offsetSec),
-      endSec: r3((words.at(-1)?.end ?? resp.metadata?.duration ?? 0) + offsetSec),
-      speaker: speakerLabel(words[0]?.speaker),
-      text,
-      words: mapWords(words),
-    },
-  ];
+  return toRows(
+    words[0]?.start ?? 0,
+    words.at(-1)?.end ?? resp.metadata?.duration ?? 0,
+    text,
+    words[0]?.speaker,
+    words,
+  );
 }
 
 /** POST the audio to Deepgram and return the parsed response. */

@@ -1,7 +1,7 @@
 // Spec value formats and label truncation used by stat and bar/line widgets.
 
 import { describe, expect, it } from 'vitest';
-import { fmtFormat, truncateLabel } from '@/session/dashboards/data';
+import { fmtField, fmtFormat, truncateLabel } from '@/session/dashboards/data';
 
 describe('fmtFormat', () => {
   it('shows seconds as a duration', () => {
@@ -38,5 +38,14 @@ describe('truncateLabel', () => {
     expect(truncateLabel('A very long chapter title', 10)).toBe('A very lo…');
     expect(truncateLabel('A very long chapter title', 10).length).toBeLessThanOrEqual(10);
     expect(truncateLabel('Anything', undefined)).toBe('Anything');
+  });
+});
+
+describe('fmtField', () => {
+  it('uses the spec format when given, else the field-name default', () => {
+    expect(fmtField(2529, 'seconds', 'minutes')).toBe(fmtFormat(2529, 'minutes'));
+    expect(fmtField(125, 'atSec', 'duration')).toBe('2:05');
+    expect(fmtField(125, 'atSec')).toBe('2:05');
+    expect(fmtField(125, 'count')).toBe(new Intl.NumberFormat().format(125));
   });
 });
