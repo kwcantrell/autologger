@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
-import { Redirect } from 'wouter';
+import { Link, Redirect } from 'wouter';
 import { qk, useCapabilities, useMe } from '@/api/queries';
 import { auth, errorMessage } from '@/api/rpc';
 import { GATE_PAGE } from '@/components/RouteState';
@@ -209,6 +209,14 @@ export function LoginPage() {
             </Alert>
           )}
         </Card>
+        <p className="mt-5 mb-0 text-center text-[0.8125rem]">
+          <Link
+            href="/"
+            className="text-si-muted no-underline outline-none hover:text-si-fg hover:underline focus-visible:rounded-ctl focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            What is AutoLogger?
+          </Link>
+        </p>
       </main>
     </div>
   );
