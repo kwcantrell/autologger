@@ -1,4 +1,4 @@
-import type { RpcError } from '@autologger/contract';
+import { formatIssues, type RpcError } from '@autologger/contract';
 import { z } from 'zod';
 
 export type ErrorCode = RpcError['code'];
@@ -37,7 +37,7 @@ export function toRpcError(err: unknown): RpcError {
     return {
       code: 'bad_request',
       message: 'Invalid input.',
-      issues: err.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+      issues: formatIssues(err.issues),
     };
   }
   // Unique-violation from Postgres → conflict.

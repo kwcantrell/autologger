@@ -1,5 +1,5 @@
 import type { Session } from '@autologger/contract';
-import { MoreVertical, Plus, Search, Settings, Upload, X } from 'lucide-react';
+import { AudioLines, MoreVertical, Plus, Search, Settings, Upload, X } from 'lucide-react';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useLocation } from 'wouter';
@@ -7,7 +7,7 @@ import { qk, useOpMutation, useSessions } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { LoadingVideo } from '@/components/RouteState';
 import { newSessionOpen, settingsOpen } from '@/lib/store';
-import { formatFrames, useTransportClock } from '@/lib/timecode';
+import { fmtSec, formatFrames, isMediaOnly, useTransportClock } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
@@ -282,14 +282,28 @@ function MetaRow({ session: s }: { session: Session }) {
   const clock = useTransportClock(s.isRolling ? s : null);
   const live = s.isRolling;
   const runtime = formatFrames(s.elapsedFrames, s.frameRate).replace(/[:;]\d{2}$/, '');
+  const mediaOnly = isMediaOnly(s);
   return (
     <div className={META_ROW}>
       <span
         className={CARD_META}
       >{`${fmtDateOnly(s.episodeDate ?? s.createdAt)} · ${s.eventCount} events`}</span>
-      <SimpleTooltip content={live ? 'Current timecode' : 'Total runtime'}>
-        <span className={cn(RUNTIME, live && 'text-foreground!')}>
-          {live ? clock.timecode.replace(/[:;]\d{2}$/, '') : runtime}
+      <SimpleTooltip
+        content={live ? 'Current timecode' : mediaOnly ? 'Audio length' : 'Total runtime'}
+      >
+        <span
+          className={cn(
+            RUNTIME,
+            live && 'text-foreground!',
+            mediaOnly && 'inline-flex items-center gap-1',
+          )}
+        >
+          {mediaOnly && <AudioLines className="size-3" role="img" aria-label="Audio length" />}
+          {live
+            ? clock.timecode.replace(/[:;]\d{2}$/, '')
+            : mediaOnly
+              ? fmtSec(s.audioSeconds)
+              : runtime}
         </span>
       </SimpleTooltip>
     </div>

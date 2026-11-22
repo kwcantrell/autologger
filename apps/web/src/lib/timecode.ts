@@ -93,6 +93,14 @@ export function useTransportClock(session: Session | undefined | null): Transpor
   return clock;
 }
 
+/**
+ * A session whose clock never rolled (imported media) but has audio: its runtime is the audio
+ * length, not the zero on the clock.
+ */
+export const isMediaOnly = (
+  s: Pick<Session, 'isRolling' | 'take' | 'elapsedFrames' | 'audioSeconds'>,
+): boolean => !s.isRolling && s.take === 0 && s.elapsedFrames === 0 && s.audioSeconds > 0;
+
 /** Session seconds for an event's stored frames (frames include the start offset). */
 export function eventSec(
   timecodeFrames: number | null,
