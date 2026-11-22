@@ -8,9 +8,11 @@ import type { Readable } from 'node:stream';
 import {
   CreateBucketCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -96,6 +98,11 @@ export function objectKeyFor(sessionId: string, segmentId: string, ext: string):
 /** The waveform peaks object of a segment, next to its audio (see media/waveform.ts). */
 export function peaksKeyFor(sessionId: string, segmentId: string): string {
   return `sessions/${sessionId}/${segmentId}.peaks.json`;
+}
+
+/** Every stored object of a session (audio, peaks) lives under this prefix. */
+export function sessionPrefix(sessionId: string): string {
+  return `sessions/${sessionId}/`;
 }
 
 let bucketReady: Promise<void> | null = null;
@@ -204,4 +211,31 @@ export async function putObjectBody(
 
 export async function deleteObject(key: string): Promise<void> {
   await server().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
+}
+
+/** Delete every object under a key prefix; returns how many were deleted. */
+export async function deletePrefix(prefix: string): Promise<number> {
+  let deleted = 0;
+  let token: string | undefined;
+  do {
+    const page = await server().send(
+      new ListObjectsV2Command({ Bucket: bucket(), Prefix: prefix, ContinuationToken: token }),
+    );
+    const keys = (page.Contents ?? []).flatMap((o) => (o.Key ? [{ Key: o.Key }] : []));
+    if (keys.length) {
+      // A page holds at most 1000 keys, the DeleteObjects limit.
+      const r = await server().send(
+        new DeleteObjectsCommand({ Bucket: bucket(), Delete: { Objects: keys, Quiet: true } }),
+      );
+      if (r.Errors?.length) {
+        const e = r.Errors[0]!;
+        throw new Error(
+          `could not delete ${r.Errors.length} object(s), e.g. ${e.Key}: ${e.Message}`,
+        );
+      }
+      deleted += keys.length;
+    }
+    token = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (token);
+  return deleted;
 }
