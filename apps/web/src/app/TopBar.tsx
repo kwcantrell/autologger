@@ -1,4 +1,4 @@
-import { BookOpenIcon, ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import { BookOpenIcon, ChevronDownIcon, ChevronRightIcon, FilmIcon } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
 import { settingsOpen, TRANSPORT_LABEL, transportStatus, useStore } from '@/lib/store';
 import { SearchPalette } from '@/routes/search/SearchPalette';
@@ -178,6 +178,17 @@ export function TopBar() {
       >
         <BookOpenIcon aria-hidden="true" />
         <span className="max-md:hidden">Wiki</span>
+      </Button>
+
+      <Button
+        variant="ghost"
+        size="icon"
+        className="shrink-0 max-md:hidden md:w-auto md:px-2.5"
+        nativeButton={false}
+        render={<Link href="/compilations" aria-label="Compilations" title="Video compilations" />}
+      >
+        <FilmIcon aria-hidden="true" />
+        <span>Compilations</span>
       </Button>
 
       <span role="status" className="sr-only">{`Transport ${label}`}</span>

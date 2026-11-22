@@ -44,8 +44,9 @@ export type ShowServerMessage =
    * `job`: jobs of the show changed, refetch them. `session`: the show's session list changed
    * (a session was created, deleted, renamed, archived, imported into or started rolling), or
    * its events changed (event counts; at most one such hint every few seconds per socket).
+   * `compilation`: a compilation of the show was created, progressed, finished or was deleted.
    */
-  | { type: 'invalidate'; entity: 'job' | 'session' }
+  | { type: 'invalidate'; entity: 'job' | 'session' | 'compilation' }
   | { type: 'closed'; reason: 'access_revoked' | 'deleted' }
   | { type: 'pong' };
 

@@ -1,5 +1,5 @@
 // Worker entrypoint: `node src/worker/main.ts`. Runs background jobs from the `jobs` table
-// (transcribe, youtube_import, waveform). Several workers may run side by side; claiming uses
+// (transcribe, youtube_import, waveform, compile). Several workers may run side by side; claiming uses
 // FOR UPDATE SKIP LOCKED.
 
 import { eq } from 'drizzle-orm';
@@ -28,7 +28,7 @@ const RECOVER_MS = 60_000;
 const HEARTBEAT_MS = 60_000;
 
 const KIND_CONCURRENCY = env.workerKindConcurrency;
-// Without ffmpeg this worker leaves waveform jobs to workers that have it.
+// Without ffmpeg this worker leaves waveform and compile jobs to workers that have it.
 const hasFfmpeg = await ffmpegAvailable(env.ffmpegPath);
 const WORKER_ID = newId('wrk');
 
@@ -78,7 +78,8 @@ function fullKinds(): JobRow['kind'][] {
   const full = (Object.keys(KIND_CONCURRENCY) as JobRow['kind'][]).filter(
     (kind) => (running.get(kind) ?? 0) >= KIND_CONCURRENCY[kind],
   );
-  if (!hasFfmpeg && !full.includes('waveform')) full.push('waveform');
+  if (!hasFfmpeg)
+    for (const kind of ['waveform', 'compile'] as const) if (!full.includes(kind)) full.push(kind);
   return full;
 }
 
@@ -154,7 +155,7 @@ await waitForMigrations();
 console.log(
   `autologger worker starting (concurrency ${CONCURRENCY}, per kind ${JSON.stringify(KIND_CONCURRENCY)}; storage ${storageConfigured ? 'on' : 'off'}, ` +
     `transcription ${transcriptionConfigured ? 'on' : 'off'}, youtube ${env.youtubeEnabled ? `on via ${env.ytDlpPath}` : 'off'}, ` +
-    `waveforms ${hasFfmpeg ? `on via ${env.ffmpegPath}` : `off: ffmpeg not found (FFMPEG_PATH=${env.ffmpegPath}), this worker does not claim waveform jobs`})`,
+    `waveforms ${hasFfmpeg ? `on via ${env.ffmpegPath}` : `off: ffmpeg not found (FFMPEG_PATH=${env.ffmpegPath}), this worker does not claim waveform or compile jobs`})`,
 );
 await ensureBucket();
 await beat();

@@ -425,6 +425,40 @@ export interface Job {
   updatedAt: string;
 }
 
+export type CompilationStatus = 'queued' | 'running' | 'ready' | 'failed';
+
+export interface CompilationClip {
+  sessionId: string;
+  /** The session's current title (its title at creation if the session was deleted since). */
+  sessionTitle: string;
+  /** Seconds from the session start, as transcript_text's @seconds. */
+  startSec: number;
+  endSec: number;
+  label?: string;
+}
+
+/** A video built by the worker from ranges of YouTube-sourced sessions (compilations.*). */
+export interface Compilation {
+  id: string;
+  showId: string;
+  title: string;
+  status: CompilationStatus;
+  /** While queued or running, e.g. "clip 3/12". */
+  progress?: string;
+  /** When failed: why. */
+  error?: string;
+  clips: CompilationClip[];
+  /** Seconds: the sum of the clip lengths, then the built video's measured length once ready. */
+  durationSec: number;
+  sizeBytes?: number;
+  /** Ready only: presigned GET of the MP4, valid about 1 hour (see urlExpiresAt). */
+  url?: string;
+  urlExpiresAt?: string;
+  createdBy: UserRef | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** sessions.get: the queued or running job that will produce the session's transcript. */
 export interface TranscriptJob {
   id: string;

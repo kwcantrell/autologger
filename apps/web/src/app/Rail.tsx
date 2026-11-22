@@ -1,5 +1,5 @@
 import type { Job, Session } from '@autologger/contract';
-import { AudioLines, MoreVertical, Plus, Search, Settings, Upload, X } from 'lucide-react';
+import { AudioLines, Film, MoreVertical, Plus, Search, Settings, Upload, X } from 'lucide-react';
 import { lazy, type ReactElement, Suspense, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useLocation } from 'wouter';
@@ -283,6 +283,19 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
       <SidebarSeparator className="mx-0" />
       <SidebarFooter className="px-3 group-data-[collapsible=icon]:px-2">
         <SidebarMenu className="group-data-[collapsible=icon]:items-center">
+          {/* On phones the top bar has no room for its Compilations link; the rail carries it. */}
+          <SidebarMenuItem className="md:hidden">
+            <SidebarMenuButton
+              tooltip="Compilations"
+              onClick={() => {
+                closeSheet();
+                navigate('/compilations');
+              }}
+            >
+              <Film aria-hidden="true" />
+              <span>Compilations</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               id="v6-btn-settings"

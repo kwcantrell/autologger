@@ -3,7 +3,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import type { LiveEntity, SessionServerMessage } from '@autologger/contract';
+import type { CompilationStatus, LiveEntity, SessionServerMessage } from '@autologger/contract';
 import { sqlClient } from '../db/client.ts';
 
 /** Topics: `session:<id>`, `show:<id>` (categories etc.), `user:<id>` (access changes). */
@@ -12,7 +12,14 @@ export type Topic = `session:${string}` | `show:${string}` | `user:${string}`;
 export type BusMessage =
   | SessionServerMessage
   | { type: 'access_changed'; userId: string }
-  | { type: 'show_changed'; showId: string; entity: 'category' | 'show' | 'device' };
+  | { type: 'show_changed'; showId: string; entity: 'category' | 'show' | 'device' }
+  /** On `show:<id>`: a compilation was created, progressed, finished or deleted. */
+  | {
+      type: 'compilation_changed';
+      showId: string;
+      id: string;
+      status: CompilationStatus | 'deleted';
+    };
 
 const CHANNEL = 'autologger';
 const ORIGIN = randomUUID();

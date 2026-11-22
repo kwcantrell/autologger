@@ -56,13 +56,15 @@ export const env = {
   workerConcurrency,
   /**
    * Per job kind, how many of a worker's slots it may fill at once (WORKER_CONCURRENCY_<KIND>,
-   * 1 up to workerConcurrency, which is also the default; waveform defaults to 1).
+   * 1 up to workerConcurrency, which is also the default; waveform and compile default to 1).
    */
   workerKindConcurrency: {
     transcribe: kindConcurrency('WORKER_CONCURRENCY_TRANSCRIBE'),
     youtube_import: kindConcurrency('WORKER_CONCURRENCY_YOUTUBE_IMPORT'),
     // Cosmetic work: one slot by default, so it never crowds out imports and transcriptions.
     waveform: kindConcurrency('WORKER_CONCURRENCY_WAVEFORM', 1),
+    // Video compilations download and re-encode video: heavy, one at a time by default.
+    compile: kindConcurrency('WORKER_CONCURRENCY_COMPILE', 1),
   },
 };
 

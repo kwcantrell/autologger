@@ -32,6 +32,13 @@ export type JobSpec =
       sessionId: string;
       actorId: string | null;
       payload: { segmentId: string };
+    }
+  | {
+      /** Build one video compilation (worker/handlers.ts); show-level, so no session. */
+      kind: 'compile';
+      sessionId: null;
+      actorId: string | null;
+      payload: { compilationId: string };
     };
 
 /**
