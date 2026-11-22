@@ -495,6 +495,8 @@ export interface CompilationClip {
   startSec: number;
   endSec: number;
   label?: string;
+  /** The "Compilation" event logged for this clip in its session (absent with logEvents: false). */
+  eventId?: string;
 }
 
 /** A video built by the worker from ranges of YouTube-sourced sessions (compilations.*). */

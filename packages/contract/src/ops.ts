@@ -490,6 +490,7 @@ export const opInputs = {
       .refine((cs) => cs.reduce((n, c) => n + c.endSec - c.startSec, 0) <= MAX_COMPILATION_SEC, {
         message: `The clips may total at most ${MAX_COMPILATION_SEC / 3600} hours.`,
       }),
+    logEvents: z.boolean().default(true),
   }),
   'compilations.get': z.object({
     compilationId: id,
