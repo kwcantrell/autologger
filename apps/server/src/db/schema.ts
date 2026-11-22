@@ -608,6 +608,8 @@ export const jobs = pgTable(
       .notNull()
       .default('queued'),
     sessionId: text('session_id').references(() => sessions.id, { onDelete: 'cascade' }),
+    /** Show-level jobs only (compile; session_id is null): the show they belong to. */
+    showId: text('show_id').references(() => shows.id, { onDelete: 'cascade' }),
     payload: jsonb('payload').notNull().default({}),
     actorId: text('actor_id').references(() => users.id, { onDelete: 'set null' }),
     error: text('error'),
@@ -625,6 +627,7 @@ export const jobs = pgTable(
   (t) => [
     index('jobs_queue').on(t.status, t.runAfter),
     index('jobs_session').on(t.sessionId, t.createdAt),
+    index('jobs_show').on(t.showId, t.createdAt),
     // Recent finished jobs per kind (duration estimates in jobs.list).
     index('jobs_finished').on(t.kind, t.status, t.updatedAt),
   ],

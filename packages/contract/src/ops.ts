@@ -442,9 +442,9 @@ export const opInputs = {
         .max(4)
         .optional(),
       kinds: z
-        .array(z.enum(['transcribe', 'youtube_import', 'waveform']))
+        .array(z.enum(['transcribe', 'youtube_import', 'waveform', 'compile']))
         .min(1)
-        .max(3)
+        .max(4)
         .optional(),
       limit: z.number().int().min(1).max(500).default(100),
       waitSec: z.number().int().min(1).max(55).optional(),
@@ -483,7 +483,8 @@ export const opInputs = {
   }),
   'compilations.get': z.object({
     compilationId: id,
-    waitSec: z.number().int().min(0).max(60).optional(),
+    // ≤ 55 like jobs.list: MCP clients time out requests at about 60 s.
+    waitSec: z.number().int().min(0).max(55).optional(),
   }),
   'compilations.list': z.object({ showId: id }),
   'compilations.delete': z.object({ compilationId: id }),

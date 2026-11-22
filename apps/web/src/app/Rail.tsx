@@ -162,9 +162,15 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
             data={showJobs.data}
             error={showJobs.error}
             sessions={all}
+            canWriteShow={active.canWriteShow}
             onOpenSession={(id) => {
               setJobsOpenFor(null);
               openSession(id);
+            }}
+            onOpenCompilations={() => {
+              setJobsOpenFor(null);
+              closeSheet();
+              navigate('/compilations');
             }}
             onClose={() => setJobsOpenFor(null)}
           />

@@ -1,8 +1,8 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Storage "configured" for this file only; uploads and deletes are mocked, presigning is local.
@@ -29,7 +29,7 @@ const { env } = await import('../env.ts');
 const { newId } = await import('../core/ids.ts');
 const { publish } = await import('../core/bus.ts');
 const { compilationMessage } = await import('../media/compilations.ts');
-const { claimJob } = await import('../worker/queue.ts');
+const { claimJob, failJob } = await import('../worker/queue.ts');
 const { handlers } = await import('../worker/handlers.ts');
 const { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } = await import(
   './harness.ts'
@@ -207,6 +207,137 @@ describe('compilations ops', () => {
     const t = Date.now();
     await call(owner, 'compilations.get', { compilationId: c.id, waitSec: 10 });
     expect(Date.now() - t).toBeLessThan(2000);
+    // Longer waits would outlast MCP clients' ~60 s request timeout.
+    await failsWith(
+      call(owner, 'compilations.get', { compilationId: c.id, waitSec: 60 }),
+      'bad_request',
+    );
+  });
+});
+
+describe('compile jobs in jobs.list and compilation estimates', () => {
+  beforeAll(setupDb);
+  beforeEach(resetDb);
+
+  it('lists show-level compile jobs by showId, wakes waits on them and dismisses them', async () => {
+    const { owner, team, show, session } = await studio();
+    await youtubeSession(session.id);
+    const c = await call(owner, 'compilations.create', {
+      showId: show.id,
+      title: 'Best bits',
+      clips: [{ sessionId: session.id, startSec: 0, endSec: 10 }],
+    });
+    const agent = asAgent(owner);
+    const listed = await call(agent, 'jobs.list', { showId: show.id, kinds: ['compile'] });
+    expect(listed).toHaveLength(1);
+    const job = listed[0]!;
+    expect(job).toMatchObject({
+      kind: 'compile',
+      status: 'queued',
+      sessionId: null,
+      compilationId: c.id,
+      compilationTitle: 'Best bits',
+      queuePosition: 0,
+    });
+    expect(await call(agent, 'jobs.list', { sessionId: session.id })).toEqual([]);
+
+    const stranger = await makeUser('stranger@example.com');
+    await failsWith(call(stranger, 'jobs.list', { showId: show.id }), 'not_found');
+    await failsWith(call(stranger, 'jobs.dismiss', { jobId: job.id }), 'not_found');
+    const reader = await makeUser('reader@example.com');
+    await call(owner, 'teams.invite', { teamId: team.id, email: reader.user.email });
+    await call(owner, 'teams.setGrant', {
+      teamId: team.id,
+      userId: reader.user.id,
+      showId: show.id,
+      access: 'read',
+    });
+    expect((await call(reader, 'jobs.list', { showId: show.id })).map((j) => j.id)).toEqual([
+      job.id,
+    ]);
+
+    // The worker claiming it (published on the show topic) ends a wait.
+    const started = Date.now();
+    setTimeout(() => void claimJob(), 200);
+    const waited = await call(agent, 'jobs.list', {
+      showId: show.id,
+      status: ['queued', 'running'],
+      waitSec: 10,
+    });
+    expect(waited[0]).toMatchObject({ id: job.id, status: 'running' });
+    expect(Date.now() - started).toBeLessThan(5000);
+
+    const [row] = await db.select().from(jobs).where(eq(jobs.id, job.id));
+    await failJob(row!, 'boom', true);
+    await failsWith(call(reader, 'jobs.dismiss', { jobId: job.id }), 'forbidden');
+    expect((await call(agent, 'jobs.dismiss', { jobId: job.id })).dismissedAt).not.toBeNull();
+
+    // Deleted: still listed (unlabelled); its open failures are dismissed.
+    const again = await call(owner, 'compilations.create', {
+      showId: show.id,
+      title: 'Gone',
+      clips: [{ sessionId: session.id, startSec: 0, endSec: 10 }],
+    });
+    await call(owner, 'compilations.delete', { compilationId: again.id });
+    const gone = (await call(agent, 'jobs.list', { showId: show.id })).find(
+      (j) => j.compilationId === again.id,
+    );
+    expect(gone).toMatchObject({ status: 'failed', error: 'Compilation deleted.' });
+    expect(gone!.compilationTitle).toBeUndefined();
+    expect(gone!.dismissedAt).not.toBeNull();
+  });
+
+  it('gives unfinished compilations queuePosition and etaSec scaled by clip seconds', async () => {
+    const { owner, show, session } = await studio();
+    await youtubeSession(session.id);
+    // History: a 100 s compilation built in 50 s (0.5 s per clip second).
+    const old = await call(owner, 'compilations.create', {
+      showId: show.id,
+      title: 'Old',
+      clips: [{ sessionId: session.id, startSec: 0, endSec: 100 }],
+    });
+    await db.update(compilations).set({ status: 'ready' }).where(eq(compilations.id, old.id));
+    await db
+      .update(jobs)
+      .set({
+        status: 'done',
+        startedAt: new Date(Date.now() - 50_000),
+        updatedAt: new Date(),
+      })
+      .where(eq(jobs.kind, 'compile'));
+
+    const c = await call(owner, 'compilations.create', {
+      showId: show.id,
+      title: 'New',
+      clips: [{ sessionId: session.id, startSec: 0, endSec: 20 }],
+    });
+    expect(c).toMatchObject({ queuePosition: 0, etaSec: 10 });
+    expect(await call(owner, 'compilations.get', { compilationId: c.id })).toMatchObject({
+      queuePosition: 0,
+      etaSec: 10,
+    });
+    const [listed] = await call(owner, 'jobs.list', { showId: show.id, status: ['queued'] });
+    expect(listed).toMatchObject({ compilationId: c.id, etaSec: 10 });
+    const ready = (await call(owner, 'compilations.list', { showId: show.id })).find(
+      (x) => x.id === old.id,
+    );
+    expect(ready!.queuePosition).toBeUndefined();
+    expect(ready!.etaSec).toBeUndefined();
+  });
+
+  it('backfills show_id of compile jobs queued before the column existed', async () => {
+    const { owner, show, session } = await studio();
+    await youtubeSession(session.id);
+    const c = await call(owner, 'compilations.create', {
+      showId: show.id,
+      title: 'Before',
+      clips: [{ sessionId: session.id, startSec: 0, endSec: 10 }],
+    });
+    await db.update(jobs).set({ showId: null });
+    const migration = new URL('../../drizzle/0015_backfill_compile_job_show.sql', import.meta.url);
+    await db.execute(sql.raw(readFileSync(migration, 'utf8')));
+    const [job] = await call(owner, 'jobs.list', { showId: show.id });
+    expect(job).toMatchObject({ compilationId: c.id });
   });
 });
 

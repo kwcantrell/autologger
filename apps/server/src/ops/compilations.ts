@@ -3,16 +3,16 @@
 // content, so they are not in the change log; deleting one removes its video for good.
 
 import type { Compilation } from '@autologger/contract';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { requireShow } from '../core/authz.ts';
-import { type BusMessage, subscribeAll, type Topic } from '../core/bus.ts';
+import { type BusMessage, changeMessage, subscribeAll, type Topic } from '../core/bus.ts';
 import { badRequest, notFound, unavailable } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp, type OpWatch } from '../core/op.ts';
 import { schema } from '../db/client.ts';
 import { env, storageConfigured } from '../env.ts';
 import { compilationMessage, resolveClipSources } from '../media/compilations.ts';
-import { enqueueJob } from '../media/jobs.ts';
+import { enqueueJob, toJob, withJobEstimates } from '../media/jobs.ts';
 import {
   deleteObject,
   PLAYBACK_URL_TTL_SEC,
@@ -41,10 +41,11 @@ async function toEntities(ctx: Ctx, rows: Row[]): Promise<Compilation[]> {
         .where(inArray(sessions.id, ids))
     : [];
   const titles = new Map(titleRows.map((t) => [t.id, t.title]));
+  const estimates = await buildEstimates(ctx, rows);
   const expiresAt = new Date(Date.now() + PLAYBACK_URL_TTL_SEC * 1000).toISOString();
   return Promise.all(
     rows.map(async (r) => {
-      const c = toCompilation(r, users, titles);
+      const c = { ...toCompilation(r, users, titles), ...estimates.get(r.id) };
       if (r.status !== 'ready' || !r.objectKey || !storageConfigured) return c;
       return {
         ...c,
@@ -53,6 +54,41 @@ async function toEntities(ctx: Ctx, rows: Row[]): Promise<Compilation[]> {
       };
     }),
   );
+}
+
+/**
+ * queuePosition / etaSec of unfinished compilations, from their queued or running compile job
+ * (jobs.list's estimates). One indexed query (jobs_show) plus the estimate's own.
+ */
+async function buildEstimates(
+  ctx: Ctx,
+  rows: Row[],
+): Promise<Map<string, Pick<Compilation, 'queuePosition' | 'etaSec'>>> {
+  const out = new Map<string, Pick<Compilation, 'queuePosition' | 'etaSec'>>();
+  const open = rows.filter((r) => r.status === 'queued' || r.status === 'running');
+  if (!open.length) return out;
+  const jobRows = await ctx.db
+    .select()
+    .from(jobs)
+    .where(
+      and(
+        inArray(jobs.showId, [...new Set(open.map((r) => r.showId))]),
+        eq(jobs.kind, 'compile'),
+        inArray(jobs.status, ['queued', 'running']),
+        inArray(
+          sql`${jobs.payload}->>'compilationId'`,
+          open.map((r) => r.id),
+        ),
+      ),
+    );
+  for (const j of await withJobEstimates(ctx.db, jobRows.map(toJob))) {
+    if (!j.compilationId) continue;
+    out.set(j.compilationId, {
+      ...(j.queuePosition !== undefined ? { queuePosition: j.queuePosition } : {}),
+      ...(j.etaSec !== undefined ? { etaSec: j.etaSec } : {}),
+    });
+  }
+  return out;
 }
 
 /** The compilation and the actor's access to its show; no access answers not_found. */
@@ -71,7 +107,7 @@ async function loadCompilation(ctx: Ctx, compilationId: string, need: 'read' | '
 defineOp({
   name: 'compilations.create',
   description:
-    'Build one MP4 video from ranges of a show\'s sessions that were imported from YouTube (sessions_get: sourceKind "youtube" with a sourceUrl; media_importYoutube / media_importPlaylist). showId from shows_list; needs write access to the show. clips: 1–100 ranges in play order, each {sessionId, startSec, endSec, label?} in SECONDS FROM THE SESSION START — the same @seconds as transcript_text, search hits and topics — each 1 s to 20 min long, together at most 3 hours. Every session must belong to this show and its range must lie within the session\'s stored YouTube audio; otherwise the call fails with bad_request listing the offending clips (e.g. "clip 2 (sessionId …): the session was not imported from YouTube") and nothing is created. Sessions recorded or uploaded in the app have no video and cannot be compiled. The server then downloads just those sections of the YouTube videos (≤720p), re-encodes them to one H.264/AAC MP4 (1280×720, 30 fps) and stores it; this runs in the background and takes roughly a few seconds per clip-minute plus download time. Returns the Compilation with status "queued". Wait for it with compilations_get {compilationId, waitSec: 60} in a loop until status is "ready" (then url is a presigned download link valid about 1 hour — call compilations_get again for a fresh one, do not store it) or "failed" (error says why). progress reads like "clip 3/12" meanwhile. Users see and play compilations in the web app\'s Compilations page.',
+    'Build one MP4 video from ranges of a show\'s sessions that were imported from YouTube (sessions_get: sourceKind "youtube" with a sourceUrl; media_importYoutube / media_importPlaylist). showId from shows_list; needs write access to the show. clips: 1–100 ranges in play order, each {sessionId, startSec, endSec, label?} in SECONDS FROM THE SESSION START — the same @seconds as transcript_text, search hits and topics — each 1 s to 20 min long, together at most 3 hours. Every session must belong to this show and its range must lie within the session\'s stored YouTube audio; otherwise the call fails with bad_request listing the offending clips (e.g. "clip 2 (sessionId …): the session was not imported from YouTube") and nothing is created. Sessions recorded or uploaded in the app have no video and cannot be compiled. The server then downloads just those sections of the YouTube videos (≤720p), re-encodes them to one H.264/AAC MP4 (1280×720, 30 fps) and stores it; this runs in the background and takes roughly a few seconds per clip-minute plus download time. Returns the Compilation with status "queued". Wait for it with compilations_get {compilationId, waitSec: 55} in a loop until status is "ready" (then url is a presigned download link valid about 1 hour — call compilations_get again for a fresh one, do not store it) or "failed" (error says why). progress reads like "clip 3/12" meanwhile. Users see and play compilations in the web app\'s Compilations page.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId, title, clips }) {
@@ -109,12 +145,14 @@ defineOp({
         createdBy: ctx.actor.user.id,
       })
       .returning();
-    await enqueueJob(ctx.db, {
+    const job = await enqueueJob(ctx.db, {
       kind: 'compile',
       sessionId: null,
+      showId,
       actorId: ctx.actor.user.id,
       payload: { compilationId: id },
     });
+    ctx.publish(`show:${showId}`, changeMessage('job', 'upsert', job.id, toJob(job)));
     ctx.publish(`show:${showId}`, compilationMessage(showId, id, 'queued'));
     const [out] = await toEntities(ctx, [row!]);
     return out!;
@@ -165,7 +203,7 @@ function watchCompilation(ms: number, signal?: AbortSignal): OpWatch<Compilation
 defineOp({
   name: 'compilations.get',
   description:
-    'One video compilation (compilationId from compilations_create or compilations_list): status "queued" | "running" | "ready" | "failed", progress while working (e.g. "clip 3/12"), error when failed, the clips (session seconds), durationSec (seconds; the sum of the clip lengths until ready, then the measured video length) and sizeBytes. When ready it includes url: a presigned link to the MP4 valid about 1 hour (urlExpiresAt) — fetch a fresh one with this call rather than storing it. To wait for a compilation, pass waitSec (1–60): while it is queued or running the call holds until its status changes (or it is deleted), then returns it — or after waitSec seconds unchanged. Call it again in a loop until ready or failed; no separate sleep is needed. Needs read access to the show.',
+    'One video compilation (compilationId from compilations_create or compilations_list): status "queued" | "running" | "ready" | "failed", progress while working (e.g. "clip 3/12"), error when failed, the clips (session seconds), durationSec (seconds; the sum of the clip lengths until ready, then the measured video length) and sizeBytes. When ready it includes url: a presigned link to the MP4 valid about 1 hour (urlExpiresAt) — fetch a fresh one with this call rather than storing it. To wait for a compilation, pass waitSec (1–55; longer waits outlast the ~60 s request timeout of MCP clients): while it is queued or running the call holds until its status changes (or it is deleted), then returns it — or after waitSec seconds unchanged. Call it again in a loop until ready or failed; no separate sleep is needed. Needs read access to the show.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   watch: ({ waitSec }, signal) => (waitSec ? watchCompilation(waitSec * 1000, signal) : null),
@@ -178,7 +216,7 @@ defineOp({
 
 defineOp({
   name: 'compilations.list',
-  description: `The video compilations of a show (showId from shows_list), newest first (at most ${LIST_MAX}), each as in compilations_get: status, progress, clips, durationSec and, when ready, a url valid about 1 hour. Needs read access to the show.`,
+  description: `The video compilations of a show (showId from shows_list), newest first (at most ${LIST_MAX}), each as in compilations_get: status, progress, clips, durationSec and, when ready, a url valid about 1 hour. Queued compilations include queuePosition (jobs the worker starts before this build, 0 = next) and queued or running ones etaSec (rough seconds until ready, from recent builds' time per clip second; absent without history) — both also in compilations_get. The build itself is a compile job in jobs_list with showId. Needs read access to the show.`,
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId }) {
@@ -203,16 +241,21 @@ defineOp({
     const row = await loadCompilation(ctx, compilationId, 'write');
     await ctx.db.delete(compilations).where(eq(compilations.id, row.id));
     // A queued build has nothing left to do; a running one finds the row gone and cleans up.
+    // Its failures (and this cancellation) are dismissed: nothing is left to retry.
+    const now = new Date();
+    const ofThis = and(
+      eq(jobs.kind, 'compile'),
+      sql`${jobs.payload}->>'compilationId' = ${row.id}`,
+    );
     await ctx.db
       .update(jobs)
-      .set({ status: 'failed', error: 'Compilation deleted.', updatedAt: new Date() })
-      .where(
-        and(
-          eq(jobs.kind, 'compile'),
-          eq(jobs.status, 'queued'),
-          sql`${jobs.payload}->>'compilationId' = ${row.id}`,
-        ),
-      );
+      .set({ status: 'failed', error: 'Compilation deleted.', dismissedAt: now, updatedAt: now })
+      .where(and(ofThis, eq(jobs.status, 'queued')));
+    await ctx.db
+      .update(jobs)
+      .set({ dismissedAt: now })
+      .where(and(ofThis, eq(jobs.status, 'failed'), isNull(jobs.dismissedAt)));
+    ctx.publish(`show:${row.showId}`, { type: 'invalidate', entity: 'job' });
     const key = row.objectKey;
     if (key && storageConfigured)
       ctx.afterCommit(async () => {
