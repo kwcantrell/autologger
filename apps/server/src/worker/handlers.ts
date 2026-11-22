@@ -151,7 +151,11 @@ const youtubeImport: Handler = {
     if (!url || !job.sessionId) throw new PermanentError('Job payload has no url or session.');
     const sessionId = job.sessionId;
     const [session] = await db
-      .select({ id: sessions.id })
+      .select({
+        id: sessions.id,
+        episodeDate: sessions.episodeDate,
+        createdAt: sessions.createdAt,
+      })
       .from(sessions)
       .where(eq(sessions.id, sessionId));
     if (!session) return 'Session was deleted';
@@ -184,9 +188,18 @@ const youtubeImport: Handler = {
             createdBy: job.actorId,
           })
           .returning();
+        // The upload date replaces the date only while it is still the default (creation day).
+        const defaultDate =
+          !session.episodeDate ||
+          session.episodeDate === session.createdAt.toISOString().slice(0, 10);
         await tx
           .update(sessions)
-          .set({ sourceKind: 'youtube', sourceUrl: url, updatedAt: sql`now()` })
+          .set({
+            sourceKind: 'youtube',
+            sourceUrl: url,
+            ...(dl.uploadDate && defaultDate ? { episodeDate: dl.uploadDate } : {}),
+            updatedAt: sql`now()`,
+          })
           .where(eq(sessions.id, sessionId));
         const transcribeJob = transcriptionConfigured
           ? await enqueueJob(tx, {

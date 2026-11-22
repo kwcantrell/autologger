@@ -75,6 +75,10 @@ function invalidateDerived(qc: QueryClient, entity: LiveEntity, sessionId: strin
     void qc.invalidateQueries({ queryKey: qk.dashboardQueryAll(sessionId) });
   }
   if (entity === 'event') void qc.invalidateQueries({ queryKey: qk.sessionsAll });
+  // audioSeconds is derived from the audio segments: refresh the session and the rail.
+  if (entity === 'audio_segment') void qc.invalidateQueries({ queryKey: qk.session(sessionId) });
+  if (entity === 'audio_segment' || entity === 'session')
+    void qc.invalidateQueries({ queryKey: qk.sessionsAll });
 }
 
 export function applySessionMessage(qc: QueryClient, sessionId: string, m: SessionServerMessage) {
