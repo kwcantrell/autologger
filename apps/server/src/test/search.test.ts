@@ -93,4 +93,25 @@ describe('search', () => {
     const outsider = await makeUser('outsider@example.com');
     await failsWith(call(outsider, 'search', { query: 'bombing', showId: show.id }), 'not_found');
   });
+
+  it('returns more than 100 hits when asked, up to 500', async () => {
+    const { owner, show, session } = await studio();
+    await call(owner, 'events.createMany', {
+      sessionId: session.id,
+      events: Array.from({ length: 150 }, (_, i) => ({
+        category: 'Note',
+        message: `bombing ${i}`,
+        atSec: i,
+      })),
+    });
+    const hits = await call(owner, 'search', {
+      query: 'bombing',
+      showId: show.id,
+      kinds: ['event'],
+      limit: 500,
+    });
+    expect(hits).toHaveLength(150);
+    expect(await call(owner, 'search', { query: 'bombing', kinds: ['event'] })).toHaveLength(30);
+    await failsWith(call(owner, 'search', { query: 'bombing', limit: 501 }), 'bad_request');
+  });
 });

@@ -6,7 +6,7 @@ import { defineOp } from '../core/op.ts';
 defineOp({
   name: 'search',
   description:
-    'Full-text search across everything you can access: events, transcript lines, topics, wiki pages and sessions. Narrow by show, session or kinds. Hits carry sessionId and atSec so you can jump to the moment (transcript lines and topics also endSec, where they end; null otherwise), plus sessionTitle and sessionDate (episode date, or creation time) to tell sessions apart.',
+    'Full-text search across everything you can access: events, transcript lines, topics, wiki pages and sessions. Narrow by show, session or kinds. Hits carry sessionId and atSec so you can jump to the moment (transcript lines and topics also endSec, where they end; null otherwise), plus sessionTitle and sessionDate (episode date, or creation time) to tell sessions apart. Hits come best match first; limit defaults to 30 (max 500), so getting exactly `limit` hits means there may be more — narrow by show, session, kinds or more words, or raise the limit.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { query, showId, sessionId, kinds, limit }) {

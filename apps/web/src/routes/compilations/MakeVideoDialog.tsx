@@ -53,6 +53,8 @@ interface Props {
   startTicked: boolean;
   /** How the clip ranges were chosen, shown under the list (search hits are points, not ranges). */
   note?: string;
+  /** The caller is still fetching the candidates (search's "Make video" loads a show's moments). */
+  loading?: boolean;
 }
 
 export function MakeVideoDialog({ open, onOpenChange, ...rest }: Props) {
@@ -81,6 +83,7 @@ function MakeVideoForm({
   sourceNoun,
   startTicked,
   note,
+  loading,
 }: Omit<Props, 'open'>) {
   const ids = useId();
   const [, navigate] = useLocation();
@@ -108,10 +111,11 @@ function MakeVideoForm({
         </Button>
       </div>
     );
-  if (!plan)
+  if (!plan || loading)
     return (
       <div role="status" className="flex items-center gap-2 py-6 text-sm text-si-muted">
-        <Spinner role="presentation" aria-hidden="true" className="size-4" /> Checking the sessions…
+        <Spinner role="presentation" aria-hidden="true" className="size-4" />{' '}
+        {loading ? 'Finding the moments…' : 'Checking the sessions…'}
       </div>
     );
 

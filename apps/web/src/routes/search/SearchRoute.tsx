@@ -1,7 +1,9 @@
 // `/search?q=&show=`: the full results page. The URL is the state; every edit REPLACES the entry
 // (Back leaves the page rather than stepping through keystrokes). Results are grouped by kind;
 // moments are grouped under their session, 3 each, with "Show N more in this session". "Make video"
-// turns the moments of one show into a compilation (MakeVideoDialog), one per show.
+// turns the moments of one show into a compilation (MakeVideoDialog), one per show. The page asks
+// for the best PAGE_LIMIT hits and says when it got that many; "Make video" asks again for just that
+// show's moments, up to VIDEO_LIMIT, so it is not limited to what the page shows.
 
 import type { SearchHit } from '@autologger/contract';
 import { BookOpenIcon, FilmIcon, SearchIcon } from 'lucide-react';
@@ -30,6 +32,7 @@ import { momentsByShow, type ShowMoments, searchClipCandidates, WINDOW_NOTE } fr
 import {
   groupHits,
   hitHref,
+  isMoment,
   isSearchable,
   type MomentHit,
   momentLabel,
@@ -40,6 +43,9 @@ import {
 } from './searchLinks';
 
 const PAGE_LIMIT = 100;
+/** "Make video" fetches up to this many of one show's moments (the search op's maximum). */
+const VIDEO_LIMIT = 500;
+const MOMENT_KINDS: ('transcript' | 'topic' | 'event')[] = ['transcript', 'topic', 'event'];
 const PER_SESSION = 3;
 const ALL = '__all__';
 /** Up to this many clips start ticked in the "Make video" dialog; more start unticked to pick from. */
@@ -185,14 +191,31 @@ function ShowVideoButton({
   const [open, setOpen] = useState(false);
   const show = allShows.find((s) => s.id === group.showId);
   const canWrite = show?.access === 'manage' || show?.access === 'write';
-  const candidates = useMemo(() => searchClipCandidates(group.moments), [group.moments]);
+  const pageCandidates = useMemo(() => searchClipCandidates(group.moments), [group.moments]);
+  // Opening the dialog asks for this show's moments alone, past the page's top PAGE_LIMIT hits.
+  const all = useSearch(
+    open ? { query, showId: group.showId, kinds: MOMENT_KINDS, limit: VIDEO_LIMIT } : null,
+  );
+  const fetched = useMemo(
+    () => (all.data && !all.isPlaceholderData ? all.data.filter(isMoment) : null),
+    [all.data, all.isPlaceholderData],
+  );
+  const moments = fetched ?? group.moments;
+  const candidates = useMemo(
+    () => (fetched ? searchClipCandidates(fetched) : pageCandidates),
+    [fetched, pageCandidates],
+  );
   const sessions = useSessions(group.showId);
   const noVideo =
-    sessions.data && planClips(candidates, sessions.data).clips.length === 0
+    sessions.data && planClips(pageCandidates, sessions.data).clips.length === 0
       ? 'None of these sessions were imported from YouTube, so there is no video to cut.'
       : null;
   const blocked = useMakeVideoBlocked(canWrite, group.showName) ?? noVideo;
-  const n = group.moments.length;
+  const n = moments.length;
+  const capped = fetched && n >= VIDEO_LIMIT ? `the best ${VIDEO_LIMIT} of the ` : '';
+  const partial = all.isError
+    ? ' The full list of moments could not be loaded, so only the ones on the search page are listed.'
+    : '';
   return (
     <>
       <Tooltip content={blocked} disabled={!blocked}>
@@ -215,9 +238,10 @@ function ShowVideoButton({
         onOpenChange={setOpen}
         defaultTitle={`${group.showName} — “${query}”`}
         candidates={candidates}
-        sourceNoun={`${n} moment${n === 1 ? '' : 's'} found for “${query}”${named ? ` in ${group.showName}` : ''}`}
+        sourceNoun={`${capped}${n} moment${n === 1 ? '' : 's'} found for “${query}”${named ? ` in ${group.showName}` : ''}`}
         startTicked={candidates.length <= TICK_ALL_UP_TO}
-        note={WINDOW_NOTE}
+        note={WINDOW_NOTE + partial}
+        loading={open && !fetched && !all.isError}
       />
     </>
   );
@@ -321,6 +345,14 @@ export function SearchRoute() {
   } else {
     body = (
       <div className="flex flex-col gap-6">
+        {data && data.length >= PAGE_LIMIT && (
+          <p role="status" className="m-0 px-3 text-sm text-si-muted">
+            Showing the top {PAGE_LIMIT} matches. {show ? 'Add' : 'Narrow by show or add'} words to
+            see the rest.
+            {groups.moments.length > 0 &&
+              ` Make video looks further: it searches its show again, up to ${VIDEO_LIMIT} moments.`}
+          </p>
+        )}
         {groups.sessions.length > 0 && (
           <ResultGroup title="Sessions">
             {groups.sessions.map((h) => (
