@@ -18,7 +18,12 @@ import { z } from 'zod';
 import { toRpcError } from '../core/errors.ts';
 import { type Actor, executeOp, listOps } from '../core/op.ts';
 import { bearerFrom } from '../http/app.ts';
-import { coerceArguments, looksLikeStaleToolList, STALE_TOOL_LIST_HINT } from './coerce.ts';
+import {
+  coerceArguments,
+  looksLikeStaleToolList,
+  staleToolListHint,
+  toolListVersion,
+} from './coerce.ts';
 import { resourceMetadataUrl } from './oauth.ts';
 import { PROMPTS } from './prompts.ts';
 import { actorFromBearer } from './tokens.ts';
@@ -50,6 +55,8 @@ const DESTRUCTIVE =
 
 type ToolCache = {
   tools: Tool[];
+  /** Hash of the tool names, descriptions and input schemas (see toolListVersion). */
+  version: string;
   byTool: Map<string, OpName>;
   schemas: Map<string, Record<string, unknown>>;
 };
@@ -90,7 +97,7 @@ export function mcpTools(): ToolCache {
             },
     };
   });
-  toolCache = { tools, byTool, schemas };
+  toolCache = { tools, version: toolListVersion(tools), byTool, schemas };
   return toolCache;
 }
 
@@ -108,10 +115,19 @@ function resultContent(op: OpName, data: unknown): CallToolResult {
   return { content: [{ type: 'text', text: JSON.stringify(data ?? null) }] };
 }
 
+const APP_VERSION = '3.0.0';
+
+/** serverInfo.version: the app version with the tool-list version as semver build metadata. */
+export const mcpServerVersion = () => `${APP_VERSION}+tools.${mcpTools().version}`;
+
+/** The instructions plus a line naming the tool-list version this connection got. */
+export const mcpInstructions = () =>
+  `${SERVER_INSTRUCTIONS}\n\nTool list version: ${mcpTools().version}. A tool error naming a different version means the server's tools changed after you connected; reconnect the AutoLogger MCP server to refresh them.`;
+
 export function createMcpServer(actor: Actor): Server {
   const server = new Server(
-    { name: 'autologger', title: 'AutoLogger', version: '3.0.0' },
-    { capabilities: { tools: {}, prompts: {} }, instructions: SERVER_INSTRUCTIONS },
+    { name: 'autologger', title: 'AutoLogger', version: mcpServerVersion() },
+    { capabilities: { tools: {}, prompts: {} }, instructions: mcpInstructions() },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: mcpTools().tools }));
@@ -138,7 +154,7 @@ export function createMcpServer(actor: Actor): Server {
         : '';
       const hint =
         e instanceof z.ZodError && looksLikeStaleToolList(e.issues, args)
-          ? `\n${STALE_TOOL_LIST_HINT}`
+          ? `\n${staleToolListHint(mcpTools().version)}`
           : '';
       return {
         isError: true,
