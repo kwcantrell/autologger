@@ -1,4 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { newId } from '../core/ids.ts';
+import { db, schema } from '../db/client.ts';
 import { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
 
 beforeAll(setupDb);
@@ -216,6 +218,42 @@ describe('dashboards and wiki', () => {
       call(outsider, 'dashboards.query', {
         sessionId: session.id,
         query: { name: 'topics', maxLevel: 1 },
+      }),
+      'not_found',
+    );
+  });
+
+  it('summary_stats reports speech duration and words per minute', async () => {
+    const { owner, session } = await studio();
+    const stats = () =>
+      call(owner, 'dashboards.query', { sessionId: session.id, query: { name: 'summary_stats' } });
+    expect(await stats()).toMatchObject([{ words: 0, speechSec: 0, wpm: null }]);
+    const word = (w: string) => ({ w, s: 0, e: 0 });
+    await db.insert(schema.transcriptSegments).values([
+      {
+        id: newId('seg'),
+        sessionId: session.id,
+        startSec: 10,
+        endSec: 40,
+        text: 'a b',
+        words: [word('a'), word('b')],
+      },
+      {
+        id: newId('seg'),
+        sessionId: session.id,
+        startSec: 60,
+        endSec: 70,
+        text: 'c',
+        words: [word('c')],
+      },
+    ]);
+    // 3 words over 60s (10 → 70), gaps included.
+    expect(await stats()).toMatchObject([{ words: 3, speechSec: 60, wpm: 3 }]);
+    const outsider = await makeUser('outsider@example.com');
+    await failsWith(
+      call(outsider, 'dashboards.query', {
+        sessionId: session.id,
+        query: { name: 'summary_stats' },
       }),
       'not_found',
     );
