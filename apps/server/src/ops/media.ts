@@ -10,7 +10,7 @@ import { requireSession, requireShow } from '../core/authz.ts';
 import { type BusMessage, changeMessage, subscribeAll, type Topic } from '../core/bus.ts';
 import { badRequest, conflict, notFound, unavailable } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
-import { type Ctx, defineOp, type OpWatch } from '../core/op.ts';
+import { type Actor, type Ctx, defineOp, type OpWatch } from '../core/op.ts';
 import { db, schema } from '../db/client.ts';
 import { env, storageConfigured, transcriptionConfigured } from '../env.ts';
 import { enqueueJob, type JobRow, jobTopic, toJob, withJobEstimates } from '../media/jobs.ts';
@@ -29,6 +29,7 @@ import {
   isYoutubeUrl,
   listPlaylist,
   type Playlist,
+  videoDuration,
   watchUrl,
   youtubePlaylistId,
   youtubeVideoId,
@@ -260,10 +261,11 @@ defineOp({
 defineOp({
   name: 'media.importYoutube',
   description:
-    'Import the audio of one YouTube video into an existing session. Runs in the background: the worker downloads the audio, stores it and transcribes it. If the session\'s episodeDate is still its default (the day it was created), it is set to the video\'s upload date. Playlist URLs are rejected: use media.importPlaylist to import a whole playlist into a show. Returns the job; wait for it with jobs.list (waitSec; kinds ["youtube_import","transcribe"] leaves out the cosmetic waveform job queued after the download).',
+    'Import the audio of one YouTube video into an existing session. Runs in the background: the worker downloads the audio, stores it and transcribes it. If the session\'s episodeDate is still its default (the day it was created), it is set to the video\'s upload date. Playlist URLs are rejected: use media.importPlaylist to import a whole playlist into a show. Returns the job; wait for it with jobs.list (waitSec; kinds ["youtube_import","transcribe"] leaves out the cosmetic waveform job queued after the download). Before queuing it reads the video length from YouTube (a few seconds, no download) so sessions.get transcriptJob.etaSec can include the transcription time; if that read is slow or fails the import is still queued, with a download-only estimate.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, url }) {
+  // Validate and authorize, then read the video length, before the op's transaction opens.
+  async prepare(actor, { sessionId, url }): Promise<number | null> {
     requireYoutube();
     if (!isYoutubeUrl(url))
       throw badRequest('That is not a YouTube URL (youtube.com or youtu.be).');
@@ -271,17 +273,53 @@ defineOp({
       throw badRequest(
         'That is a playlist URL. Use media.importPlaylist with the showId to create one session per video.',
       );
+    await db.transaction((tx) =>
+      requireSession(prepareCtx(actor, tx, 'media.importYoutube'), sessionId, 'write'),
+    );
+    // Only for the estimate: never fail or hold up the import over it for long.
+    if (videoProbes >= MAX_VIDEO_PROBES) return null;
+    videoProbes++;
+    try {
+      return await videoDuration(env.ytDlpPath, url, VIDEO_PROBE_TIMEOUT_MS);
+    } catch (e) {
+      console.warn(`video length of ${url}: ${(e as Error).message}`);
+      return null;
+    } finally {
+      videoProbes--;
+    }
+  },
+  async run(ctx, { sessionId, url }, durationSec) {
     await requireSession(ctx, sessionId, 'write');
     const job = await enqueueJob(ctx.db, {
       kind: 'youtube_import',
       sessionId,
       actorId: ctx.actor.user.id,
-      payload: { url },
+      // durationSec lets sessions.get estimate the transcription that follows the download.
+      payload: { url, ...(durationSec ? { durationSec } : {}) },
     });
     publishJob(ctx, job);
     return toJob(job);
   },
 });
+
+/** Concurrent yt-dlp video-length reads allowed per server process; beyond it, length unknown. */
+const MAX_VIDEO_PROBES = 4;
+const VIDEO_PROBE_TIMEOUT_MS = 15_000;
+let videoProbes = 0;
+
+/** A Ctx for authorizing in `prepare`: reads only, outside the op's transaction. */
+function prepareCtx(actor: Actor, tx: Ctx['db'], op: Ctx['op']): Ctx {
+  return {
+    actor,
+    db: tx,
+    op,
+    groupId: '',
+    record: () => Promise.reject(new Error('read-only')),
+    recordMany: () => Promise.reject(new Error('read-only')),
+    publish: () => {},
+    afterCommit: () => {},
+  };
+}
 
 /** Concurrent yt-dlp playlist resolutions allowed per server process. */
 const MAX_PLAYLIST_RESOLUTIONS = 2;
@@ -303,20 +341,7 @@ defineOp({
   // Authorize, then run yt-dlp, before the op's transaction opens.
   async prepare(actor, { showId, url }): Promise<Playlist> {
     await db.transaction((tx) =>
-      requireShow(
-        {
-          actor,
-          db: tx,
-          op: 'media.importPlaylist',
-          groupId: '',
-          record: () => Promise.reject(new Error('read-only')),
-          recordMany: () => Promise.reject(new Error('read-only')),
-          publish: () => {},
-          afterCommit: () => {},
-        },
-        showId,
-        'write',
-      ),
+      requireShow(prepareCtx(actor, tx, 'media.importPlaylist'), showId, 'write'),
     );
     requireYoutube();
     const listId = youtubePlaylistId(url);
@@ -514,24 +539,31 @@ defineOp({
 
 defineOp({
   name: 'media.delete',
-  description: 'Delete one audio segment, its stored audio, waveform and transcript.',
+  description:
+    'Delete one audio segment, its stored audio, waveform and transcript. Its queued transcribe/waveform jobs are cancelled (failed, "Audio segment deleted.") and they and its earlier failed jobs are dismissed, so jobs.list hideDismissed leaves them out.',
   kind: 'write',
   surfaces: ['web'],
   async run(ctx, { segmentId }) {
     const { row, session } = await loadSegment(ctx, segmentId, 'write');
     // Transcript rows cascade with the segment.
     await ctx.db.delete(audioSegments).where(eq(audioSegments.id, segmentId));
+    // The segment's jobs can't run or be retried any more: cancel the queued ones and dismiss
+    // them and earlier failures, so they aren't reported as open failures (hideDismissed).
+    // A running job's next attempt finds the segment gone and ends as done in the worker.
+    const now = new Date();
+    const segmentJobs = and(
+      inArray(jobs.kind, ['transcribe', 'waveform']),
+      eq(jobs.sessionId, session.id),
+      sql`${jobs.payload}->>'segmentId' = ${segmentId}`,
+    );
     await ctx.db
       .update(jobs)
-      .set({ status: 'failed', error: 'Audio segment deleted.', updatedAt: new Date() })
-      .where(
-        and(
-          inArray(jobs.kind, ['transcribe', 'waveform']),
-          eq(jobs.status, 'queued'),
-          eq(jobs.sessionId, session.id),
-          sql`${jobs.payload}->>'segmentId' = ${segmentId}`,
-        ),
-      );
+      .set({ status: 'failed', error: 'Audio segment deleted.', dismissedAt: now, updatedAt: now })
+      .where(and(segmentJobs, eq(jobs.status, 'queued')));
+    await ctx.db
+      .update(jobs)
+      .set({ dismissedAt: now })
+      .where(and(segmentJobs, eq(jobs.status, 'failed'), isNull(jobs.dismissedAt)));
     if (storageConfigured) {
       ctx.afterCommit(async () => {
         for (const key of [row.objectKey, row.peaksKey]) {
@@ -616,7 +648,7 @@ function watchJobs(ms: number, showId: string | undefined, signal?: AbortSignal)
 defineOp({
   name: 'jobs.list',
   description:
-    'Background jobs (transcription, YouTube import, waveform, video compilation), newest first, with status, progress and errors. waveform jobs only draw the timeline waveform in the web app (cosmetic, run after everything else): when waiting for imports or transcripts, pass kinds ["youtube_import","transcribe"] or ignore them. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"; it also lists the show\'s compile jobs, which have sessionId null and instead compilationId and compilationTitle (absent once the compilation was deleted) — the compilation itself is compilations_get). Transcribe and waveform jobs include segmentId, the audio segment they are for (media_list); retry a failed transcription of just that segment with media_retranscribe and that segmentId (without segmentId it redoes every segment and loses manual edits). youtube_import jobs include sourceUrl, the video URL being imported: retry a failed import with media_importYoutube with that url and the job sessionId. Optional kinds filters to the given job kinds; optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Queued jobs include queuePosition: how many jobs the worker will start before this one, 0 = next. It counts every runnable queued job on the server (all teams and shows; only the number is exposed); a job waiting to retry after a failure has no queuePosition until its retry time. startedAt is when the current attempt started (null while queued). Queued (with a queuePosition) and running jobs include etaSec: a rough estimate of seconds until the job finishes, from the median duration of the last 20 finished jobs of the same kind (transcriptions scaled by their audio length), the jobs ahead in the queue, the time left on running jobs and the total job slots of the workers currently running (compile jobs scaled by their total clip seconds); 0 on a running job means it is taking longer than usual. It is absent when there is no finished history to estimate from. Use it to choose waitSec, not as a deadline. To wait for jobs, pass waitSec (1–55): if any listed job is queued or running, the call holds until one of them changes status (starts, finishes, fails) or a new job is queued in one of their sessions, then returns the fresh list — or returns after waitSec seconds when nothing changed. Call it again in a loop until the result is empty / all done; no separate sleep is needed. Without waitSec the call returns at once; do not poll it in a tight loop. A failed job that someone acknowledged (jobs.dismiss) has dismissedAt set; hideDismissed: true leaves those failures out (e.g. status ["failed"] with hideDismissed lists the failures nobody has dealt with yet).',
+    'Background jobs (transcription, YouTube import, waveform, video compilation), newest first, with status, progress and errors. waveform jobs only draw the timeline waveform in the web app (cosmetic, run after everything else): when waiting for imports or transcripts, pass kinds ["youtube_import","transcribe"] or ignore them. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"; it also lists the show\'s compile jobs, which have sessionId null and instead compilationId and compilationTitle (absent once the compilation was deleted) — the compilation itself is compilations_get; retry a failed compile job with compilations_retry {compilationId}). Transcribe and waveform jobs include segmentId, the audio segment they are for (media_list); retry a failed transcription of just that segment with media_retranscribe and that segmentId (without segmentId it redoes every segment and loses manual edits). youtube_import jobs include sourceUrl, the video URL being imported: retry a failed import with media_importYoutube with that url and the job sessionId. Optional kinds filters to the given job kinds; optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Queued jobs include queuePosition: how many jobs the worker will start before this one, 0 = next. It counts every runnable queued job on the server (all teams and shows; only the number is exposed); a job waiting to retry after a failure has no queuePosition until its retry time. startedAt is when the current attempt started (null while queued). Queued (with a queuePosition) and running jobs include etaSec: a rough estimate of seconds until the job finishes, from the median duration of the last 20 finished jobs of the same kind (transcriptions scaled by their audio length), the jobs ahead in the queue, the time left on running jobs and the total job slots of the workers currently running (compile jobs scaled by their total clip seconds); 0 on a running job means it is taking longer than usual. It is absent when there is no finished history to estimate from. Use it to choose waitSec, not as a deadline. To wait for jobs, pass waitSec (1–55): if any listed job is queued or running, the call holds until one of them changes status (starts, finishes, fails) or a new job is queued in one of their sessions, then returns the fresh list — or returns after waitSec seconds when nothing changed. Call it again in a loop until the result is empty / all done; no separate sleep is needed. Without waitSec the call returns at once; do not poll it in a tight loop. A failed job that someone acknowledged (jobs.dismiss) has dismissedAt set; hideDismissed: true leaves those failures out (e.g. status ["failed"] with hideDismissed lists the failures nobody has dealt with yet). Deleting an audio segment dismisses its transcribe and waveform jobs automatically.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   watch: ({ waitSec, showId }, signal) =>

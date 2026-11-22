@@ -51,6 +51,8 @@ interface Props {
   sourceNoun: string;
   /** Start with every clip ticked (a page's citations) or none (a session's topics, to pick from). */
   startTicked: boolean;
+  /** How the clip ranges were chosen, shown under the list (search hits are points, not ranges). */
+  note?: string;
 }
 
 export function MakeVideoDialog({ open, onOpenChange, ...rest }: Props) {
@@ -78,6 +80,7 @@ function MakeVideoForm({
   candidates,
   sourceNoun,
   startTicked,
+  note,
 }: Omit<Props, 'open'>) {
   const ids = useId();
   const [, navigate] = useLocation();
@@ -241,6 +244,7 @@ function MakeVideoForm({
             );
           })}
         </ol>
+        {note && <p className="m-0 text-xs text-si-dim">{note}</p>}
         {(anyDefault || trimmedMax) && (
           <p className="m-0 text-xs text-si-dim">
             {anyDefault &&

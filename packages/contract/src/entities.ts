@@ -561,6 +561,8 @@ export interface SearchHit {
   snippet: string;
   /** Session seconds for event/transcript/topic hits. */
   atSec: number | null;
+  /** Where a transcript line or topic ends (session seconds); null for events, wiki pages, sessions and zero-length topics. */
+  endSec: number | null;
   rank: number;
 }
 
@@ -571,4 +573,6 @@ export interface Capabilities {
   transcription: boolean;
   youtube: boolean;
   publicUrl: string;
+  /** Signed-out visitors at `/` see the public landing page; false sends them to /login (LANDING_PAGE=0). */
+  landingPage: boolean;
 }

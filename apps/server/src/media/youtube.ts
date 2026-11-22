@@ -161,6 +161,36 @@ function isoDate(d: unknown): string | null {
     : null;
 }
 
+/**
+ * One video's length in seconds from its metadata, without downloading anything; null when
+ * yt-dlp does not report one. Throws when yt-dlp fails or exceeds `timeoutMs`.
+ */
+export async function videoDuration(
+  ytDlpPath: string,
+  url: string,
+  timeoutMs: number,
+): Promise<number | null> {
+  const { stdout } = await run(
+    ytDlpPath,
+    [
+      '--ignore-config',
+      '--no-playlist',
+      '--skip-download',
+      '--dump-json',
+      '--no-warnings',
+      '--',
+      url,
+    ],
+    timeoutMs,
+  );
+  try {
+    const d: unknown = JSON.parse(stdout.trim().split('\n').at(-1) ?? '').duration;
+    return typeof d === 'number' && d > 0 ? d : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface PlaylistEntry {
   videoId: string;
   title: string;
