@@ -85,6 +85,56 @@ describe('transcript find and batch update', () => {
     ]);
   });
 
+  it('finds several patterns at once with matched text and context lines', async () => {
+    const { owner, session } = await studio();
+    const [a, b, c, d, e] = await seedTranscript(session.id, [
+      "I'm sure the Doctor will see m",
+      'call it at x',
+      '-one and then doctor again',
+      'filler',
+      'more filler',
+    ]);
+
+    const many = await call(owner, 'transcript.find', {
+      sessionId: session.id,
+      patterns: ['\\mdoctor\\M', '\\mm\\M', '^-one'],
+      regex: true,
+    });
+    expect(many.map((l) => [l.id, l.matches, l.patternIndexes])).toEqual([
+      [a, ['Doctor', 'm'], [0, 1]],
+      [c, ['doctor', '-one'], [0, 2]],
+    ]);
+    // Empty-string hits (`z*` matches everywhere) are neither matches nor a reason to return a line.
+    const empties = await call(owner, 'transcript.find', {
+      sessionId: session.id,
+      patterns: ['z*', 'x+'],
+      regex: true,
+    });
+    expect(empties.map((l) => [l.id, l.matches, l.patternIndexes])).toEqual([[b, ['x'], [1]]]);
+    // Plain text: literal metacharacters, each distinct matched substring once.
+    const [plain] = await call(owner, 'transcript.find', { sessionId: session.id, pattern: 'X' });
+    expect(plain).toMatchObject({ id: b, matches: ['x'], patternIndexes: [0] });
+
+    const withContext = await call(owner, 'transcript.find', {
+      sessionId: session.id,
+      pattern: '-one',
+      context: 1,
+    });
+    expect(withContext.map((l) => [l.id, l.context ?? false])).toEqual([
+      [b, true],
+      [c, false],
+      [d, true],
+    ]);
+    expect(withContext[0]).not.toHaveProperty('matches');
+    expect(withContext.some((l) => l.id === e)).toBe(false);
+
+    await failsWith(
+      call(owner, 'transcript.find', { sessionId: session.id, pattern: 'a', patterns: ['b'] }),
+      'bad_request',
+    );
+    await failsWith(call(owner, 'transcript.find', { sessionId: session.id }), 'bad_request');
+  });
+
   it('rejects readers, outsiders, and a batch naming a segment from another session', async () => {
     const { owner, team, show, session } = await studio();
     const [a] = await seedTranscript(session.id, ['hello there']);

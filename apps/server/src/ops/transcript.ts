@@ -1,5 +1,5 @@
-import { secondsToClock, type TranscriptLine } from '@autologger/contract';
-import { and, asc, eq, gte, ilike, inArray, lte, sql } from 'drizzle-orm';
+import { secondsToClock, type TranscriptFindLine, type TranscriptLine } from '@autologger/contract';
+import { and, asc, eq, gte, ilike, inArray, lte, or, sql } from 'drizzle-orm';
 import { requireSession } from '../core/authz.ts';
 import { changeMessage } from '../core/bus.ts';
 import { badRequest, notFound } from '../core/errors.ts';
@@ -128,33 +128,99 @@ defineOp({
   },
 });
 
+/** The non-empty substrings of a segment's text that `pattern` matches, in order (text[]). */
+function matchArray(pattern: string, regex: boolean) {
+  // `***=` makes the rest of the pattern a literal, so plain text shares the regex functions.
+  const p = regex ? pattern : `***=${pattern}`;
+  // Patterns like `x*` also match the empty string everywhere; those hits are dropped.
+  return sql`array(select m from (select regexp_substr(${ts.text}, ${p}, 1, n, 'i') as m from generate_series(1, regexp_count(${ts.text}, ${p}, 1, 'i')) as n) as hits where m <> '')`;
+}
+
+function findCondition(pattern: string, regex: boolean) {
+  return regex
+    ? sql`(${ts.text} ~* ${pattern} and cardinality(${matchArray(pattern, regex)}) > 0)`
+    : ilike(ts.text, `%${pattern.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+}
+
+function findMatches(pattern: string, regex: boolean) {
+  return sql`to_jsonb(${matchArray(pattern, regex)})`;
+}
+
+/** Segments within `context` positions (session time order) of the given ones, excluding them. */
+async function findContext(ctx: Ctx, sessionId: string, ids: string[], context: number) {
+  if (context === 0 || ids.length === 0) return [];
+  const near = await ctx.db.execute<{ id: string }>(sql`
+    with o as (
+      select ${ts.id} as id, row_number() over (order by ${ts.startSec}, ${ts.id}) as rn
+      from ${ts} where ${ts.sessionId} = ${sessionId}
+    )
+    select distinct o.id from o join o hit
+      on hit.id in (${sql.join(
+        ids.map((i) => sql`${i}`),
+        sql`, `,
+      )}) and abs(o.rn - hit.rn) <= ${context}`);
+  const hit = new Set(ids);
+  const want = near.map((r) => r.id).filter((i) => !hit.has(i));
+  if (want.length === 0) return [];
+  return ctx.db.select().from(ts).where(inArray(ts.id, want));
+}
+
 defineOp({
   name: 'transcript.find',
   description:
-    'Find transcript segments (speaker turns) in one session whose text matches `pattern`, case-insensitive. By default `pattern` is plain text (substring match); set `regex: true` to use a PostgreSQL regular expression (POSIX style, e.g. `\\mdoctor\\M` for whole words, `x ?2`). Optional fromSec/toSec (seconds from session start) narrow the range. Regex searches time out after 2 seconds (bad_request). Returns `{ id, startSec, endSec, speaker, text, edited }` per match in time order, without word timings, at most `limit` (default 500); page with fromSec if you hit the limit. Pass the ids to transcript.updateSegments to fix them.',
+    'Find transcript segments (speaker turns) in one session whose text matches `pattern`, or any of `patterns` (up to 20, OR-ed; pass exactly one of the two), case-insensitive. By default patterns are plain text (substring match); set `regex: true` to use PostgreSQL regular expressions (POSIX style, e.g. `\\mdoctor\\M` for whole words, `x ?2`). Beware: `\\m`/`\\M` treat apostrophes as word boundaries, so `\\mm\\M` also matches "I\'m". Optional fromSec/toSec (seconds from session start) narrow the range. Regex searches time out after 2 seconds (bad_request). ' +
+    'Returns `{ id, startSec, endSec, speaker, text, edited, matches, patternIndexes }` per matching line in time order, without word timings: `matches` lists the distinct matched substrings as written in the text, `patternIndexes` the 0-based indexes into `patterns` that matched (always `[0]` with `pattern`). At most `limit` matching lines (default 500); page with fromSec if you hit the limit. ' +
+    'Optional `context` (0-3, default 0) also returns up to that many neighbouring lines before and after each match (from the whole session, ignoring fromSec/toSec), flagged `context: true` and without matches or patternIndexes; use it when an error may span two segments. Pass the ids to transcript.updateSegments to fix them.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, pattern, regex, fromSec, toSec, limit }) {
+  async run(ctx, input) {
+    const { sessionId, regex, fromSec, toSec, limit, context } = input;
+    const patterns = input.patterns ?? [input.pattern ?? ''];
     await requireSession(ctx, sessionId, 'read');
-    const match = regex
-      ? sql`${ts.text} ~* ${pattern}`
-      : ilike(ts.text, `%${pattern.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
     try {
       // Bound regex cost: this op's transaction is read-only, so a local timeout is safe.
       if (regex) await ctx.db.execute(sql`set local statement_timeout = '2s'`);
       const rows = await ctx.db
-        .select()
+        .select({
+          row: ts,
+          hits: sql<string[][]>`jsonb_build_array(${sql.join(
+            patterns.map((p) => findMatches(p, regex)),
+            sql`, `,
+          )})`,
+        })
         .from(ts)
-        .where(and(rangeWhere(sessionId, fromSec, toSec), match))
-        .orderBy(asc(ts.startSec))
+        .where(
+          and(
+            rangeWhere(sessionId, fromSec, toSec),
+            or(...patterns.map((p) => findCondition(p, regex))),
+          ),
+        )
+        .orderBy(asc(ts.startSec), asc(ts.id))
         .limit(limit);
-      return rows.map(toTranscriptLine);
+      const lines: TranscriptFindLine[] = rows.map(({ row, hits }) => ({
+        ...toTranscriptLine(row),
+        matches: [...new Set(hits.flat())],
+        patternIndexes: hits.flatMap((h, i) => (h.length > 0 ? [i] : [])),
+      }));
+      const around = await findContext(
+        ctx,
+        sessionId,
+        lines.map((l) => l.id),
+        context,
+      );
+      if (around.length === 0) return lines;
+      return [
+        ...lines,
+        ...around.map((r): TranscriptFindLine => ({ ...toTranscriptLine(r), context: true })),
+      ].sort((a, b) => a.startSec - b.startSec || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     } catch (e) {
       const err = e as { code?: string; cause?: { code?: string; message?: string } };
       const code = err.code ?? err.cause?.code;
       // 2201B invalid_regular_expression
       if (code === '2201B') {
-        throw badRequest(`Invalid regular expression: ${err.cause?.message ?? pattern}`);
+        throw badRequest(
+          `Invalid regular expression: ${err.cause?.message ?? patterns.join(' | ')}`,
+        );
       }
       // 57014 query_canceled (statement_timeout)
       if (code === '57014') {
