@@ -224,6 +224,16 @@ export const opInputs = {
     from: z.string().max(80),
     to: z.string().trim().min(1).max(80),
   }),
+  // Segment structure fixes (merge / split).
+  'transcript.mergeSegments': z.object({
+    segmentIds: z.array(id).min(2).max(50),
+    speaker: z.string().trim().max(80).optional(),
+  }),
+  'transcript.splitSegment': z.object({
+    segmentId: id,
+    atWord: z.number().int().min(1).max(100000),
+    speaker: z.string().trim().max(80).optional(),
+  }),
 
   // ── topics ────────────────────────────────────────────────
   'topics.list': z.object({ sessionId: id }),
@@ -399,6 +409,8 @@ export interface OpOutputs {
   'transcript.find': TranscriptLine[];
   'transcript.updateSegments': { updated: number; segments: TranscriptLine[] };
   'transcript.renameSpeaker': { updated: number };
+  'transcript.mergeSegments': TranscriptSegment;
+  'transcript.splitSegment': TranscriptSegment[];
   'topics.list': Topic[];
   'topics.create': Topic;
   'topics.update': Topic;
