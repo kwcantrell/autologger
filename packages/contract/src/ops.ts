@@ -42,6 +42,13 @@ export const MAX_KEY_TERMS_TOTAL_CHARS = 1000;
 /** Characters a key term list spends of MAX_KEY_TERMS_TOTAL_CHARS. */
 export const keyTermsChars = (terms: string[]): number =>
   terms.reduce((n, t) => n + t.trim().length, 0);
+/** A key term list for one session or one re-transcription (same limits as the show's list). */
+const keyTermList = z
+  .array(z.string().trim().min(1).max(MAX_KEY_TERM_LENGTH))
+  .max(MAX_KEY_TERMS)
+  .refine((terms) => keyTermsChars(terms) <= MAX_KEY_TERMS_TOTAL_CHARS, {
+    message: `Key terms may total at most ${MAX_KEY_TERMS_TOTAL_CHARS} characters (Deepgram limits key terms to about 500 tokens per request).`,
+  });
 const teamRole = z.enum(['owner', 'admin', 'member']);
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 const sec = z
@@ -158,6 +165,7 @@ export const opInputs = {
     frameRate: z.number().positive().max(120).optional(),
     startTimecode: timecode.optional(),
     notes: z.string().max(10000).optional(),
+    keyTerms: keyTermList.optional(),
   }),
   'sessions.update': z.object({
     sessionId: id,
@@ -167,6 +175,7 @@ export const opInputs = {
     notes: z.string().max(10000).optional(),
     frameRate: z.number().positive().max(120).optional(),
     startTimecode: timecode.optional(),
+    keyTerms: keyTermList.optional(),
   }),
   'sessions.archive': z.object({ sessionId: id, archived: z.boolean() }),
   'sessions.delete': z.object({ sessionId: id }),
@@ -328,7 +337,11 @@ export const opInputs = {
   'media.completeUpload': z.object({ segmentId: id, durationSec: sec.optional() }),
   'media.playbackUrl': z.object({ segmentId: id }),
   'media.importYoutube': z.object({ sessionId: id, url: z.url() }),
-  'media.retranscribe': z.object({ sessionId: id, segmentId: id.optional() }),
+  'media.retranscribe': z.object({
+    sessionId: id,
+    segmentId: id.optional(),
+    keyTerms: keyTermList.optional(),
+  }),
   'media.delete': z.object({ segmentId: id }),
   'jobs.list': z
     .object({

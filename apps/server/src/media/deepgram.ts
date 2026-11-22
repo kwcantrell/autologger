@@ -10,7 +10,7 @@ import {
 
 const DEEPGRAM_LISTEN = 'https://api.deepgram.com/v1/listen';
 
-/** Per-show transcription settings (columns on `shows`). */
+/** Transcription settings: the show's, with the session's key terms ahead of the show's. */
 export interface TranscriptionOptions {
   smartFormat: boolean;
   keyTerms: string[];
@@ -22,10 +22,28 @@ export const DEFAULT_TRANSCRIPTION_OPTIONS: TranscriptionOptions = {
 };
 
 /**
- * Build the Deepgram pre-recorded URL for a show's settings. Punctuation stays on even without
- * smart formatting. Key terms use nova-3 keyterm prompting: one repeated `keyterm` parameter per
- * term (URL-encoded, so multi-word terms stay one term), trimmed, de-duplicated and capped by
- * count, per-term length and total length (Deepgram allows ~500 keyterm tokens per request).
+ * The key terms actually sent: trimmed, de-duplicated and capped by count, per-term length and
+ * total length (Deepgram allows ~500 keyterm tokens per request). Earlier terms win, so session
+ * terms listed first are kept over show terms.
+ */
+export function selectKeyTerms(keyTerms: string[]): string[] {
+  const terms = new Set<string>();
+  let budget = MAX_KEY_TERMS_TOTAL_CHARS;
+  for (const raw of keyTerms) {
+    const t = raw.trim().slice(0, MAX_KEY_TERM_LENGTH);
+    if (!t || terms.has(t)) continue;
+    // Over the token budget Deepgram rejects the whole request, so drop the rest instead.
+    if (t.length > budget || terms.size >= MAX_KEY_TERMS) break;
+    terms.add(t);
+    budget -= t.length;
+  }
+  return [...terms];
+}
+
+/**
+ * Build the Deepgram pre-recorded URL for the transcription settings. Punctuation stays on even
+ * without smart formatting. Key terms use nova-3 keyterm prompting: one repeated `keyterm`
+ * parameter per term (URL-encoded, so multi-word terms stay one term), see `selectKeyTerms`.
  */
 export function deepgramUrl(opts: TranscriptionOptions = DEFAULT_TRANSCRIPTION_OPTIONS): string {
   const q = new URLSearchParams({
@@ -35,18 +53,28 @@ export function deepgramUrl(opts: TranscriptionOptions = DEFAULT_TRANSCRIPTION_O
     utterances: 'true',
     punctuate: 'true',
   });
-  const terms = new Set<string>();
-  let budget = MAX_KEY_TERMS_TOTAL_CHARS;
-  for (const raw of opts.keyTerms) {
-    const t = raw.trim().slice(0, MAX_KEY_TERM_LENGTH);
-    if (!t || terms.has(t)) continue;
-    // Over the token budget Deepgram rejects the whole request, so drop the rest instead.
-    if (t.length > budget || terms.size >= MAX_KEY_TERMS) break;
-    terms.add(t);
-    budget -= t.length;
-  }
-  for (const t of terms) q.append('keyterm', t);
+  for (const t of selectKeyTerms(opts.keyTerms)) q.append('keyterm', t);
   return `${DEEPGRAM_LISTEN}?${q.toString()}`;
+}
+
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * How often each key term occurs in the transcript text: case-insensitive, whole words only. A
+ * term with an unexpected count (a guest's name in another guest's episode) points to key-term
+ * bleed, where the transcriber forced a term onto audio that doesn't contain it.
+ */
+export function countKeyTerms(texts: string[], terms: string[]): { term: string; count: number }[] {
+  const text = texts.join('\n');
+  return terms.map((term) => {
+    const re = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(term)}(?![\\p{L}\\p{N}])`, 'giu');
+    return { term, count: text.match(re)?.length ?? 0 };
+  });
+}
+
+/** Job-result note, e.g. "key terms: Tom Segura ×41, Olu Dara ×0". */
+export function describeKeyTermCounts(counts: { term: string; count: number }[]): string {
+  return counts.length ? `key terms: ${counts.map((c) => `${c.term} ×${c.count}`).join(', ')}` : '';
 }
 
 export interface DeepgramWord {

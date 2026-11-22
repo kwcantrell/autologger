@@ -1,8 +1,10 @@
 import { keyTermsChars, MAX_KEY_TERMS_TOTAL_CHARS, opInputs } from '@autologger/contract';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  countKeyTerms,
   type DeepgramResponse,
   deepgramUrl,
+  describeKeyTermCounts,
   mapDeepgram,
   PermanentError,
   transcribeAudio,
@@ -171,6 +173,25 @@ describe('deepgramUrl', () => {
     const sent = params(deepgramUrl({ smartFormat: true, keyTerms: terms })).getAll('keyterm');
     expect(sent).toEqual(terms.slice(0, 25));
     expect(keyTermsChars(sent)).toBeLessThanOrEqual(MAX_KEY_TERMS_TOTAL_CHARS);
+  });
+});
+
+describe('key term hit counts', () => {
+  it('counts whole-word, case-insensitive occurrences of each term', () => {
+    const counts = countKeyTerms(
+      ['Tom Segura is here. tom segura!', 'Rotten Tom Segura', 'Seguras', "O'Leary and Olu Dara"],
+      ['Tom Segura', "O'Leary", 'Akinyele', 'a+b'],
+    );
+    expect(counts).toEqual([
+      { term: 'Tom Segura', count: 3 },
+      { term: "O'Leary", count: 1 },
+      { term: 'Akinyele', count: 0 },
+      { term: 'a+b', count: 0 },
+    ]);
+    expect(describeKeyTermCounts(counts)).toBe(
+      "key terms: Tom Segura ×3, O'Leary ×1, Akinyele ×0, a+b ×0",
+    );
+    expect(describeKeyTermCounts([])).toBe('');
   });
 });
 
