@@ -14,7 +14,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.0.1';
 
 const USAGE = `autologger-import ${VERSION} — import YouTube videos into AutoLogger from your computer
 
@@ -399,11 +399,17 @@ async function videoInfo(ctx, url) {
 
 /** @param {string} stdout @returns {Record<string, unknown>} */
 function parseLastJson(stdout) {
-  try {
-    return JSON.parse(stdout.trim().split('\n').at(-1) ?? '{}');
-  } catch {
-    return {};
+  // With --progress, yt-dlp writes progress to stdout too, separated by \r and sometimes on the
+  // same line as the JSON, so take the last {...} line.
+  const lines = stdout.split(/[\r\n]+/).filter((l) => l.trimStart().startsWith('{'));
+  for (const line of lines.reverse()) {
+    try {
+      return JSON.parse(line.trim());
+    } catch {
+      /* not the metadata line */
+    }
   }
+  return {};
 }
 
 /**

@@ -39,7 +39,8 @@ if (args.includes('--download-sections')) {
   process.exit(0);
 }
 if (args.includes('--no-simulate')) fs.writeFileSync(out.replace('%(ext)s', 'm4a'), 'x'.repeat(5000));
-console.log(JSON.stringify(info));
+// Like real yt-dlp, --progress output follows the JSON on stdout, joined by \\r.
+process.stdout.write(JSON.stringify(info) + (args.includes('--progress') ? '\\r[download] 100% of 5.00KiB\\n' : '\\n'));
 `;
 
 const FAKE_FFMPEG = `#!/usr/bin/env node
