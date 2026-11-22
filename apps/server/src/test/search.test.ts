@@ -1,5 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { call, resetDb, setupDb, studio } from './harness.ts';
+import { newId } from '../core/ids.ts';
+import { db, schema } from '../db/client.ts';
+import { call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
 
 beforeAll(setupDb);
 beforeEach(resetDb);
@@ -54,5 +56,41 @@ describe('search', () => {
       Math.abs(Date.parse(sessionHit!.sessionDate!) - Date.parse(session.createdAt)),
     ).toBeLessThan(1000);
     expect(wikiHit?.sessionDate).toBeNull();
+  });
+
+  it('gives transcript lines and topics an end, not events', async () => {
+    const { owner, show, session } = await studio();
+    await db.insert(schema.transcriptSegments).values({
+      id: newId('seg'),
+      sessionId: session.id,
+      startSec: 12.5,
+      endSec: 17,
+      text: 'the bombing story',
+      words: [],
+    });
+    await call(owner, 'topics.create', {
+      sessionId: session.id,
+      startSec: 60,
+      durationSec: 90,
+      title: 'Bombing on stage',
+    });
+    await call(owner, 'topics.create', { sessionId: session.id, startSec: 300, title: 'Bombing' });
+    await call(owner, 'events.create', {
+      sessionId: session.id,
+      category: 'Note',
+      message: 'bombing',
+    });
+
+    const hits = await call(owner, 'search', { query: 'bombing', showId: show.id });
+    const ends = hits.map((h) => `${h.kind} ${h.kind === 'event' ? '' : h.atSec} ${h.endSec}`);
+    expect(ends.sort()).toEqual([
+      'event  null',
+      'topic 300 null',
+      'topic 60 150',
+      'transcript 12.5 17',
+    ]);
+
+    const outsider = await makeUser('outsider@example.com');
+    await failsWith(call(outsider, 'search', { query: 'bombing', showId: show.id }), 'not_found');
   });
 });
