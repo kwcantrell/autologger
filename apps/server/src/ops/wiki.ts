@@ -1,13 +1,15 @@
 import {
   normTitle,
+  type WikiCitation,
   type WikiLint,
   type WikiList,
+  type WikiListItem,
   type WikiPage,
   type WikiPageSummary,
   wikiCitations,
   wikiLinkTargets,
 } from '@autologger/contract';
-import { and, asc, desc, eq, inArray, isNull, ne, type SQL, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, ne, or, type SQL, sql } from 'drizzle-orm';
 import { requireSession, requireShow } from '../core/authz.ts';
 import { badRequest, conflict, notFound } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
@@ -15,7 +17,13 @@ import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { type Db, schema } from '../db/client.ts';
 import { iso, userRefs } from './map.ts';
 
-const { wikiPages: pages, wikiRevisions: revisions, wikiLinks: links, sessions } = schema;
+const {
+  wikiPages: pages,
+  wikiRevisions: revisions,
+  wikiLinks: links,
+  wikiCitations: citations,
+  sessions,
+} = schema;
 type PageRow = typeof pages.$inferSelect;
 
 /** Deleted pages are kept (with their revisions) for undo, but are invisible everywhere else. */
@@ -58,8 +66,9 @@ export async function wikiNames(db: Ctx['db'], showId: string): Promise<Map<stri
 }
 
 /**
- * Re-index a page's [[links]] from its body. Every write of `bodyMd` calls this (upsert, patch,
- * restore, undo); a soft delete keeps the rows, which readers skip by joining live pages.
+ * Re-index a page's [[links]] and session citations from its body. Every write of `bodyMd` calls
+ * this (upsert, patch, restore, undo); a soft delete keeps the rows, which readers skip by joining
+ * live pages.
  */
 export async function indexWikiLinks(db: Ctx['db'], pageId: string, bodyMd: string) {
   await db.delete(links).where(eq(links.fromPageId, pageId));
@@ -73,14 +82,28 @@ export async function indexWikiLinks(db: Ctx['db'], pageId: string, bodyMd: stri
         ord: i + 1,
       })),
     );
+  await db.delete(citations).where(eq(citations.fromPageId, pageId));
+  const cites = wikiCitations(bodyMd);
+  if (cites.length)
+    await db.insert(citations).values(
+      cites.map((c, i) => ({
+        fromPageId: pageId,
+        ord: i + 1,
+        sessionId: c.sessionId,
+        startSec: c.startSec,
+        endSec: c.endSec ?? null,
+        label: c.label,
+      })),
+    );
 }
 
 /**
- * Index the links of pages written before the link index existed: pages (live or deleted) with no
- * wiki_links rows whose body contains `[[`. Runs at API startup; idempotent, and one query when
- * nothing is pending. Uses the shared JS parser so the index matches what the ops write (a SQL
- * regex port would differ on Unicode whitespace and case). Pages whose `[[` yields no link (e.g.
- * only inside code) stay without rows and are re-read on each run, which is harmless.
+ * Index the links and citations of pages written before those indexes existed: pages (live or
+ * deleted) whose body contains `[[` but that have no wiki_links rows, or contains `/sessions/` but
+ * have no wiki_citations rows. Runs at API startup; idempotent, and one query when nothing is
+ * pending. Uses the shared JS parsers so the index matches what the ops write (a SQL regex port
+ * would differ on Unicode whitespace and case). Pages whose markers yield nothing (e.g. only
+ * inside code) stay without rows and are re-read on each run, which is harmless.
  * Returns how many pages got rows.
  */
 export async function backfillWikiLinks(db: Db, batchSize = 200): Promise<number> {
@@ -95,8 +118,10 @@ export async function backfillWikiLinks(db: Db, batchSize = 200): Promise<number
         .where(
           and(
             sql`${pages.id} > ${after}`,
-            sql`${pages.bodyMd} like '%[[%'`,
-            sql`not exists (select 1 from ${links} where ${links.fromPageId} = ${pages.id})`,
+            or(
+              sql`${pages.bodyMd} like '%[[%' and not exists (select 1 from ${links} where ${links.fromPageId} = ${pages.id})`,
+              sql`${pages.bodyMd} like '%/sessions/%' and not exists (select 1 from ${citations} where ${citations.fromPageId} = ${pages.id})`,
+            ),
           ),
         )
         .orderBy(asc(pages.id))
@@ -104,7 +129,7 @@ export async function backfillWikiLinks(db: Db, batchSize = 200): Promise<number
         .for('update');
       for (const r of rows) {
         await indexWikiLinks(tx, r.id, r.bodyMd);
-        if (wikiLinkTargets(r.bodyMd).length) indexed++;
+        if (wikiLinkTargets(r.bodyMd).length || wikiCitations(r.bodyMd).length) indexed++;
       }
       return rows;
     });
@@ -227,10 +252,14 @@ async function findByTitle(ctx: Ctx, showId: string, title: string): Promise<Pag
 defineOp({
   name: 'wiki.list',
   description:
-    'Wiki pages of a show (people, topics, recurring bits, session recaps, answered questions), sorted by kind then title, as { pages, total, nextOffset }. Paged: limit (default 50, max 200) and offset; when nextOffset is not null, call again with offset = nextOffset for the rest. Metadata only by default. Bulk read: include "summary" adds each page\'s first paragraph (headings skipped, max 400 chars); include "body" adds the full bodyMd of every page, which is large (pages run to several KB each) — narrow it with kind (e.g. kind "session" for all recaps, kind "question" for questions already answered — check these before answering a question again) and a smaller limit. linksTo (a pageId of this show, from wiki_list / wiki_get) keeps only the pages whose [[links]] point to that page: its full backlinks list, of which wiki_get returns only the first 50 (backlinkCount has the total).',
+    'Wiki pages of a show (people, topics, recurring bits, session recaps, answered questions), sorted by kind then title, as { pages, total, nextOffset }. Paged: limit (default 50, max 200) and offset; when nextOffset is not null, call again with offset = nextOffset for the rest. Metadata only by default. Bulk read: include "summary" adds each page\'s first paragraph (headings skipped, max 400 chars); include "body" adds the full bodyMd of every page, which is large (pages run to several KB each) — narrow it with kind (e.g. kind "session" for all recaps, kind "question" for questions already answered — check these before answering a question again) and a smaller limit. linksTo (a pageId of this show, from wiki_list / wiki_get) keeps only the pages whose [[links]] point to that page: its full backlinks list, of which wiki_get returns only the first 50 (backlinkCount has the total). ' +
+    'citesSession (a sessionId of this show, from sessions_list) keeps only the pages that cite that session ([label](/sessions/<sessionId>?t=…) links, any page kind) and adds to each page `citations`: [{ startSec, endSec?, label }] — the cited ranges of that session in seconds from its start, in body order. Use it to find what the wiki already says about a session (e.g. question pages answered from it) before answering again or rewriting its recap.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { showId, kind, include, linksTo, limit = 50, offset = 0 }): Promise<WikiList> {
+  async run(
+    ctx,
+    { showId, kind, include, linksTo, citesSession, limit = 50, offset = 0 },
+  ): Promise<WikiList> {
     await requireShow(ctx, showId, 'read');
     let linking: SQL | undefined;
     if (linksTo) {
@@ -239,11 +268,24 @@ defineOp({
       linking = await linkingTo(ctx, target);
       if (!linking) return { pages: [], total: 0, nextOffset: null };
     }
+    if (citesSession) {
+      const { session } = await requireSession(ctx, citesSession, 'read');
+      if (session.showId !== showId) throw badRequest('citesSession is a session of another show.');
+    }
     const where = and(
       live,
       eq(pages.showId, showId),
       kind ? eq(pages.kind, kind) : undefined,
       linking,
+      citesSession
+        ? inArray(
+            pages.id,
+            ctx.db
+              .select({ id: citations.fromPageId })
+              .from(citations)
+              .where(eq(citations.sessionId, citesSession)),
+          )
+        : undefined,
     );
     const [{ total } = { total: 0 }] = await ctx.db
       .select({ total: sql<number>`count(*)::int` })
@@ -256,7 +298,32 @@ defineOp({
       .orderBy(asc(pages.kind), asc(pages.title), asc(pages.id))
       .limit(limit)
       .offset(offset);
-    const list = await summaries(ctx, rows);
+    let list: WikiListItem[] = await summaries(ctx, rows);
+    if (citesSession && rows.length) {
+      const ranges = new Map<string, NonNullable<WikiListItem['citations']>>();
+      for (const c of await ctx.db
+        .select()
+        .from(citations)
+        .where(
+          and(
+            eq(citations.sessionId, citesSession),
+            inArray(
+              citations.fromPageId,
+              rows.map((r) => r.id),
+            ),
+          ),
+        )
+        .orderBy(asc(citations.fromPageId), asc(citations.ord))) {
+        const of = ranges.get(c.fromPageId) ?? [];
+        of.push({
+          startSec: c.startSec,
+          ...(c.endSec != null ? { endSec: c.endSec } : {}),
+          label: c.label,
+        });
+        ranges.set(c.fromPageId, of);
+      }
+      list = list.map((p) => ({ ...p, citations: ranges.get(p.id) ?? [] }));
+    }
     const nextOffset = offset + rows.length < total ? offset + rows.length : null;
     if (include === 'body')
       return {
@@ -281,18 +348,35 @@ const AUDIO_END_SLACK_SEC = 1;
  * Check every citation of a show's live pages against its sessions: the session must be in this
  * show (another show's session counts as unknown, revealing nothing about it), `to` must be after
  * `t`, and the range must end within the session's audio (sessions without measured audio are not
- * range-checked). Bodies are parsed here; only pages that mention `/sessions/` are read.
+ * range-checked). Reads the citation index; no bodies are parsed.
  */
 async function lintCitations(
   ctx: Ctx,
   showId: string,
 ): Promise<{ count: number; bad: WikiLint['badCitations'] }> {
-  const rows = await ctx.db
-    .select({ id: pages.id, title: pages.title, kind: pages.kind, bodyMd: pages.bodyMd })
-    .from(pages)
-    .where(and(live, eq(pages.showId, showId), sql`${pages.bodyMd} like '%/sessions/%'`))
-    .orderBy(asc(pages.kind), asc(pages.title));
-  const cited = rows.map((r) => ({ ...r, cites: wikiCitations(r.bodyMd) }));
+  const cited: { id: string; title: string; kind: PageRow['kind']; cites: WikiCitation[] }[] = [];
+  for (const c of await ctx.db
+    .select({
+      id: pages.id,
+      title: pages.title,
+      kind: pages.kind,
+      sessionId: citations.sessionId,
+      startSec: citations.startSec,
+      endSec: citations.endSec,
+      label: citations.label,
+    })
+    .from(citations)
+    .innerJoin(pages, eq(pages.id, citations.fromPageId))
+    .where(and(live, eq(pages.showId, showId)))
+    .orderBy(asc(pages.kind), asc(pages.title), asc(pages.id), asc(citations.ord))) {
+    const { id, title, kind, endSec, ...rest } = c;
+    let page = cited[cited.length - 1];
+    if (page?.id !== id) {
+      page = { id, title, kind, cites: [] };
+      cited.push(page);
+    }
+    page.cites.push({ ...rest, ...(endSec != null ? { endSec } : {}) });
+  }
   const ids = [...new Set(cited.flatMap((r) => r.cites.map((c) => c.sessionId)))];
   const audioEnd = new Map<string, number | null>();
   if (ids.length)

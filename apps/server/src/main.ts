@@ -14,9 +14,9 @@ import './ws/companion.ts';
 import './mcp/index.ts';
 
 await runMigrations();
-// Index [[links]] of wiki pages saved before the link index existed (one query when none are).
+// Index [[links]] and citations of wiki pages saved before those indexes existed (one query when none are).
 const wikiIndexed = await backfillWikiLinks(db);
-console.log(`wiki link index: backfilled ${wikiIndexed} pages`);
+console.log(`wiki link/citation index: backfilled ${wikiIndexed} pages`);
 await loadOps();
 await listenForRemote();
 

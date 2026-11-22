@@ -532,4 +532,86 @@ describe('question pages and citations', () => {
     await call(owner, 'changes.revert', { changeId: created!.id });
     expect((await call(owner, 'wiki.lint', { showId: show.id })).counts.citations).toBe(0);
   });
+
+  it('lists the pages citing a session, kept in step with every write, undo and the backfill', async () => {
+    const { owner, team, show, session } = await studio();
+    const other = await call(owner, 'sessions.create', { showId: show.id });
+    const cite = (id: string, q: string) => `[x](/sessions/${id}?${q})`;
+    const citing = async () =>
+      (await call(owner, 'wiki.list', { showId: show.id, citesSession: session.id })).pages.map(
+        (p) => [p.title, p.citations],
+      );
+    const q = await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'question',
+      title: 'Q',
+      bodyMd: `${cite(session.id, 't=10&to=20')} ${cite(other.id, 't=1')} ${cite(session.id, 't=30')}`,
+    });
+    const recap = await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'session',
+      title: 'Recap',
+      sessionId: other.id,
+      bodyMd: `Only ${cite(other.id, 't=5')}`,
+    });
+    expect(await citing()).toEqual([
+      [
+        'Q',
+        [
+          { startSec: 10, endSec: 20, label: 'x' },
+          { startSec: 30, label: 'x' },
+        ],
+      ],
+    ]);
+
+    // patch adds a citing page; delete hides one; undo brings it back.
+    await call(owner, 'wiki.patch', { pageId: recap.id, append: cite(session.id, 't=42&to=50') });
+    expect((await citing()).map(([t]) => t)).toEqual(['Q', 'Recap']);
+    await call(owner, 'wiki.patch', {
+      pageId: q.id,
+      edits: [{ find: `${cite(session.id, 't=30')}`, replace: 'gone' }],
+    });
+    expect((await citing()).find(([t]) => t === 'Q')?.[1]).toEqual([
+      { startSec: 10, endSec: 20, label: 'x' },
+    ]);
+    await call(owner, 'wiki.delete', { pageId: q.id });
+    expect((await citing()).map(([t]) => t)).toEqual(['Recap']);
+    const [del, patch] = await call(owner, 'changes.list', { showId: show.id });
+    await call(owner, 'changes.revert', { changeId: del!.id });
+    // Undoing the patch of Q restores its second citation.
+    await call(owner, 'changes.revert', { changeId: patch!.id });
+    const before = await citing();
+    expect(before).toEqual([
+      [
+        'Q',
+        [
+          { startSec: 10, endSec: 20, label: 'x' },
+          { startSec: 30, label: 'x' },
+        ],
+      ],
+      ['Recap', [{ startSec: 42, endSec: 50, label: 'x' }]],
+    ]);
+
+    // Pages saved before the index: the backfill rebuilds it, and a rerun is a no-op.
+    await db.delete(schema.wikiCitations);
+    expect(await citing()).toEqual([]);
+    expect(await backfillWikiLinks(db)).toBe(2);
+    expect(await backfillWikiLinks(db)).toBe(0);
+    expect(await citing()).toEqual(before);
+    expect((await call(owner, 'wiki.lint', { showId: show.id })).counts.citations).toBe(5);
+
+    // Another show's session is refused; a stranger cannot read the show or the session.
+    const elsewhere = await call(owner, 'sessions.create', {
+      showId: (await call(owner, 'shows.create', { teamId: team.id, name: 'Other' })).id,
+    });
+    await failsWith(
+      call(owner, 'wiki.list', { showId: show.id, citesSession: elsewhere.id }),
+      'bad_request',
+    );
+    const stranger = await makeUser('stranger@example.com');
+    await failsWith(
+      call(stranger, 'wiki.list', { showId: show.id, citesSession: session.id }),
+      'not_found',
+    );
+  });
 });

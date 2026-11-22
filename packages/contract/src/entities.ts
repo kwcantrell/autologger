@@ -307,6 +307,8 @@ export interface WikiListItem extends WikiPageSummary {
   /** First paragraph of the body (headings skipped), at most 400 characters. */
   summary?: string;
   bodyMd?: string;
+  /** With `citesSession`: this page's citations of that session, in body order. */
+  citations?: Omit<WikiCitation, 'sessionId'>[];
 }
 
 /** A page of wiki.list. `nextOffset` is null on the last page. */
