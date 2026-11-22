@@ -1,8 +1,13 @@
-import { type DashboardQuery, type DashboardRows, DashboardSpec } from '@autologger/contract';
+import {
+  type DashboardQuery,
+  type DashboardRows,
+  type DashboardSpec,
+  Widget,
+} from '@autologger/contract';
 import { and, asc, desc, eq, lte, sql } from 'drizzle-orm';
 import { requireSession } from '../core/authz.ts';
 import { changeMessage } from '../core/bus.ts';
-import { badRequest, notFound } from '../core/errors.ts';
+import { AppError, badRequest, notFound } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
@@ -19,6 +24,15 @@ async function loadDashboard(ctx: Ctx, id: string, need: 'read' | 'write') {
   if (!row) throw notFound('Dashboard');
   const { session } = await requireSession(ctx, row.sessionId, need);
   return { row, session };
+}
+
+/** JSON with object keys sorted, to compare widgets regardless of key order. */
+function stableJson(v: unknown): string {
+  return JSON.stringify(v, (_k, x) =>
+    x && typeof x === 'object' && !Array.isArray(x)
+      ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b)))
+      : x,
+  );
 }
 
 /** Replace a stored dashboard's spec as a new revision, recorded for undo. */
@@ -248,9 +262,9 @@ defineOp({
 patches: { id (an existing widget id, from dashboards_get), ...fields to set }. Fields you give replace the
 stored ones (a query or data replaces the whole query/data), fields you omit stay, and null removes an optional
 field (e.g. labelMaxChars: null). Example: { dashboardId, widgets: [{ id: "talk", title: "Talk time", format: "minutes" }] }.
-The merged spec is validated like dashboards_save (bad_request with the path, e.g. widgets[3].x); an unknown widget id
-fails with nothing changed. Widget order, adding and removing widgets need dashboards_save. Saved as one new
-revision, undoable from the change log. Returns the dashboard; compact: true returns only { id, revision }.`,
+Each patched widget is validated like dashboards_save (bad_request with the path, e.g. widgets[3].x); an unknown widget
+id fails with nothing changed. type cannot be patched; changing type, order, adding and removing widgets need
+dashboards_save. Saved as one new revision, undoable from the change log; a patch that changes nothing saves nothing. Returns the dashboard; compact: true returns only { id, revision }.`,
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { dashboardId, widgets: patches, compact }) {
@@ -258,13 +272,21 @@ revision, undoable from the change log. Returns the dashboard; compact: true ret
     const stored = prev.spec as DashboardSpec;
     const byId = new Map(patches.map((p) => [p.id, p]));
     if (byId.size !== patches.length) throw badRequest('Each widget id may appear only once.');
+    if (patches.some((p) => 'type' in p))
+      throw badRequest(
+        'A widget patch cannot change type; replace the widget with dashboards_save.',
+      );
     const known = new Set(stored.widgets.map((w) => w.id));
     const unknown = [...byId.keys()].filter((id) => !known.has(id));
     if (unknown.length)
       throw badRequest(
         `No widget with id ${unknown.join(', ')} on this dashboard (ids: ${[...known].join(', ')}).`,
       );
-    const widgets = stored.widgets.map((w) => {
+    // Only patched widgets are validated; untouched ones stay exactly as stored, so an older
+    // widget the schema no longer accepts never blocks a patch to another one.
+    const issues: { path: string; message: string }[] = [];
+    let changed = false;
+    const widgets = stored.widgets.map((w, i) => {
       const patch = byId.get(w.id);
       if (!patch) return w;
       const merged: Record<string, unknown> = { ...w };
@@ -272,9 +294,24 @@ revision, undoable from the change log. Returns the dashboard; compact: true ret
         if (v === null) delete merged[k];
         else merged[k] = v;
       }
-      return merged;
+      const r = Widget.safeParse(merged);
+      if (!r.success) {
+        for (const issue of r.error.issues)
+          issues.push({
+            path: [`widgets[${i}]`, ...issue.path.map(String)].join('.'),
+            message: issue.message,
+          });
+        return w;
+      }
+      if (stableJson(r.data) !== stableJson(w)) changed = true;
+      return r.data;
     });
-    const spec = DashboardSpec.parse({ ...stored, widgets });
+    if (issues.length) throw new AppError('bad_request', 'Invalid widget patch.', issues);
+    if (!changed) {
+      const out = await entity(ctx, prev);
+      return compact ? { id: out.id, revision: out.revision } : out;
+    }
+    const spec = { ...stored, widgets };
     const row = await updateSpec(ctx, prev, session, spec);
     const out = await entity(ctx, row);
     ctx.publish(`session:${session.id}`, changeMessage('dashboard', 'upsert', out.id, out));

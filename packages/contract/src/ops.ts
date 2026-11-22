@@ -511,7 +511,8 @@ export interface OpOutputs {
   'wiki.list': WikiPageSummary[];
   'wiki.get': WikiPage;
   'wiki.upsert': WikiPage;
-  'wiki.patch': WikiPageSummary;
+  // The page summary (WikiPageSummary), spelled via WikiPage so it doesn't depend on that import.
+  'wiki.patch': Omit<WikiPage, 'bodyMd' | 'backlinks'>;
   'wiki.delete': { deleted: true };
   'wiki.revisions': WikiRevision[];
   'wiki.restore': WikiPage;
