@@ -1,4 +1,4 @@
-import type { WikiPage, WikiPageSummary } from '@autologger/contract';
+import type { WikiLint, WikiListItem, WikiPage, WikiPageSummary } from '@autologger/contract';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { requireSession, requireShow } from '../core/authz.ts';
 import { badRequest, conflict, notFound } from '../core/errors.ts';
@@ -31,6 +31,32 @@ async function summaries(ctx: Ctx, rows: PageRow[]): Promise<WikiPageSummary[]> 
     updatedAt: r.updatedAt.toISOString(),
     updatedBy: r.updatedBy ? (users.get(r.updatedBy) ?? null) : null,
   }));
+}
+
+// Same syntax the web renderer links: [[Title]] and [[Title|label]].
+const WIKI_LINK = /\[\[([^[\]|\n]+?)(?:\|([^[\]\n]+?))?\]\]/g;
+
+/** Distinct link targets of a body, as written (trimmed), in order of first appearance. */
+function linkTargets(bodyMd: string): string[] {
+  const seen = new Map<string, string>();
+  for (const m of bodyMd.matchAll(WIKI_LINK)) {
+    const t = (m[1] ?? '').trim();
+    if (t && !seen.has(normTitle(t))) seen.set(normTitle(t), t);
+  }
+  return [...seen.values()];
+}
+
+/** First paragraph of a body, skipping headings, capped at 400 characters. */
+function firstParagraph(bodyMd: string): string {
+  for (const block of bodyMd.split(/\n\s*\n/)) {
+    const text = block
+      .split('\n')
+      .filter((l) => !/^\s*#/.test(l))
+      .join(' ')
+      .trim();
+    if (text) return text.length > 400 ? `${text.slice(0, 399)}…` : text;
+  }
+  return '';
 }
 
 async function fullPage(ctx: Ctx, row: PageRow): Promise<WikiPage> {
@@ -99,24 +125,81 @@ async function findByTitle(ctx: Ctx, showId: string, title: string): Promise<Pag
 
 defineOp({
   name: 'wiki.list',
-  description: 'Wiki pages of a show (people, topics, recurring bits, session recaps).',
+  description:
+    'Wiki pages of a show (people, topics, recurring bits, session recaps), sorted by kind then title. Metadata only by default. Bulk read: include "summary" adds each page\'s first paragraph (headings skipped, max 400 chars); include "body" adds the full bodyMd of every page — narrow it with kind (e.g. kind "session" for all recaps) to keep the response small. Backlinks are only in wiki_get.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { showId, kind }) {
+  async run(ctx, { showId, kind, include }): Promise<WikiListItem[]> {
     await requireShow(ctx, showId, 'read');
     const rows = await ctx.db
       .select()
       .from(pages)
       .where(and(live, eq(pages.showId, showId), kind ? eq(pages.kind, kind) : undefined))
       .orderBy(asc(pages.kind), asc(pages.title));
-    return summaries(ctx, rows);
+    const list = await summaries(ctx, rows);
+    if (include === 'body') return list.map((p, i) => ({ ...p, bodyMd: rows[i]!.bodyMd }));
+    if (include === 'summary')
+      return list.map((p, i) => ({ ...p, summary: firstParagraph(rows[i]!.bodyMd) }));
+    return list;
+  },
+});
+
+defineOp({
+  name: 'wiki.lint',
+  description:
+    'Check the links of a whole show wiki in one call. unresolved: pages with [[Target]] / [[Target|label]] links that match no page title or alias (case-insensitive), with the missing targets as written — create those pages with wiki_upsert or fix the links. orphans: pages no other page links to. counts: pages, distinct links, unresolved links, orphans. Read-only.',
+  kind: 'read',
+  surfaces: ['web', 'mcp'],
+  async run(ctx, { showId }): Promise<WikiLint> {
+    await requireShow(ctx, showId, 'read');
+    const rows = await ctx.db
+      .select({
+        id: pages.id,
+        title: pages.title,
+        kind: pages.kind,
+        aliases: pages.aliases,
+        bodyMd: pages.bodyMd,
+      })
+      .from(pages)
+      .where(and(live, eq(pages.showId, showId)))
+      .orderBy(asc(pages.kind), asc(pages.title));
+    // Every title and alias → the page it names.
+    const byName = new Map<string, string>();
+    for (const r of rows)
+      for (const n of [r.title, ...r.aliases])
+        if (!byName.has(normTitle(n))) byName.set(normTitle(n), r.id);
+    const linked = new Set<string>();
+    const unresolved: WikiLint['unresolved'] = [];
+    let links = 0;
+    let unresolvedLinks = 0;
+    for (const r of rows) {
+      const missing: string[] = [];
+      for (const t of linkTargets(r.bodyMd)) {
+        links++;
+        const target = byName.get(normTitle(t));
+        if (!target) missing.push(t);
+        else if (target !== r.id) linked.add(target);
+      }
+      if (missing.length) {
+        unresolvedLinks += missing.length;
+        unresolved.push({ pageId: r.id, title: r.title, kind: r.kind, targets: missing });
+      }
+    }
+    const orphans = rows
+      .filter((r) => !linked.has(r.id))
+      .map((r) => ({ pageId: r.id, title: r.title, kind: r.kind }));
+    return {
+      unresolved,
+      orphans,
+      counts: { pages: rows.length, links, unresolvedLinks, orphans: orphans.length },
+    };
   },
 });
 
 defineOp({
   name: 'wiki.get',
   description:
-    'Read a wiki page by pageId, or by showId + title (aliases match too). Includes backlinks.',
+    'Read a wiki page by pageId, or by showId + title (aliases match too). Includes backlinks. To read many pages in one call use wiki_list with include "summary" or "body".',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { pageId, showId, title }) {
@@ -132,7 +215,7 @@ defineOp({
 defineOp({
   name: 'wiki.upsert',
   description:
-    'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated (keeping its title), otherwise a new one is created; pass pageId to rename. Body is Markdown; link other pages with [[Title]]. Kind "session" pages are recaps tied to sessionId. Every save keeps a revision.',
+    'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated (keeping its title), otherwise a new one is created; pass pageId to rename. bodyMd is raw Markdown text, stored exactly as sent: write real newlines and quotes, not JSON escapes like \\n or \\" inside the text. Link other pages with [[Title]] or [[Title|label]]; wiki_lint finds links to missing pages. Kind "session" pages are recaps tied to sessionId. Every save keeps a revision.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {

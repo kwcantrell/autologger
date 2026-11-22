@@ -25,8 +25,9 @@ import type {
   TranscriptLine,
   TranscriptReplaceResult,
   TranscriptSegment,
+  WikiLint,
+  WikiListItem,
   WikiPage,
-  WikiPageSummary,
   WikiRevision,
 } from './entities.ts';
 import { MAX_TRANSCRIPT_RULES, TranscriptRuleInput } from './transcriptRules.ts';
@@ -291,6 +292,7 @@ export const opInputs = {
   'wiki.list': z.object({
     showId: id,
     kind: z.enum(['person', 'topic', 'bit', 'session']).optional(),
+    include: z.enum(['summary', 'body']).optional(),
   }),
   'wiki.get': z.object({
     pageId: id.optional(),
@@ -309,6 +311,7 @@ export const opInputs = {
   'wiki.delete': z.object({ pageId: id }),
   'wiki.revisions': z.object({ pageId: id }),
   'wiki.restore': z.object({ pageId: id, revision: z.number().int().min(1) }),
+  'wiki.lint': z.object({ showId: id }),
 
   // ── media ─────────────────────────────────────────────────
   'media.list': z.object({ sessionId: id }),
@@ -474,12 +477,13 @@ export interface OpOutputs {
   'dashboards.save': Dashboard | CompactDashboard;
   'dashboards.delete': { deleted: true };
   'dashboards.query': DashboardRows;
-  'wiki.list': WikiPageSummary[];
+  'wiki.list': WikiListItem[];
   'wiki.get': WikiPage;
   'wiki.upsert': WikiPage;
   'wiki.delete': { deleted: true };
   'wiki.revisions': WikiRevision[];
   'wiki.restore': WikiPage;
+  'wiki.lint': WikiLint;
   'media.list': AudioSegment[];
   'media.createUpload': {
     segment: AudioSegment;

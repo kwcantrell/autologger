@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { asAgent, call, failsWith, resetDb, setupDb, studio } from './harness.ts';
+import { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
 
 beforeAll(setupDb);
 beforeEach(resetDb);
@@ -89,5 +89,44 @@ describe('wiki delete keeps history', () => {
     await call(owner, 'changes.revert', { changeId: undo.id });
     expect((await call(owner, 'wiki.get', { pageId: page.id })).bodyMd).toBe('Draft.');
     expect(await call(owner, 'wiki.revisions', { pageId: page.id })).toHaveLength(1);
+  });
+});
+
+describe('wiki lint and bulk read', () => {
+  it('finds unresolved links and orphans, and lists pages with summaries or bodies', async () => {
+    const { owner, show } = await pageWithHistory();
+    await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'topic',
+      title: 'Guide',
+      bodyMd:
+        '# Guide\n\nHosted by [[dana]], see [[Cold open|the opener]].\n\nAlso [[Missing]] and [[Missing]].',
+    });
+
+    const lint = await call(owner, 'wiki.lint', { showId: show.id });
+    expect(lint.unresolved).toEqual([
+      expect.objectContaining({ title: 'Guide', targets: ['Missing'] }),
+    ]);
+    expect(lint.orphans.map((o) => o.title)).toEqual(['Guide']);
+    expect(lint.counts).toEqual({ pages: 3, links: 4, unresolvedLinks: 1, orphans: 1 });
+
+    const summaries = await call(owner, 'wiki.list', { showId: show.id, include: 'summary' });
+    expect(summaries.find((p) => p.title === 'Guide')).toMatchObject({
+      summary: 'Hosted by [[dana]], see [[Cold open|the opener]].',
+    });
+    expect(summaries[0]).not.toHaveProperty('bodyMd');
+    const bodies = await call(owner, 'wiki.list', {
+      showId: show.id,
+      kind: 'person',
+      include: 'body',
+    });
+    expect(bodies).toEqual([
+      expect.objectContaining({ title: 'Dana', bodyMd: 'Host of the show.' }),
+    ]);
+    expect((await call(owner, 'wiki.list', { showId: show.id }))[0]).not.toHaveProperty('bodyMd');
+
+    const stranger = await makeUser('stranger@example.com');
+    await failsWith(call(stranger, 'wiki.lint', { showId: show.id }), 'not_found');
+    await failsWith(call(stranger, 'wiki.list', { showId: show.id, include: 'body' }), 'not_found');
   });
 });
