@@ -1,9 +1,9 @@
 // Agents tab: how to connect an MCP agent, and the session's change log with undo.
 
-import type { Change, Session, Via } from '@autologger/contract';
+import type { Change, Session } from '@autologger/contract';
 import type { QueryKey } from '@tanstack/react-query';
-import { Copy, Undo2 } from 'lucide-react';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { Copy } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   qk,
   useCapabilities,
@@ -16,20 +16,8 @@ import { errorMessage } from '@/api/rpc';
 import { settingsOpen } from '@/lib/store';
 import { eventSec } from '@/lib/timecode';
 import { useWorkspace } from '@/session/context';
-import {
-  type Column,
-  FEED_CELL,
-  FEED_CELL_TEXT,
-  FEED_ROW,
-  FeedShell,
-  FeedTable,
-  IconFilter,
-  JUMP_COLUMN,
-  JumpButton,
-  ToolbarCaption,
-} from '@/session/feed';
+import { FeedShell, FeedTable, IconFilter, ToolbarCaption } from '@/session/feed';
 import { showToast } from '@/shared/components/Toast';
-import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import {
   DropdownMenu,
@@ -40,8 +28,8 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/shared/components/ui/dropdown-menu';
-import { cn } from '@/shared/lib/utils';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
+import { CHANGE_COLUMNS, ChangeRow } from './ChangeRow';
 
 type Filter = 'all' | 'mcp' | 'operators';
 const FILTER_LABEL: Record<Filter, string> = {
@@ -54,45 +42,10 @@ const EMPTY: Record<Filter, string> = {
   mcp: 'No agent has changed this session yet.',
   operators: 'No operator changes in this session yet.',
 };
-const VIA_LABEL: Record<Via, string> = {
-  web: 'web',
-  mcp: 'agent',
-  companion: 'companion',
-  worker: 'worker',
-  system: 'system',
-};
-const ENTITY_LABEL: Record<Change['entity'], string> = {
-  event: 'event',
-  topic: 'topic',
-  transcript_segment: 'transcript',
-  dashboard: 'dashboard',
-  wiki_page: 'wiki page',
-  category: 'category',
-  session: 'session clock',
-};
 const LIMIT = 300;
-
-const COLUMNS: Column[] = [
-  JUMP_COLUMN,
-  { key: 'time', label: 'Time', className: 'w-24' },
-  { key: 'who', label: 'Who', className: 'w-48' },
-  { key: 'what', label: 'Change', className: 'w-36' },
-  { key: 'summary', label: 'Summary' },
-  { key: 'undo', label: 'Undo', className: 'w-28', srOnly: true },
-];
 
 // ── relative time ───────────────────────────────────────────────────
 
-const RTF = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto', style: 'short' });
-function fmtRelative(iso: string, now: number): string {
-  const s = Math.round((new Date(iso).getTime() - now) / 1000);
-  const a = Math.abs(s);
-  if (a < 45) return 'just now';
-  if (a < 3600) return RTF.format(Math.round(s / 60), 'minute');
-  if (a < 86_400) return RTF.format(Math.round(s / 3600), 'hour');
-  if (a < 30 * 86_400) return RTF.format(Math.round(s / 86_400), 'day');
-  return new Date(iso).toLocaleDateString();
-}
 function useNow(ms = 30_000) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -321,7 +274,7 @@ function ChangeFeed({ session }: { session: Session }) {
         </p>
       ) : (
         <FeedTable
-          columns={COLUMNS}
+          columns={CHANGE_COLUMNS}
           loading={changes.isPending}
           empty={rows.length === 0}
           emptyMessage={EMPTY[filter]}
@@ -348,127 +301,5 @@ function ChangeFeed({ session }: { session: Session }) {
       )}
       {confirmElement}
     </FeedShell>
-  );
-}
-
-function SmallBadge({
-  children,
-  className,
-  title,
-}: {
-  children: ReactNode;
-  className?: string;
-  title?: string;
-}) {
-  return (
-    <Badge variant="outline" title={title} className={cn('px-1 py-0 text-[0.6rem]', className)}>
-      {children}
-    </Badge>
-  );
-}
-
-function ChangeRow({
-  change: c,
-  now,
-  sec,
-  onJump,
-  canWrite,
-  busy,
-  error,
-  onUndo,
-}: {
-  change: Change;
-  now: number;
-  sec: number | null;
-  onJump: (sec: number) => void;
-  canWrite: boolean;
-  busy: boolean;
-  error: string | undefined;
-  onUndo: () => void;
-}) {
-  const isAgent = c.via === 'mcp';
-  return (
-    <tr className={cn(FEED_ROW, c.revertedAt && 'opacity-60')}>
-      <td className={cn(FEED_CELL, 'w-8')}>
-        <JumpButton sec={sec} label={c.summary} onJump={onJump} />
-      </td>
-      <td className={cn(FEED_CELL, 'whitespace-nowrap text-si-muted tabular-nums')}>
-        <time dateTime={c.at} title={c.at}>
-          {fmtRelative(c.at, now)}
-        </time>
-      </td>
-      <td className={cn(FEED_CELL, FEED_CELL_TEXT)}>
-        <div className="flex min-w-0 flex-wrap items-center gap-1">
-          <span className="truncate font-semibold">{c.actor?.name ?? 'System'}</span>
-          {isAgent && c.clientName && (
-            <SmallBadge
-              className="border-[color-mix(in_oklab,var(--si-accent)_45%,var(--si-line))] text-(--si-accent-text)"
-              title={`MCP client: ${c.clientName}`}
-            >
-              {c.clientName}
-            </SmallBadge>
-          )}
-          <SmallBadge>{VIA_LABEL[c.via]}</SmallBadge>
-        </div>
-      </td>
-      <td className={cn(FEED_CELL, 'whitespace-nowrap text-si-muted')}>
-        <span className="font-semibold text-si-fg">{c.kind}</span>{' '}
-        {ENTITY_LABEL[c.entity] ?? c.entity}
-      </td>
-      <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'py-1')}>
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          {c.revertOf && <SmallBadge title="This change undid an earlier one">undo</SmallBadge>}
-          {c.groupSize && (
-            <SmallBadge
-              title={`One ${c.op} call: ${c.groupSize} changes here${c.groupTotal ? ` (${c.groupTotal} in all sessions)` : ''}, newest shown${c.groupUndone ? `; ${c.groupUndone} already undone` : ''}`}
-            >
-              {c.groupTotal ? `${c.groupSize} of ${c.groupTotal}` : c.groupSize} changes
-              {c.groupUndone ? ` · ${c.groupUndone} undone` : ''}
-            </SmallBadge>
-          )}
-          <span className="[overflow-wrap:anywhere]">
-            {c.summary}
-            {(c.groupSize ?? 0) > 1 && (
-              <span className="text-si-muted"> and {(c.groupSize ?? 1) - 1} more</span>
-            )}
-          </span>
-        </div>
-        {error && (
-          <p role="alert" className="m-0 mt-0.5 text-[0.75rem] text-(--si-danger)">
-            {error}
-          </p>
-        )}
-      </td>
-      <td className={cn(FEED_CELL, 'whitespace-nowrap text-right')}>
-        {c.revertedAt ? (
-          <span className="text-[0.75rem] text-si-dim" title={c.revertedAt}>
-            Undone {fmtRelative(c.revertedAt, now)}
-          </span>
-        ) : (
-          // The wrapper carries the reason: a disabled button gets no pointer events (no title).
-          <span
-            className="inline-flex"
-            title={canWrite ? undefined : "Read-only: you can't change this show's content"}
-          >
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={onUndo}
-              disabled={!canWrite || busy}
-              title={
-                !canWrite
-                  ? undefined
-                  : c.groupSize
-                    ? 'Undo every change of this call'
-                    : 'Undo this change'
-              }
-            >
-              <Undo2 aria-hidden="true" />
-              {busy ? 'Undoing…' : c.groupSize ? 'Undo all' : 'Undo'}
-            </Button>
-          </span>
-        )}
-      </td>
-    </tr>
   );
 }

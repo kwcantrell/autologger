@@ -1,12 +1,20 @@
-// Static, decorative product mocks for the landing page. They reuse the app's primitives (Kbd,
-// Badge) and its Show Ignition classes, hold sample data only and are hidden from assistive tech
-// (each feature row says the same thing in text). Category colours are sample user data and stay
-// on their own channel: a 2px swatch, never a label colour.
+// Decorative product mocks for the landing page, filled with sample data and hidden from
+// assistive tech (each feature row says the same thing in text) and from the keyboard (inert).
+// Where the app has a presentational piece (the log button; the Event feed, Transcript, Topics
+// and Agents rows and their feed table) the mock renders that same component, so it follows the
+// real UI. The rest is static markup in the app's Show Ignition classes; each such mock names the
+// component it imitates: changed that component's look? Update its mock.
 
-import { Download, Play, Undo2 } from 'lucide-react';
+import type { Change, SessionEvent, Topic, TranscriptSegment } from '@autologger/contract';
+import { Download, Play } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
+import { FeedTable } from '@/session/feed';
+import { LogButton } from '@/session/LogButton';
+import { CHANGE_COLUMNS, ChangeRow } from '@/session/tabs/ChangeRow';
+import { EventRow, eventColumns } from '@/session/tabs/EventRow';
+import { SEGMENT_COLUMNS, SegmentRow } from '@/session/tabs/SegmentRow';
+import { TOPIC_COLUMNS, TopicRow } from '@/session/tabs/TopicRow';
 import { Badge } from '@/shared/components/ui/badge';
-import { Kbd } from '@/shared/components/ui/kbd';
 import { cn } from '@/shared/lib/utils';
 
 const CATS = [
@@ -41,6 +49,7 @@ export function MockFrame({
   return (
     <div
       aria-hidden="true"
+      inert
       className={cn(
         'pointer-events-none w-full min-w-0 select-none overflow-hidden rounded-card border border-si-line bg-si-panel p-4 text-left sm:p-5',
         className,
@@ -66,7 +75,14 @@ function Swatch({ color }: { color: string }) {
   );
 }
 
-function LogButton({
+const noop = () => {};
+// The feed table's scroll area, minus the height cap and the scrollbars: a table wider than the
+// card is cropped at its edge, like a screenshot.
+const MOCK_TABLE = 'overflow-hidden';
+const resolved = () => Promise.resolve();
+
+/** CategoryStrip's LogButton, rendered as a plain span. */
+function MockLogButton({
   n,
   name,
   color,
@@ -78,18 +94,110 @@ function LogButton({
   pressed?: boolean;
 }) {
   return (
-    <span
-      className={cn(
-        'inline-flex min-h-(--h-ctl) min-w-0 items-center gap-2 rounded-ctl border border-si-line bg-si-panel py-1.5 pr-3 pl-2 text-[0.875rem] font-semibold leading-tight text-si-fg',
-        pressed && 'border-(--cat) bg-[color-mix(in_oklab,var(--cat)_22%,var(--si-panel))]',
-      )}
-      style={{ '--cat': color } as CSSProperties}
-    >
-      {n !== undefined && <Kbd>{n}</Kbd>}
-      <Swatch color={color} />
-      <span className="truncate">{name}</span>
-    </span>
+    <LogButton
+      nativeButton={false}
+      render={<span />}
+      hotkey={n}
+      color={color}
+      label={name}
+      latched={pressed ? 'on' : undefined}
+    />
   );
+}
+
+// Sample data in the contract's shapes, for the real row components.
+const MOCK_FPS = 30;
+const MOCK_AT = '2026-03-14T20:00:00.000Z';
+const HOST = { id: 'usr_mock', name: 'Dana Ruiz' };
+
+function mockEvent(
+  sec: number,
+  cat: { name: string; color: string },
+  message: string,
+  source: SessionEvent['source'] = 'operator',
+): SessionEvent {
+  return {
+    id: `ev-${sec}`,
+    sessionId: 'mock',
+    categoryId: null,
+    category: cat.name,
+    color: cat.color,
+    message,
+    value: null,
+    timecodeFrames: sec * MOCK_FPS,
+    atSec: sec,
+    wallTime: MOCK_AT,
+    take: 2,
+    source,
+    createdBy: HOST,
+    createdAt: MOCK_AT,
+    updatedAt: MOCK_AT,
+  };
+}
+
+/** A speaker turn with evenly spread word timings, so the word under the playhead lights up. */
+function mockSegment(
+  startSec: number,
+  endSec: number,
+  speaker: string,
+  text: string,
+): TranscriptSegment {
+  const words = text.split(' ');
+  const step = (endSec - startSec) / words.length;
+  return {
+    id: `seg-${startSec}`,
+    sessionId: 'mock',
+    audioSegmentId: null,
+    startSec,
+    endSec,
+    speaker,
+    text,
+    words: words.map((w, i) => ({ w, s: startSec + i * step, e: startSec + (i + 1) * step })),
+    edited: false,
+  };
+}
+
+function mockTopic(startSec: number, durationSec: number, title: string, summary: string): Topic {
+  return {
+    id: `topic-${startSec}`,
+    sessionId: 'mock',
+    startSec,
+    durationSec,
+    level: 1,
+    title,
+    summary,
+    createdBy: HOST,
+    via: 'mcp',
+    createdAt: MOCK_AT,
+  };
+}
+
+function mockChange(
+  minutesAgo: number,
+  op: string,
+  entity: Change['entity'],
+  kind: Change['kind'],
+  summary: string,
+  groupSize?: number,
+): Change {
+  return {
+    id: `chg-${minutesAgo}`,
+    at: new Date(Date.parse(MOCK_AT) - minutesAgo * 60_000).toISOString(),
+    actor: HOST,
+    via: 'mcp',
+    clientName: 'Claude Code',
+    op,
+    entity,
+    entityId: `${entity}-${minutesAgo}`,
+    kind,
+    summary,
+    sessionId: 'mock',
+    showId: 'mock',
+    revertedAt: null,
+    revertOf: null,
+    groupId: groupSize ? `grp-${minutesAgo}` : null,
+    ...(groupSize ? { groupSize } : {}),
+  };
 }
 
 // Deterministic waveform heights (no randomness between renders).
@@ -137,13 +245,16 @@ function Waveform({
   );
 }
 
-/** Hero: the session workspace, rolling. */
+/**
+ * Hero: the session workspace, rolling. Log buttons and feed rows are the real components; the
+ * top bar, clock and waveform are static (TransportStrip, Timeline).
+ */
 export function WorkspaceMock() {
   const feed = [
-    { tc: '00:42:11:02', cat: CATS[0], note: 'Dana on the parking ticket' },
-    { tc: '00:39:48:17', cat: CATS[4], note: 'Cold open candidate' },
-    { tc: '00:36:05:09', cat: CATS[3], note: 'Mic 2 crackle' },
-    { tc: '00:31:20:00', cat: CATS[2], note: 'Sponsor read, take 2' },
+    mockEvent(2531, CATS[0], 'Dana on the parking ticket'),
+    mockEvent(2388, CATS[4], 'Cold open candidate', 'agent'),
+    mockEvent(2165, CATS[3], 'Mic 2 crackle', 'companion'),
+    mockEvent(1880, CATS[2], 'Sponsor read, take 2'),
   ];
   return (
     <MockFrame className="p-0 sm:p-0">
@@ -181,38 +292,34 @@ export function WorkspaceMock() {
         />
         <div className="flex flex-wrap gap-1.5">
           {CATS.slice(0, 5).map((c, i) => (
-            <LogButton key={c.name} n={i + 1} name={c.name} color={c.color} pressed={i === 0} />
+            <MockLogButton key={c.name} n={i + 1} name={c.name} color={c.color} pressed={i === 0} />
           ))}
         </div>
-        <div className="overflow-hidden rounded-ctl border border-si-line">
-          <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-3 border-b border-si-line bg-si-panel px-3 py-2 sm:grid-cols-[7rem_8rem_minmax(0,1fr)]">
-            <span className={LABEL}>Timecode</span>
-            <span className={cn(LABEL, 'max-sm:hidden')}>Event</span>
-            <span className={LABEL}>Note</span>
-          </div>
-          {feed.map((r, i) => (
-            <div
-              key={r.tc}
-              className={cn(
-                'grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-3 border-b border-si-line px-3 py-2 text-[0.84rem] last:border-b-0 sm:grid-cols-[7rem_8rem_minmax(0,1fr)]',
-                i === 0 && 'bg-[color-mix(in_oklab,var(--si-accent)_18%,transparent)]',
-              )}
-            >
-              <span className={TC}>{r.tc}</span>
-              <span className="flex min-w-0 items-center gap-2 max-sm:hidden">
-                <Swatch color={r.cat.color} />
-                <span className="truncate">{r.cat.name}</span>
-              </span>
-              <span className="truncate text-si-muted">{r.note}</span>
-            </div>
+        <FeedTable columns={eventColumns('session')} maxHeight={MOCK_TABLE}>
+          {feed.map((e) => (
+            <EventRow
+              key={e.id}
+              e={e}
+              session={{ frameRate: MOCK_FPS, startOffsetFrames: 0, isRolling: true }}
+              categories={[]}
+              timeMode="session"
+              editable={false}
+              canWrite={false}
+              onJump={noop}
+              onSave={resolved}
+              onDelete={noop}
+            />
           ))}
-        </div>
+        </FeedTable>
       </div>
     </MockFrame>
   );
 }
 
-/** Live logging: the logging strip plus a Stream Deck page driven by Companion. */
+/**
+ * Live logging: the logging strip (real LogButtons) plus a static Stream Deck page driven by
+ * Companion (the presets in apps/companion).
+ */
 export function LoggingMock() {
   const keys: { label: string; sub?: string; color?: string; lit?: boolean }[] = [
     { label: 'Roll', lit: true },
@@ -226,7 +333,7 @@ export function LoggingMock() {
     <MockFrame title="Logging strip · Stream Deck">
       <div className="grid grid-cols-2 gap-1.5">
         {CATS.map((c, i) => (
-          <LogButton key={c.name} n={i + 1} name={c.name} color={c.color} pressed={i === 1} />
+          <MockLogButton key={c.name} n={i + 1} name={c.name} color={c.color} pressed={i === 1} />
         ))}
       </div>
       <div className="mt-5 rounded-card border border-(--si-line-strong) bg-(--si-ink) p-2.5">
@@ -261,46 +368,38 @@ export function LoggingMock() {
   );
 }
 
-/** Transcript tab: speaker turns on the session clock, the current line selected. */
+/** Transcript tab: speaker turns on the session clock, the word under the playhead lit. */
 export function TranscriptMock() {
-  const lines = [
-    {
-      at: '00:41:52',
-      who: 'Dana',
-      text: 'So the meter maid is standing there, and I have a parking ticket in each hand.',
-    },
-    { at: '00:42:03', who: 'Marcus', text: 'Two tickets. For one car.' },
-    {
-      at: '00:42:09',
-      who: 'Dana',
-      text: 'Two tickets, one car, zero minutes over. I checked.',
-      current: true,
-    },
-    { at: '00:42:15', who: 'Priya', text: "This is going in the cold open, isn't it?" },
+  const segments = [
+    mockSegment(
+      2512,
+      2523,
+      'Dana',
+      'So the meter maid is standing there, and I have a parking ticket in each hand.',
+    ),
+    mockSegment(2523, 2529, 'Marcus', 'Two tickets. For one car.'),
+    mockSegment(2529, 2535, 'Dana', 'Two tickets, one car, zero minutes over. I checked.'),
+    mockSegment(2535, 2541, 'Priya', "This is going in the cold open, isn't it?"),
   ];
+  const playhead = 2530.4;
   return (
     <MockFrame title="Transcript" aside={<span className={TC}>3 speakers · 58:12</span>}>
-      <ul className="m-0 flex list-none flex-col gap-1 p-0">
-        {lines.map((l) => (
-          <li
-            key={l.at}
-            className={cn(
-              'grid grid-cols-[4.25rem_minmax(0,1fr)] gap-3 rounded-ctl px-2.5 py-2',
-              l.current && SEL,
-            )}
-          >
-            <span className={cn(TC, 'pt-0.5')}>{l.at}</span>
-            <span className="min-w-0">
-              <span className="block font-label text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-si-muted">
-                {l.who}
-              </span>
-              <span className="mt-0.5 block text-[0.875rem] leading-[1.45] text-si-fg">
-                {l.text}
-              </span>
-            </span>
-          </li>
+      <FeedTable columns={SEGMENT_COLUMNS} maxHeight={MOCK_TABLE}>
+        {segments.map((s) => (
+          // Not `active`: an active row scrolls itself into view, which would scroll the page.
+          <SegmentRow
+            key={s.id}
+            s={s}
+            active={false}
+            playheadSec={playhead >= s.startSec && playhead < s.endSec ? playhead : null}
+            canWrite={false}
+            rolling={false}
+            onSeek={noop}
+            onRenameSpeaker={noop}
+            onSaveText={resolved}
+          />
         ))}
-      </ul>
+      </FeedTable>
       <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-si-line pt-3">
         <span className={cn(LABEL, 'mr-1')}>Key terms</span>
         {['Dana Ruiz', 'Priya Nair', 'Long Table'].map((t) => (
@@ -313,54 +412,39 @@ export function TranscriptMock() {
   );
 }
 
-/** Topics tab: chapters with start and length, over a proportional strip. */
+/** Topics tab: chapters with start, length and an agent-written summary. */
 export function TopicsMock() {
   const topics = [
-    { title: 'Cold open: the double ticket', start: '00:00:00', len: 4 },
-    { title: 'Listener mail', start: '00:04:12', len: 11 },
-    { title: 'Guest: Priya on touring', start: '00:15:30', len: 23, current: true },
-    { title: 'Ad break', start: '00:38:41', len: 2 },
-    { title: 'Lightning round', start: '00:41:02', len: 17 },
+    mockTopic(0, 252, 'Cold open: the double ticket', 'Two tickets, one car, zero minutes over.'),
+    mockTopic(252, 678, 'Listener mail', 'Sandwich court rulings and a fan theory.'),
+    mockTopic(930, 1391, 'Guest: Priya on touring', 'Twelve cities, one van, no parking.'),
+    mockTopic(2321, 141, 'Ad break', 'Sponsor read, take 2.'),
+    mockTopic(2462, 1030, 'Lightning round', 'Dana keeps the tally.'),
   ];
-  const total = topics.reduce((s, t) => s + t.len, 0);
   return (
     <MockFrame title="Topics" aside={<span className={TC}>5 chapters</span>}>
-      <div className="mb-4 flex h-2.5 gap-0.5 overflow-hidden rounded-full">
+      {/* No Level column (4th): in a half-width card it squeezes the times. */}
+      <FeedTable columns={TOPIC_COLUMNS} maxHeight={cn(MOCK_TABLE, '[&_tr>:nth-child(4)]:hidden')}>
         {topics.map((t) => (
-          <span
-            key={t.title}
-            className={t.current ? 'bg-si-accent' : 'bg-(--si-line-strong)'}
-            style={{ flexGrow: t.len }}
+          <TopicRow
+            key={t.id}
+            t={t}
+            canWrite={false}
+            rolling={false}
+            onJump={noop}
+            onSave={resolved}
+            onDelete={noop}
           />
         ))}
-      </div>
-      <ol className="m-0 flex list-none flex-col gap-1 p-0">
-        {topics.map((t, i) => (
-          <li
-            key={t.title}
-            className={cn(
-              'grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-3 rounded-ctl px-2.5 py-2',
-              t.current && SEL,
-            )}
-          >
-            <span className={TC}>{i + 1}</span>
-            <span className={cn('truncate text-[0.875rem]', t.current && 'font-semibold')}>
-              {t.title}
-            </span>
-            <span className={TC}>
-              {t.start} · {t.len}m
-            </span>
-          </li>
-        ))}
-      </ol>
-      <p className="m-0 mt-3 text-[0.78rem] text-si-dim">
-        {Math.round((23 / total) * 100)}% of the episode is the guest segment.
-      </p>
+      </FeedTable>
     </MockFrame>
   );
 }
 
-/** Dashboards tab: stat tiles, events by category, speaker talk time. */
+/**
+ * Dashboards tab: stat tiles, events by category, speaker talk time. Static: see
+ * session/dashboards/widgets.tsx.
+ */
 export function DashboardMock() {
   const byCat = [
     { ...CATS[0], n: 41 },
@@ -437,7 +521,7 @@ export function DashboardMock() {
   );
 }
 
-/** Wiki: a person page with [[links]] and backlinks. */
+/** Wiki: a person page with [[links]] and backlinks. Static: see routes/wiki/WikiPageView.tsx. */
 export function WikiMock() {
   const link = cn(
     ACCENT_TEXT,
@@ -478,7 +562,10 @@ export function WikiMock() {
   );
 }
 
-/** Ask & compile: a question page whose cited ranges become one video. */
+/**
+ * Ask & compile: a question page whose cited ranges become one video. Static: see
+ * routes/wiki/WikiPageView.tsx and routes/compilations/CompilationsRoute.tsx.
+ */
 export function CompileMock() {
   const clips = [
     { ep: 'Ep. 109', range: '00:41:02–00:43:10', w: 30 },
@@ -528,12 +615,13 @@ export function CompileMock() {
   );
 }
 
-/** Agents tab: attributed change log with per-change and per-call undo. */
+/** Agents tab: ConnectCard's Claude Code line (static), then real change-log rows with undo. */
 export function AgentsMock() {
-  const rows = [
-    { op: 'topics.replace', what: '5 chapters', when: '2 min ago' },
-    { op: 'dashboards.save', what: 'Episode stats', when: '3 min ago' },
-    { op: 'wiki.upsert', what: 'Dana Ruiz', when: '4 min ago' },
+  const changes = [
+    mockChange(1, 'events.createMany', 'event', 'create', 'Laugh', 24),
+    mockChange(2, 'topics.replace', 'topic', 'create', 'Cold open', 5),
+    mockChange(3, 'dashboards.save', 'dashboard', 'create', 'Episode stats'),
+    mockChange(4, 'wiki.upsert', 'wiki_page', 'update', 'Dana Ruiz'),
   ];
   return (
     <MockFrame title="Agents · Change log">
@@ -543,38 +631,31 @@ export function AgentsMock() {
           claude mcp add --transport http autologger https://autologger.example.com/mcp
         </span>
       </div>
-      <div className="mt-4 overflow-hidden rounded-ctl border border-si-line">
-        <div className="flex flex-wrap items-center gap-2 border-b border-si-line bg-[color-mix(in_oklab,var(--si-accent)_8%,var(--si-panel))] px-3 py-2.5">
-          <Badge variant="outline">Claude Code</Badge>
-          <span className="font-tc text-[0.75rem] text-si-fg">events.createMany</span>
-          <span className="text-[0.8rem] text-si-muted">24 laughs logged</span>
-          <span className="ml-auto inline-flex h-(--h-sm) items-center gap-1.5 rounded-ctl border border-si-line bg-si-panel-2 px-3 text-[0.8125rem] font-semibold">
-            <Undo2 className="size-3.5" />
-            Undo all 24
-          </span>
-        </div>
-        {rows.map((r) => (
-          <div
-            key={r.op}
-            className="flex items-center gap-3 border-b border-si-line px-3 py-2.5 last:border-b-0"
-          >
-            <span className="min-w-0 flex-1">
-              <span className="block font-tc text-[0.75rem] text-si-fg">{r.op}</span>
-              <span className="block truncate text-[0.8rem] text-si-muted">
-                Claude · {r.what} · {r.when}
-              </span>
-            </span>
-            <span className="inline-flex size-(--h-sm) shrink-0 items-center justify-center rounded-ctl border border-si-line bg-si-panel-2">
-              <Undo2 className="size-3.5" />
-            </span>
-          </div>
-        ))}
+      <div className="mt-4">
+        <FeedTable columns={CHANGE_COLUMNS} maxHeight={MOCK_TABLE}>
+          {changes.map((c) => (
+            <ChangeRow
+              key={c.id}
+              change={c}
+              now={Date.parse(MOCK_AT)}
+              sec={null}
+              onJump={noop}
+              canWrite
+              busy={false}
+              error={undefined}
+              onUndo={noop}
+            />
+          ))}
+        </FeedTable>
       </div>
     </MockFrame>
   );
 }
 
-/** Import dialog: a YouTube playlist becoming one session per video. */
+/**
+ * Import dialog: a YouTube playlist becoming one session per video. Static: see
+ * routes/PlaylistImportForm.tsx.
+ */
 export function ImportMock() {
   const videos = [
     { title: 'Ep. 110 · Sandwich court', state: 'Transcribed' },
@@ -602,7 +683,7 @@ export function ImportMock() {
   );
 }
 
-/** Export tab: the download formats. */
+/** Export tab: the download formats. Static: see session/tabs/ExportTab.tsx. */
 export function ExportMock() {
   const formats = [
     ['Event feed CSV', 'events.csv'],

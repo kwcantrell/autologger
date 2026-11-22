@@ -1,0 +1,159 @@
+// One Transcript tab row (a speaker turn). Presentational: TranscriptTab owns the data and
+// saving, and the landing page mock renders the same row with sample data.
+
+import type { TranscriptSegment } from '@autologger/contract';
+import { PencilIcon } from 'lucide-react';
+import { memo, useEffect, useRef, useState } from 'react';
+import { fmtSec } from '@/lib/timecode';
+import { Button } from '@/shared/components/ui/button';
+import { cn } from '@/shared/lib/utils';
+import {
+  type Column,
+  FEED_CELL,
+  FEED_CELL_LABEL,
+  FEED_CELL_TEXT,
+  FEED_ROW,
+  FEED_TC,
+  FEED_TEXTAREA,
+  JUMP_COLUMN,
+  JumpButton,
+} from '../feed';
+
+export const SEGMENT_COLUMNS: Column[] = [
+  JUMP_COLUMN,
+  { key: 'time', label: 'Session Time', className: 'w-[6.5rem]' },
+  { key: 'speaker', label: 'Speaker', className: 'w-32' },
+  { key: 'text', label: 'Words' },
+];
+
+export const SegmentRow = memo(function SegmentRow({
+  s,
+  active,
+  playheadSec,
+  canWrite,
+  rolling,
+  onSeek,
+  onRenameSpeaker,
+  onSaveText,
+}: {
+  s: TranscriptSegment;
+  active: boolean;
+  playheadSec: number | null;
+  canWrite: boolean;
+  rolling: boolean;
+  onSeek: (sec: number) => void;
+  onRenameSpeaker: () => void;
+  /** Saves edited text; rejects when it failed (the caller reports why) and the row resets. */
+  onSaveText: (text: string) => Promise<unknown>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(s.text);
+  const rowRef = useRef<HTMLTableRowElement>(null);
+  useEffect(() => setText(s.text), [s.text]);
+  useEffect(() => {
+    if (active) rowRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
+
+  const save = async () => {
+    setEditing(false);
+    if (text.trim() === s.text) return;
+    try {
+      await onSaveText(text.trim());
+    } catch {
+      setText(s.text);
+    }
+  };
+
+  const useWords = s.words.length > 0 && !s.edited;
+
+  return (
+    <tr ref={rowRef} className={cn(FEED_ROW, 'group', active && 'bg-(--sel-bg)')}>
+      <td className={cn(FEED_CELL, 'align-top pt-1')}>
+        <JumpButton
+          sec={s.startSec}
+          label={fmtSec(s.startSec)}
+          onJump={onSeek}
+          unavailable={rolling ? 'Playback is off while timecode rolls.' : null}
+        />
+      </td>
+      <td className={cn(FEED_CELL, FEED_TC, 'align-top pt-1.5')}>{fmtSec(s.startSec)}</td>
+      <td className={cn(FEED_CELL, FEED_CELL_LABEL, 'align-top pt-1.5')}>
+        {canWrite ? (
+          <button
+            type="button"
+            className="text-left hover:underline"
+            title="Rename this speaker everywhere"
+            onClick={onRenameSpeaker}
+          >
+            {s.speaker || 'Unknown'}
+          </button>
+        ) : (
+          s.speaker || 'Unknown'
+        )}
+      </td>
+      <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top py-1 leading-[1.5]')}>
+        {editing ? (
+          <textarea
+            className={cn(
+              FEED_TEXTAREA,
+              'w-full rounded-[3px] border border-[color-mix(in_oklab,var(--si-accent)_55%,transparent)] bg-[color-mix(in_oklab,var(--si-accent)_8%,transparent)] px-1 py-0.5 text-inherit outline-none',
+            )}
+            // biome-ignore lint/a11y/noAutofocus: the user just chose Edit; focus moves into the field
+            autoFocus
+            aria-label="Segment text"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={() => void save()}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setText(s.text);
+                setEditing(false);
+              }
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                (e.target as HTMLTextAreaElement).blur();
+              }
+            }}
+          />
+        ) : (
+          <span className="flex items-start gap-1">
+            <span className="min-w-0 flex-1">
+              {useWords
+                ? s.words.map((w) => {
+                    const cur = playheadSec != null && playheadSec >= w.s && playheadSec < w.e;
+                    return (
+                      <span key={`${w.s}:${w.w}`}>
+                        <button
+                          type="button"
+                          className={cn(
+                            'cursor-pointer rounded-[2px] px-[1px] hover:bg-[rgba(255,255,255,0.06)]',
+                            cur && 'bg-si-accent/35 text-si-fg',
+                          )}
+                          onClick={() => !rolling && onSeek(w.s)}
+                          title={fmtSec(w.s)}
+                        >
+                          {w.w}
+                        </button>{' '}
+                      </span>
+                    );
+                  })
+                : s.text}
+              {s.edited && <span className="ml-1 text-[0.65rem] text-si-dim">(edited)</span>}
+            </span>
+            {canWrite && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100"
+                aria-label="Edit segment"
+                onClick={() => setEditing(true)}
+              >
+                <PencilIcon aria-hidden="true" />
+              </Button>
+            )}
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+});
