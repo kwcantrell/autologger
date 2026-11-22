@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: autologger
+          POSTGRES_PASSWORD: autologger
+          POSTGRES_DB: autologger_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U autologger"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://autologger:autologger@localhost:5432/autologger_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests (server against Postgres, companion, contract)
+        run: npm test
+      - name: Build web
+        run: npm run build -w @autologger/web
+      - name: Build Companion module
+        run: npm run build -w companion-module-autologger

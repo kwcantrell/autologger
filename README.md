@@ -1,5 +1,7 @@
 # AutoLogger
 
+[![CI](https://github.com/kwcantrell/autologger/actions/workflows/ci.yml/badge.svg)](https://github.com/kwcantrell/autologger/actions/workflows/ci.yml)
+
 Session-logging workspace for production teams. Operators log events against running timecode
 (hotkeys 1–9, transport, Bitfocus Companion hardware), record or import audio, and get Deepgram
 transcripts. **AI works through MCP:** connect Claude Code, claude.ai or any MCP client and it can
@@ -11,6 +13,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for how it fits together.
 ## Quick start (development)
 
 ```bash
+git clone https://github.com/kwcantrell/autologger.git && cd autologger
 docker compose -f compose.dev.yaml up -d   # Postgres :54329, S3 (SeaweedFS) :9000
 cp .env.example .env                       # DEV_LOGIN=1 lets you sign in with any email
 npm install
@@ -60,6 +63,28 @@ claude mcp add --transport http autologger https://autologger.example.com/mcp
 
 Claude Code and claude.ai sign in through OAuth; scripts can use a personal access token from
 Settings → Agents. Details in [docs/mcp.md](docs/mcp.md).
+
+For ready-made skills (topics, logged moments, dashboards, show wiki, search, session briefs),
+install the `autologger` plugin from the
+[AutoLogger plugin marketplace](https://github.com/kwcantrell/autologger-marketplace):
+
+```bash
+claude plugin marketplace add kwcantrell/autologger-marketplace
+claude plugin install autologger@autologger
+```
+
+## Contributing
+
+Read [CLAUDE.md](CLAUDE.md) and [ARCHITECTURE.md](ARCHITECTURE.md) first. With Claude Code, the
+marketplace's contributor plugins walk you through it:
+
+```bash
+claude plugin install autologger-contribute@autologger   # onboarding, workflow, starter tasks, pre-PR check
+claude plugin install autologger-dev@autologger          # implementation guides, reviewer agent, guard hooks
+```
+
+Then run `/autologger-contribute:start-here`. Pull requests run lint, typecheck, tests against
+Postgres and the web and Companion builds in CI.
 
 ## Repository
 
