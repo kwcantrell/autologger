@@ -1,7 +1,10 @@
-// Agent-authored markdown, rendered without raw HTML. Only http(s) links survive; images render as
-// their alt text (no remote fetches from a spec).
+// Agent-authored markdown (GitHub-flavoured: tables, strikethrough, task lists), rendered without
+// raw HTML. Only http(s) links survive; images render as their alt text (no remote fetches from a
+// spec). Wide tables scroll inside their own box.
 
 import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { markdownTableComponents } from '@/shared/ui/markdownTable';
 
 const SAFE_URL = /^https?:\/\//i;
 
@@ -44,7 +47,13 @@ const components: Components = {
     <h6 className="mt-2 mb-1 text-[0.85rem] font-semibold text-si-fg first:mt-0">{children}</h6>
   ),
   p: ({ children }) => <p className="my-1.5 first:mt-0 last:mb-0">{children}</p>,
-  ul: ({ children }) => <ul className="my-1.5 list-disc pl-5">{children}</ul>,
+  // GFM task lists mark the list `contains-task-list`: no bullet, the checkbox stands in for it.
+  ul: ({ className, children }) =>
+    className?.includes('contains-task-list') ? (
+      <ul className="my-1.5 list-none pl-1 [&_input]:mr-1.5">{children}</ul>
+    ) : (
+      <ul className="my-1.5 list-disc pl-5">{children}</ul>
+    ),
   ol: ({ children }) => <ol className="my-1.5 list-decimal pl-5">{children}</ol>,
   li: ({ children }) => <li className="my-0.5">{children}</li>,
   blockquote: ({ children }) => (
@@ -59,23 +68,19 @@ const components: Components = {
     <pre className="my-2 overflow-x-auto rounded-ctl bg-si-bg p-2 text-[0.78rem]">{children}</pre>
   ),
   hr: () => <hr className="my-3 border-si-line" />,
-  table: ({ children }) => (
-    <div className="my-2 overflow-x-auto">
-      <table className="w-full border-collapse text-[0.78rem]">{children}</table>
-    </div>
-  ),
-  th: ({ children }) => (
-    <th className="border-b border-si-line px-2 py-1 text-left font-semibold text-si-dim">
-      {children}
-    </th>
-  ),
-  td: ({ children }) => <td className="border-b border-white/5 px-2 py-1">{children}</td>,
+  del: ({ children }) => <del className="text-si-muted">{children}</del>,
+  ...markdownTableComponents,
 };
 
 export function SpecMarkdown({ source }: { source: string }) {
   return (
     <div className="min-w-0 text-[0.85rem] leading-[1.5] text-si-fg [overflow-wrap:anywhere]">
-      <ReactMarkdown skipHtml urlTransform={urlTransform} components={components}>
+      <ReactMarkdown
+        skipHtml
+        urlTransform={urlTransform}
+        remarkPlugins={[remarkGfm]}
+        components={components}
+      >
         {source}
       </ReactMarkdown>
     </div>
