@@ -1,10 +1,17 @@
-import { secondsToClock, type TranscriptLine } from '@autologger/contract';
+import {
+  secondsToClock,
+  TRANSCRIPT_REPLACE_LIST_LIMIT,
+  type TranscriptLine,
+  type TranscriptReplaceChange,
+  transcriptRuleError,
+} from '@autologger/contract';
 import { and, asc, eq, gte, ilike, inArray, lte, sql } from 'drizzle-orm';
 import { requireSession } from '../core/authz.ts';
 import { changeMessage } from '../core/bus.ts';
 import { badRequest, notFound } from '../core/errors.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
+import { applyRulesToText, compileRules, ruleCounts } from '../media/rules.ts';
 import { alignWordTimings } from '../media/words.ts';
 import { toTranscriptSegment } from './map.ts';
 
@@ -218,5 +225,67 @@ defineOp({
       .returning({ id: ts.id });
     ctx.publish(`session:${sessionId}`, { type: 'invalidate', entity: 'transcript_segment' });
     return { updated: rows.length };
+  },
+});
+
+// ── transcript.replace: find/replace rules over an existing transcript (#24) ──
+
+defineOp({
+  name: 'transcript.replace',
+  description:
+    'Apply find/replace rules to the existing transcript of one session, e.g. `rules: [{ find: "doctor", replace: "dr", wholeWord: true }]`. ' +
+    "Rule fields are those of the show setting `transcriptRules` (see shows_update): `find` is plain text unless `regex: true` (JavaScript regular expression, Unicode mode: use `\\b`, not PostgreSQL's `\\m`/`\\M`; `$1` / `$<name>` in `replace`), `wholeWord` only matches whole words, matching is case-insensitive unless `caseSensitive: true`, and rules run in order on each segment. " +
+    "Omit `rules` to apply the show's saved transcriptRules (e.g. to a session transcribed before they were set, without re-transcribing and losing manual edits). Optional fromSec/toSec (seconds from session start) limit it to segments overlapping that range. " +
+    'Set `dryRun: true` first to preview: nothing is written and the result lists the would-be changes. Otherwise all changes apply in one transaction; each changed segment is its own change-log entry, undoable one by one from the Agents tab, and unchanged words keep their word timings. ' +
+    'Returns `{ dryRun, changed, rules: [{ find, replace, count }], segments: [{ id, startSec, endSec, speaker, before, after }], truncated }`; `segments` lists at most 500 changes in time order (truncated is then true; narrow fromSec/toSec to see the rest).',
+  kind: 'write',
+  surfaces: ['web', 'mcp'],
+  async run(ctx, { sessionId, rules: given, fromSec, toSec, dryRun }) {
+    const { session } = await requireSession(ctx, sessionId, 'write');
+    let rules = given;
+    if (!rules) {
+      const [show] = await ctx.db
+        .select({ rules: schema.shows.transcriptRules })
+        .from(schema.shows)
+        .where(eq(schema.shows.id, session.showId));
+      rules = (show?.rules ?? []).filter((r) => !transcriptRuleError(r));
+      if (!rules.length)
+        throw badRequest(
+          'This show has no transcript rules. Pass `rules`, or save them on the show with shows_update.',
+        );
+    }
+    const compiled = compileRules(rules);
+    const rows = await ctx.db
+      .select()
+      .from(ts)
+      .where(rangeWhere(sessionId, fromSec, toSec))
+      .orderBy(asc(ts.startSec));
+
+    const totals = rules.map(() => 0);
+    const changes: TranscriptReplaceChange[] = [];
+    for (const row of rows) {
+      const { text, counts } = applyRulesToText(row.text, compiled);
+      counts.forEach((c, i) => {
+        totals[i]! += c;
+      });
+      const after = text.trim();
+      if (after === row.text) continue;
+      if (!dryRun) await editSegment(ctx, session, row, { text: after });
+      changes.push({
+        id: row.id,
+        startSec: row.startSec,
+        endSec: row.endSec,
+        speaker: row.speaker,
+        before: row.text,
+        after,
+      });
+    }
+    return {
+      dryRun,
+      changed: changes.length,
+      rules: ruleCounts(rules, totals),
+      segments: changes.slice(0, TRANSCRIPT_REPLACE_LIST_LIMIT),
+      truncated: changes.length > TRANSCRIPT_REPLACE_LIST_LIMIT,
+    };
   },
 });

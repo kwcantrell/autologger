@@ -74,6 +74,7 @@ function toShow(
     titleSuffix: s.titleSuffix,
     smartFormat: s.smartFormat,
     keyTerms: s.keyTerms,
+    transcriptRules: s.transcriptRules,
     createdAt: s.createdAt.toISOString(),
     access: access.get(s.id)!,
     sessionCount,
@@ -163,7 +164,7 @@ defineOp({
 defineOp({
   name: 'shows.update',
   description:
-    'Change show settings (owner/admin of the show’s team; showId from shows_list). Only the fields you pass change: name, code (session-title prefix, uppercased), defaultFrameRate (for new sessions), titleSuffix (default title of new sessions created without one: "date" = CODE + date, "episode" = CODE + episode number, "none" = the show name) and nextEpisode (the episode number the next session gets). Transcription: `smartFormat` (default true) toggles Deepgram smart formatting of numbers, dates and currency; turn it off for technical or math talk, where it turns "x squared" into "x2". `keyTerms` replaces the list of key terms (names and jargon such as "dx" or "L’Hôpital") the transcriber should favour: at most 50 terms of up to 50 characters and 1000 characters in total, duplicates dropped, [] clears it. Transcription settings apply to transcriptions that run from now on; to apply them to audio already transcribed, re-transcribe the session (media_retranscribe). Event buttons are edited with categories_save. Settings changes are not in the change log and cannot be undone from it.',
+    'Change show settings (owner/admin of the show’s team; showId from shows_list). Only the fields you pass change: name, code (session-title prefix, uppercased), defaultFrameRate (for new sessions), titleSuffix (default title of new sessions created without one: "date" = CODE + date, "episode" = CODE + episode number, "none" = the show name) and nextEpisode (the episode number the next session gets). Transcription: `smartFormat` (default true) toggles Deepgram smart formatting of numbers, dates and currency; turn it off for technical or math talk, where it turns "x squared" into "x2". `keyTerms` replaces the list of key terms (names and jargon such as "dx" or "L’Hôpital") the transcriber should favour: at most 50 terms of up to 50 characters and 1000 characters in total, duplicates dropped, [] clears it. `transcriptRules` replaces the ordered list of find/replace rules applied to every new transcription before it is stored, e.g. `{ find: "doctor", replace: "dr", wholeWord: true }`: at most 100 rules; `find` up to 200 characters, plain text unless `regex: true` (JavaScript syntax; `$1` / `$<name>` in `replace`); `wholeWord` only matches whole words; matching is case-insensitive unless `caseSensitive: true`; each rule sees the output of the ones before it; [] clears them. Invalid or very slow (nested-quantifier) patterns are rejected. Transcription settings apply to transcriptions that run from now on; to apply them to audio already transcribed, re-transcribe the session (media_retranscribe), or apply the rules to the existing transcript with transcript_replace, which keeps manual edits. Event buttons are edited with categories_save. Settings changes are not in the change log and cannot be undone from it.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId, ...patch }) {
@@ -176,6 +177,7 @@ defineOp({
       nextEpisode: patch.nextEpisode,
       smartFormat: patch.smartFormat,
       keyTerms: patch.keyTerms && [...new Set(patch.keyTerms)],
+      transcriptRules: patch.transcriptRules,
     };
     for (const k of Object.keys(set) as (keyof typeof set)[])
       if (set[k] === undefined) delete set[k];

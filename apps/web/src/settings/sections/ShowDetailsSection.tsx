@@ -3,10 +3,15 @@ import {
   MAX_KEY_TERM_LENGTH,
   MAX_KEY_TERMS,
   MAX_KEY_TERMS_TOTAL_CHARS,
+  MAX_RULE_FIND_LENGTH,
+  MAX_RULE_REPLACE_LENGTH,
+  MAX_TRANSCRIPT_RULES,
   type OpInput,
   type Show,
+  type TranscriptRule,
+  transcriptRuleError,
 } from '@autologger/contract';
-import { TvIcon } from 'lucide-react';
+import { ArrowRightIcon, PlusIcon, TvIcon, XIcon } from 'lucide-react';
 import { useState } from 'react';
 import { qk, useOpMutation } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
@@ -14,9 +19,10 @@ import { useActive } from '@/app/useActive';
 import { showToast } from '@/shared/components/Toast';
 import { Button } from '@/shared/components/ui/button';
 import { Card, CardContent } from '@/shared/components/ui/card';
-import { FieldGroup, FieldSeparator } from '@/shared/components/ui/field';
+import { Field, FieldDescription, FieldGroup, FieldSeparator } from '@/shared/components/ui/field';
 import { Input } from '@/shared/components/ui/input';
 import { Textarea } from '@/shared/components/ui/textarea';
+import { Toggle } from '@/shared/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/shared/components/ui/toggle-group';
 import { useInlineDraft, useSectionGuard, useSettingsNav } from '../guard';
 import {
@@ -42,6 +48,51 @@ interface ShowDetailsDraft {
   smartFormat: boolean;
   /** Key terms as typed: one per line. */
   keyTerms: string;
+  transcriptRules: RuleDraft[];
+}
+
+/** A replacement rule as edited: every flag explicit, plus a stable React key. */
+interface RuleDraft {
+  key: string;
+  find: string;
+  replace: string;
+  regex: boolean;
+  wholeWord: boolean;
+  caseSensitive: boolean;
+}
+
+const ruleDraftOf = (r: TranscriptRule, i: number): RuleDraft => ({
+  key: `saved-${i}`,
+  find: r.find,
+  replace: r.replace,
+  regex: r.regex ?? false,
+  wholeWord: r.wholeWord ?? false,
+  caseSensitive: r.caseSensitive ?? false,
+});
+
+/** The rule to save (false flags left out), or null for a row left completely blank. */
+function ruleOf(d: RuleDraft): TranscriptRule | null {
+  if (!d.find && !d.replace) return null;
+  const rule: TranscriptRule = { find: d.find, replace: d.replace };
+  if (d.regex) rule.regex = true;
+  if (d.wholeWord) rule.wholeWord = true;
+  if (d.caseSensitive) rule.caseSensitive = true;
+  return rule;
+}
+
+const normalizeRules = (rules: TranscriptRule[]) =>
+  rules.map((r, i) => ruleOf(ruleDraftOf(r, i))).filter((r) => r !== null);
+
+/** The first problem with the rules as edited, or null. */
+function rulesError(drafts: RuleDraft[]): string | null {
+  for (const [i, d] of drafts.entries()) {
+    const rule = ruleOf(d);
+    if (!rule) continue;
+    if (!rule.find) return `Rule ${i + 1} needs text to find.`;
+    const error = transcriptRuleError(rule);
+    if (error) return `Rule ${i + 1}: ${error}`;
+  }
+  return null;
 }
 
 const draftOf = (s: Show): ShowDetailsDraft => ({
@@ -52,6 +103,7 @@ const draftOf = (s: Show): ShowDetailsDraft => ({
   nextEpisode: s.nextEpisode,
   smartFormat: s.smartFormat,
   keyTerms: s.keyTerms.join('\n'),
+  transcriptRules: s.transcriptRules.map(ruleDraftOf),
 });
 
 /** One term per line; blank lines and repeats dropped (the server de-duplicates too). */
@@ -145,6 +197,8 @@ function ShowDetails({
         : charsLeft < 0
           ? `Key terms can total ${MAX_KEY_TERMS_TOTAL_CHARS} characters; remove ${-charsLeft} more.`
           : null;
+  const rules = value.transcriptRules.map(ruleOf).filter((r) => r !== null);
+  const ruleError = rulesError(value.transcriptRules);
 
   async function save() {
     setError(null);
@@ -157,6 +211,8 @@ function ShowDetails({
     if (value.nextEpisode !== show.nextEpisode) patch.nextEpisode = value.nextEpisode;
     if (value.smartFormat !== show.smartFormat) patch.smartFormat = value.smartFormat;
     if (keyTerms.join('\n') !== show.keyTerms.join('\n')) patch.keyTerms = keyTerms;
+    if (JSON.stringify(rules) !== JSON.stringify(normalizeRules(show.transcriptRules)))
+      patch.transcriptRules = rules;
     try {
       await update.mutateAsync(patch);
       draft.markSaved();
@@ -307,6 +363,19 @@ function ShowDetails({
                 onChange={(e) => draft.update({ keyTerms: e.target.value })}
               />
             </SettingRow>
+            <FieldSeparator />
+            <SettingRow
+              label="Replacement rules"
+              labelId="settings-show-rules-label"
+              description="Fix words the transcriber keeps getting wrong, such as “doctor” for “dr”. Rules run in order on every new transcription, ignoring case unless Aa is on. To fix sessions already transcribed, an agent can apply them with transcript_replace."
+              disabled={!canEdit}
+            />
+            <TranscriptRulesEditor
+              rules={value.transcriptRules}
+              disabled={!canEdit}
+              error={ruleError}
+              onChange={(transcriptRules) => draft.update({ transcriptRules })}
+            />
           </FieldGroup>
         </CardContent>
         {canEdit && (
@@ -314,7 +383,11 @@ function ShowDetails({
             dirty={draft.dirty}
             saving={update.isPending}
             valid={
-              value.name.trim() !== '' && value.code.trim() !== '' && validEpisode && !keyTermsError
+              value.name.trim() !== '' &&
+              value.code.trim() !== '' &&
+              validEpisode &&
+              !keyTermsError &&
+              !ruleError
             }
             error={error}
             onSave={() => void save()}
@@ -322,5 +395,123 @@ function ShowDetails({
         )}
       </Card>
     </>
+  );
+}
+
+const RULE_FLAGS = [
+  { flag: 'caseSensitive', short: 'Aa', label: 'Match case' },
+  { flag: 'wholeWord', short: 'Word', label: 'Whole words only' },
+  { flag: 'regex', short: '.*', label: 'Regular expression' },
+] as const;
+
+function TranscriptRulesEditor({
+  rules,
+  disabled,
+  error,
+  onChange,
+}: {
+  rules: RuleDraft[];
+  disabled: boolean;
+  error: string | null;
+  onChange: (rules: RuleDraft[]) => void;
+}) {
+  const patch = (i: number, p: Partial<RuleDraft>) =>
+    onChange(rules.map((r, j) => (j === i ? { ...r, ...p } : r)));
+  return (
+    <FieldGroup className="gap-2" role="list" aria-labelledby="settings-show-rules-label">
+      {rules.length === 0 && (
+        <FieldDescription>No rules yet. Transcripts are stored as transcribed.</FieldDescription>
+      )}
+      {rules.map((rule, i) => {
+        const n = i + 1;
+        return (
+          <Field
+            key={rule.key}
+            role="listitem"
+            orientation="horizontal"
+            className="flex-wrap items-center gap-2"
+          >
+            <Input
+              aria-label={`Rule ${n}: find`}
+              placeholder="Find"
+              maxLength={MAX_RULE_FIND_LENGTH}
+              spellCheck={false}
+              autoComplete="off"
+              className={`min-w-32 flex-1 ${rule.regex ? 'font-tc' : ''}`}
+              disabled={disabled}
+              value={rule.find}
+              onChange={(e) => patch(i, { find: e.target.value })}
+            />
+            <ArrowRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <Input
+              aria-label={`Rule ${n}: replace with`}
+              placeholder="Replace with"
+              maxLength={MAX_RULE_REPLACE_LENGTH}
+              spellCheck={false}
+              autoComplete="off"
+              className="min-w-32 flex-1"
+              disabled={disabled}
+              value={rule.replace}
+              onChange={(e) => patch(i, { replace: e.target.value })}
+            />
+            <div className="flex items-center gap-1">
+              {RULE_FLAGS.map(({ flag, short, label }) => (
+                <Toggle
+                  key={flag}
+                  variant="outline"
+                  size="sm"
+                  className="font-tc"
+                  aria-label={`Rule ${n}: ${label}`}
+                  title={label}
+                  disabled={disabled}
+                  pressed={rule[flag]}
+                  onPressedChange={(pressed) => patch(i, { [flag]: pressed })}
+                >
+                  {short}
+                </Toggle>
+              ))}
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Remove rule ${n}`}
+                disabled={disabled}
+                onClick={() => onChange(rules.filter((_, j) => j !== i))}
+              >
+                <XIcon aria-hidden="true" />
+              </Button>
+            </div>
+          </Field>
+        );
+      })}
+      {error && (
+        <FieldDescription role="alert" className="text-destructive">
+          {error}
+        </FieldDescription>
+      )}
+      {!disabled && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="self-start"
+          disabled={rules.length >= MAX_TRANSCRIPT_RULES}
+          onClick={() =>
+            onChange([
+              ...rules,
+              {
+                key: crypto.randomUUID(),
+                find: '',
+                replace: '',
+                regex: false,
+                wholeWord: true,
+                caseSensitive: false,
+              },
+            ])
+          }
+        >
+          <PlusIcon data-icon="inline-start" aria-hidden="true" />
+          Add rule
+        </Button>
+      )}
+    </FieldGroup>
   );
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "shows" ADD COLUMN "transcript_rules" jsonb DEFAULT '[]'::jsonb NOT NULL;
