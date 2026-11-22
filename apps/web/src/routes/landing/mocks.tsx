@@ -3,7 +3,7 @@
 // (each feature row says the same thing in text). Category colours are sample user data and stay
 // on their own channel: a 2px swatch, never a label colour.
 
-import { Download, Undo2 } from 'lucide-react';
+import { Download, Play, Undo2 } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 import { Badge } from '@/shared/components/ui/badge';
 import { Kbd } from '@/shared/components/ui/kbd';
@@ -473,6 +473,56 @@ export function WikiMock() {
             </li>
           ))}
         </ul>
+      </div>
+    </MockFrame>
+  );
+}
+
+/** Ask & compile: a question page whose cited ranges become one video. */
+export function CompileMock() {
+  const clips = [
+    { ep: 'Ep. 109', range: '00:41:02–00:43:10', w: 30 },
+    { ep: 'Ep. 112', range: '00:12:30–00:15:10', w: 38 },
+    { ep: 'Ep. 118', range: '01:04:15–01:05:40', w: 20 },
+  ];
+  const shades = ['bg-si-accent', 'bg-[color-mix(in_oklab,var(--si-accent)_60%,var(--si-panel))]'];
+  return (
+    <MockFrame title="Question" aside={<span className={TC}>3 citations</span>}>
+      <h3 className="m-0 text-[1.25rem] font-semibold leading-tight">
+        How did the Parking Ticket Saga start?
+      </h3>
+      <p className="m-0 mt-2 text-[0.875rem] leading-[1.55] text-si-muted">
+        Dana got two tickets for the same spot on the same morning, then kept a running tally.
+      </p>
+      <ul className="m-0 mt-4 flex list-none flex-col gap-1.5 p-0">
+        {clips.map((c, i) => (
+          <li
+            key={c.ep}
+            className={cn(
+              'flex items-center gap-2.5 rounded-ctl border border-si-line px-2.5 py-1.5 text-[0.84rem]',
+              i === 1 && SEL,
+            )}
+          >
+            <Play className="size-3.5 shrink-0 text-si-dim" />
+            <span className="font-semibold">{c.ep}</span>
+            <span className={cn(TC, 'ml-auto')}>{c.range}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-4 border-t border-si-line pt-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className={LABEL}>Compilation</span>
+          <Badge variant="outline">Ready · 6:13 · 720p</Badge>
+        </div>
+        <div className="mt-3 flex h-2.5 gap-0.5 overflow-hidden rounded-full">
+          {clips.map((c, i) => (
+            <span key={c.ep} className={shades[i % 2]} style={{ flexGrow: c.w }} />
+          ))}
+        </div>
+        <span className="mt-3 inline-flex h-(--h-sm) items-center gap-1.5 rounded-ctl border border-si-line bg-si-panel-2 px-3 text-[0.8125rem] font-semibold">
+          <Download className="size-3.5" />
+          Download MP4
+        </span>
       </div>
     </MockFrame>
   );

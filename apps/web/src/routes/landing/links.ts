@@ -13,7 +13,8 @@ export const PRODUCT_LINKS: NavLink[] = [
   { label: 'Transcripts', href: '#transcripts', hint: 'Speaker-labelled, timecoded' },
   { label: 'Topics', href: '#topics', hint: 'Chapters for every session' },
   { label: 'Dashboards', href: '#dashboards', hint: 'Declarative session stats' },
-  { label: 'Show wiki', href: '#wiki', hint: 'People, bits and recaps' },
+  { label: 'Show wiki', href: '#wiki', hint: 'A cited knowledge base' },
+  { label: 'Ask & compile', href: '#compilations', hint: 'Answers as video compilations' },
   { label: 'Agents over MCP', href: '#agents', hint: 'Every change undoable' },
   { label: 'Import & export', href: '#import', hint: 'YouTube in, CSV and SRT out' },
 ];
@@ -70,3 +71,4 @@ export const NAV_GROUPS: NavGroup[] = [
 
 export const SIGN_IN_HREF = `/login?return=${encodeURIComponent('/')}`;
 export const MCP_DOCS_HREF = `${BLOB}/docs/mcp.md`;
+export const ASK_PLUGIN_HREF = `${MARKETPLACE}/tree/main/plugins/autologger-ask`;
