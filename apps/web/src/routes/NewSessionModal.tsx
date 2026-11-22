@@ -96,6 +96,7 @@ export function NewSessionModal({
       if (ytUrl.trim()) {
         try {
           await rpc('media.importYoutube', { sessionId: s.id, url: ytUrl.trim() });
+          void qc.invalidateQueries({ queryKey: qk.showJobsAll });
         } catch (err) {
           showToast(
             `Session created, but the YouTube import didn't start: ${errorMessage(err)}`,

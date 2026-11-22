@@ -4,6 +4,7 @@
 import type {
   DashboardQuery,
   FullOpInput,
+  Job,
   OpInput,
   OpName,
   OpResult,
@@ -20,6 +21,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { getCapabilities, RpcError, rpc } from './rpc';
 
 export const qk = {
@@ -42,6 +44,8 @@ export const qk = {
     ['dashboard-query', sessionId, query] as const,
   media: (sessionId: string) => ['media', sessionId] as const,
   jobs: (sessionId: string) => ['jobs', sessionId] as const,
+  showJobsAll: ['show-jobs'] as const,
+  showJobs: (showId: string) => ['show-jobs', showId] as const,
   changesAll: (sessionId: string) => ['changes', sessionId] as const,
   changes: (sessionId: string, via: Via | 'all') => ['changes', sessionId, via] as const,
   wikiList: (showId: string) => ['wiki', showId] as const,
@@ -158,6 +162,80 @@ export const useMedia = (sessionId: string, enabled = true) =>
   useOpQuery(qk.media(sessionId), 'media.list', { sessionId }, { enabled, retry: false });
 export const useJobs = (sessionId: string) =>
   useOpQuery(qk.jobs(sessionId), 'jobs.list', { sessionId }, { retry: false });
+
+/** Failed jobs older than this (last update) drop out of the show-wide job list. */
+const RECENT_FAILURE_MS = 24 * 60 * 60_000;
+const UNFINISHED = ['queued', 'running'] as const;
+
+export interface ShowJobs {
+  /** Queued and running jobs of every session of the show, newest first. */
+  active: Job[];
+  /** Failures of the last day not superseded by a newer job of the same kind in that session. */
+  failed: Job[];
+}
+
+async function fetchShowJobs(showId: string): Promise<ShowJobs> {
+  const [active, finished] = await Promise.all([
+    rpc('jobs.list', { showId, status: [...UNFINISHED], limit: 500 }),
+    rpc('jobs.list', { showId, status: ['done', 'failed'], limit: 100 }),
+  ]);
+  const newest = new Map<string, string>();
+  const key = (j: Job) => `${j.sessionId}:${j.kind}`;
+  for (const j of [...active, ...finished]) {
+    const cur = newest.get(key(j));
+    if (!cur || cur < j.createdAt) newest.set(key(j), j.createdAt);
+  }
+  const since = Date.now() - RECENT_FAILURE_MS;
+  const failed = finished.filter(
+    (j) =>
+      j.status === 'failed' &&
+      newest.get(key(j)) === j.createdAt &&
+      Date.parse(j.updatedAt) >= since,
+  );
+  return { active, failed };
+}
+
+/**
+ * Background jobs of a whole show (playlist imports, transcriptions). While any job is unfinished
+ * it long-polls jobs.list (waitSec) so status changes show up at once; otherwise it refreshes
+ * every minute to notice imports started elsewhere (agents, other tabs). Session sockets also
+ * invalidate it (live.ts).
+ */
+export function useShowJobs(showId: string | undefined) {
+  const qc = useQueryClient();
+  const q = useQuery<ShowJobs, RpcError>({
+    queryKey: qk.showJobs(showId ?? ''),
+    queryFn: () => fetchShowJobs(showId ?? ''),
+    enabled: !!showId,
+    refetchInterval: 60_000,
+    retry: false,
+  });
+  const pending = (q.data?.active.length ?? 0) > 0;
+  useEffect(() => {
+    if (!showId || !pending) return;
+    let stopped = false;
+    void (async () => {
+      while (!stopped) {
+        const started = Date.now();
+        try {
+          await rpc('jobs.list', { showId, status: [...UNFINISHED], limit: 500, waitSec: 25 });
+        } catch {
+          // Offline or a server error: back off instead of spinning.
+          await new Promise((r) => setTimeout(r, 10_000));
+        }
+        if (stopped) return;
+        await qc.invalidateQueries({ queryKey: qk.showJobs(showId) });
+        // Never more than one round trip every 2 s, whatever the server answers.
+        const rest = 2_000 - (Date.now() - started);
+        if (rest > 0) await new Promise((r) => setTimeout(r, rest));
+      }
+    })();
+    return () => {
+      stopped = true;
+    };
+  }, [showId, pending, qc]);
+  return q;
+}
 export const useChanges = (sessionId: string, via: Via | 'all') =>
   useOpQuery(qk.changes(sessionId, via), 'changes.list', {
     sessionId,

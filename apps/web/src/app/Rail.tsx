@@ -1,9 +1,9 @@
-import type { Session } from '@autologger/contract';
+import type { Job, Session } from '@autologger/contract';
 import { AudioLines, MoreVertical, Plus, Search, Settings, Upload, X } from 'lucide-react';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useLocation } from 'wouter';
-import { qk, useOpMutation, useSessions } from '@/api/queries';
+import { qk, useOpMutation, useSessions, useShowJobs } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { LoadingVideo } from '@/components/RouteState';
 import { newSessionOpen, settingsOpen } from '@/lib/store';
@@ -42,6 +42,7 @@ import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { Dialog } from '@/shared/ui/Dialog';
 import { Tooltip as SimpleTooltip } from '@/shared/ui/Tooltip';
 import { fmtDateOnly } from '@/shared/utils/fmtDateOnly';
+import { JobMark, JobsIcon, jobsBySession, jobsSummary, ShowJobsDialog } from './ShowJobs';
 import { useActive } from './useActive';
 
 export const APP_VERSION = '3.0.0';
@@ -64,6 +65,8 @@ function StripTooltip({ label, children }: { label: string; children: ReactEleme
 export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
   const active = useActive();
   const sessions = useSessions(active.show?.id);
+  const showJobs = useShowJobs(active.show?.id);
+  const [jobsOpen, setJobsOpen] = useState(false);
   const { state, isMobile, setOpen, setOpenMobile } = useSidebar();
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
@@ -83,6 +86,13 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
   const q = query.trim().toLowerCase();
   const match = (s: Session) =>
     !q || s.title.toLowerCase().includes(q) || s.episode.toLowerCase().includes(q);
+  const jobBySession = jobsBySession(showJobs.data);
+  const jobsLabel = jobsSummary(showJobs.data);
+  const openSession = (id: string) => {
+    closeSheet();
+    settingsOpen.set(null);
+    navigate(`/sessions/${encodeURIComponent(id)}`);
+  };
 
   return (
     <Sidebar
@@ -122,6 +132,34 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
               </Button>
             </StripTooltip>
           </div>
+        )}
+
+        {jobsLabel && (
+          <StripTooltip label={`Background jobs: ${jobsLabel}`}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full min-w-0 justify-start text-si-muted hover:text-si-fg group-data-[collapsible=icon]:justify-center"
+              aria-label={`Background jobs: ${jobsLabel}`}
+              onClick={() => setJobsOpen(true)}
+            >
+              <JobsIcon data={showJobs.data} />
+              <span className={cn('truncate', ICON_ONLY_LABEL)}>{jobsLabel}</span>
+            </Button>
+          </StripTooltip>
+        )}
+        {jobsOpen && active.show && (
+          <ShowJobsDialog
+            showName={active.show.name}
+            data={showJobs.data}
+            error={showJobs.error}
+            sessions={all}
+            onOpenSession={(id) => {
+              setJobsOpen(false);
+              openSession(id);
+            }}
+            onClose={() => setJobsOpen(false)}
+          />
         )}
 
         <div className="[display:none] group-data-[collapsible=icon]:block">
@@ -203,11 +241,8 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
                     key={s.id}
                     session={s}
                     isActive={s.id === activeSessionId}
-                    onSelect={() => {
-                      closeSheet();
-                      settingsOpen.set(null);
-                      navigate(`/sessions/${encodeURIComponent(s.id)}`);
-                    }}
+                    job={jobBySession.get(s.id)}
+                    onSelect={() => openSession(s.id)}
                     onClose={() => {
                       closeSheet();
                       navigate('/');
@@ -315,7 +350,9 @@ function useSessionActions(s: Session) {
   const { confirm, confirmElement } = useConfirm();
   const invalidate = () => [qk.sessionsAll, qk.session(s.id)];
   const archive = useOpMutation('sessions.archive', { invalidate });
-  const del = useOpMutation('sessions.delete', { invalidate: () => [qk.sessionsAll] });
+  const del = useOpMutation('sessions.delete', {
+    invalidate: () => [qk.sessionsAll, qk.showJobsAll],
+  });
   const update = useOpMutation('sessions.update', { invalidate });
 
   return {
@@ -400,11 +437,14 @@ function CardMenu({
 function SessionCard({
   session: s,
   isActive,
+  job,
   onSelect,
   onClose,
 }: {
   session: Session;
   isActive: boolean;
+  /** The session's unfinished or recently failed background job, if any. */
+  job: Job | undefined;
   onSelect: () => void;
   onClose: () => void;
 }) {
@@ -431,6 +471,7 @@ function SessionCard({
         <span className="flex min-w-0 items-center gap-1.5">
           <span className={CARD_TITLE}>{s.title || 'Untitled session'}</span>
           {s.isRolling && <Badge className="px-1 py-px text-[0.625rem] leading-none">LIVE</Badge>}
+          {job && <JobMark job={job} />}
         </span>
         <MetaRow session={s} />
       </SidebarMenuButton>
