@@ -1,4 +1,5 @@
-import { asc, eq } from 'drizzle-orm';
+import { readFileSync } from 'node:fs';
+import { asc, eq, sql } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../core/ids.ts';
 import { db, schema } from '../db/client.ts';
@@ -85,6 +86,41 @@ describe('change groups', () => {
     await failsWith(call(outsider, 'changes.revertGroup', { groupId }), 'not_found');
     // Folding needs a scope, so it never windows over the whole log.
     await failsWith(call(owner, 'changes.list', { grouped: true }), 'bad_request');
+  });
+
+  it('backfills one group per op call for changes recorded before groups', async () => {
+    const { owner, session } = await studio();
+    const agent = asAgent(owner);
+    const events = [
+      { category: 'Note', message: 'a', atSec: 1 },
+      { category: 'Note', message: 'b', atSec: 2 },
+    ];
+    await call(agent, 'events.createMany', { sessionId: session.id, events });
+    const [kept] = await call(agent, 'events.createMany', { sessionId: session.id, events });
+    const keptGroup = (await call(owner, 'changes.list', { sessionId: session.id }))[0]!.groupId;
+    // Make the older call look pre-#60: no group id, one `at` (the transaction's now()).
+    const old = (await call(owner, 'changes.list', { sessionId: session.id })).slice(2);
+    for (const c of old)
+      await db
+        .update(schema.changes)
+        .set({ groupId: null, at: new Date(old[1]!.at) })
+        .where(eq(schema.changes.id, c.id));
+
+    const migration = new URL('../../drizzle/0007_backfill_change_groups.sql', import.meta.url);
+    await db.execute(sql.raw(readFileSync(migration, 'utf8')));
+
+    const rows = await call(owner, 'changes.list', { sessionId: session.id, grouped: true });
+    expect(rows.map((r) => r.groupSize)).toEqual([2, 2]);
+    expect(rows[0]!.groupId).toBe(keptGroup);
+    expect(
+      (await call(owner, 'changes.revertGroup', { groupId: rows[1]!.groupId! })).reverted,
+    ).toBe(2);
+    const left = await db
+      .select({ id: schema.events.id })
+      .from(schema.events)
+      .where(eq(schema.events.sessionId, session.id));
+    expect(left.map((e) => e.id)).toContain(kept!.id);
+    expect(left).toHaveLength(2);
   });
 
   it('undoes an item changed twice in one group back to its first state', async () => {
