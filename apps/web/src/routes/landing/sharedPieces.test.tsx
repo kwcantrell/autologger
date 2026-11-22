@@ -98,6 +98,7 @@ describe('shared app pieces', () => {
       id: 'c',
       showId: 's',
       title: 'Saga',
+      buildLocally: false,
       status: 'running',
       progress: 'Cutting clip 2 of 3',
       etaSec: 60,

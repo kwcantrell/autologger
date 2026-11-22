@@ -93,6 +93,10 @@ const RESTRICTED =
 const BOT_CHECK =
   /confirm you(?:'|\u2019)?re not a bot|--cookies-from-browser|use --cookies|cookies for the authentication/i;
 
+/** Where to turn when the server cannot download a video: yt-dlp on the user's own computer. */
+export const HELPER_HINT =
+  'Or use the AutoLogger import helper on your own computer (yt-dlp with your browser cookies; it imports videos and builds compilations; see docs/importer.md).';
+
 /** The sign-in error in yt-dlp's stderr, as a YoutubeAuthError, or null for any other failure. */
 export function youtubeAuthError(
   stderr: string,
@@ -106,7 +110,7 @@ export function youtubeAuthError(
       ?.trim()
       .slice(0, 200) ?? '';
   if (!line) return null;
-  const detail = ` (yt-dlp: ${line})`;
+  const detail = ` ${HELPER_HINT} (yt-dlp: ${line})`;
   if (RESTRICTED.test(stderr))
     return new YoutubeAuthError(
       'restricted',

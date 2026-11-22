@@ -67,6 +67,11 @@ at most 4 at once per app process) and fail with `bad_request`, creating no sess
 when it hits that error. Any other probe outcome (yt-dlp missing on the app host, timeout, busy)
 lets the import go ahead, so an app host without yt-dlp never blocks imports.
 
+When cookies or a proxy are not an option, or the video or playlist is private, users can run the
+**local import helper** on their own computer instead: it downloads with their browser cookies
+and uploads only the audio (or a compilation MP4). See [importer.md](importer.md). The bot-check
+and sign-in errors above point at it.
+
 ### Local S3 for development
 
 `compose.dev.yaml` runs SeaweedFS with its S3 gateway on `localhost:9000` and the credentials from
@@ -149,6 +154,9 @@ In production: `node src/worker/main.ts` with the same environment as the app (c
   the `compilations` row; changes are published as `compilation_changed` on `show:<id>` (show
   socket → the web Compilations page; `compilations.get` waitSec). Needs ffmpeg (and ffprobe for
   the measured length) and yt-dlp; a worker without ffmpeg does not claim compile jobs.
+  A compilation created with `buildLocally` gets no compile job: the local import helper builds
+  it with the same yt-dlp and ffmpeg settings and uploads the MP4 ([importer.md](importer.md)).
+  Clips of audio uploaded from a private video (`source_private`) are refused for server builds.
 - **Media sweep** (`src/worker/sweep.ts`, every `MEDIA_SWEEP_INTERVAL_MIN`): removes uploads
   stuck in `uploading` past `MEDIA_SWEEP_UPLOAD_AGE_HOURS` (object, then row; an `audio_segment`
   delete is published), `sessions/<id>/` prefixes whose session no longer exists, `shows/<id>/`

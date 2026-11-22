@@ -411,30 +411,60 @@ export const opInputs = {
 
   // ── media ─────────────────────────────────────────────────
   'media.list': z.object({ sessionId: id }),
-  'media.createUpload': z.object({
-    sessionId: id,
-    mimeType: z.string().min(3).max(100),
-    origin: z.enum(['recorded', 'file']),
-    fileName: z.string().max(300).optional(),
-    startSec: sec.optional(),
-    sizeBytes: z
-      .number()
-      .int()
-      .positive()
-      .max(5 * 1024 ** 3)
-      .optional(),
-  }),
+  'media.createUpload': z
+    .object({
+      sessionId: id,
+      mimeType: z.string().min(3).max(100),
+      origin: z.enum(['recorded', 'file', 'youtube']),
+      fileName: z.string().max(300).optional(),
+      startSec: sec.optional(),
+      sizeBytes: z
+        .number()
+        .int()
+        .positive()
+        .max(5 * 1024 ** 3)
+        .optional(),
+      /** origin "youtube" only: the video the client downloaded itself (local import helper). */
+      youtube: z
+        .object({
+          url: z.url().max(2048),
+          title: z.string().trim().min(1).max(300).optional(),
+          uploadDate: z.iso.date().optional(),
+          private: z.boolean().default(false),
+        })
+        .optional(),
+    })
+    .refine((v) => (v.origin === 'youtube') === (v.youtube !== undefined), {
+      message: 'Pass youtube {url, …} exactly when origin is "youtube".',
+    }),
   'media.completeUpload': z.object({ segmentId: id, durationSec: sec.optional() }),
   'media.playbackUrl': z.object({ segmentId: id }),
   'media.waveform': z.object({ sessionId: id }),
   'media.importYoutube': z.object({ sessionId: id, url: z.url() }),
-  'media.importPlaylist': z.object({
-    showId: id,
-    url: z.url().max(2048),
-    order: z.enum(['playlist', 'reverse']).default('playlist'),
-    titleTemplate: z.string().trim().min(1).max(200).optional(),
-    dryRun: z.boolean().default(false),
-  }),
+  'media.importPlaylist': z
+    .object({
+      showId: id,
+      url: z.url().max(2048).optional(),
+      /** Instead of url: videos the client listed itself (local import helper); no server download. */
+      videos: z
+        .array(
+          z.object({
+            url: z.url().max(2048),
+            title: z.string().trim().min(1).max(500),
+            durationSec: sec.nullable().optional(),
+            uploadDate: z.iso.date().optional(),
+          }),
+        )
+        .min(1)
+        .max(200)
+        .optional(),
+      order: z.enum(['playlist', 'reverse']).default('playlist'),
+      titleTemplate: z.string().trim().min(1).max(200).optional(),
+      dryRun: z.boolean().default(false),
+    })
+    .refine((v) => (v.url === undefined) !== (v.videos === undefined), {
+      message: 'Pass exactly one of url or videos.',
+    }),
   'media.retranscribe': z.object({
     sessionId: id,
     segmentId: id.optional(),
@@ -491,6 +521,7 @@ export const opInputs = {
         message: `The clips may total at most ${MAX_COMPILATION_SEC / 3600} hours.`,
       }),
     logEvents: z.boolean().default(true),
+    buildLocally: z.boolean().default(false),
   }),
   'compilations.get': z.object({
     compilationId: id,
@@ -500,6 +531,8 @@ export const opInputs = {
   'compilations.list': z.object({ showId: id }),
   'compilations.delete': z.object({ compilationId: id }),
   'compilations.retry': z.object({ compilationId: id }),
+  'compilations.createUpload': z.object({ compilationId: id }),
+  'compilations.completeUpload': z.object({ compilationId: id, durationSec: sec.optional() }),
 
   // ── search ────────────────────────────────────────────────
   search: z.object({
@@ -633,6 +666,16 @@ export interface PlaylistImport {
   }[];
 }
 
+/** compilations.createUpload: what the local import helper downloads, and where it PUTs the MP4. */
+export interface CompilationUpload {
+  compilation: Compilation;
+  /** One per clip, in play order: the YouTube video and the range in VIDEO seconds to cut. */
+  sources: { sessionId: string; url: string; fromSec: number; toSec: number }[];
+  /** Presigned PUT for the MP4 (Content-Type video/mp4), valid 15 minutes. */
+  uploadUrl: string;
+  headers: Record<string, string>;
+}
+
 export interface OpOutputs {
   'me.get': Me;
   'me.update': Me;
@@ -737,6 +780,8 @@ export interface OpOutputs {
   'compilations.list': Compilation[];
   'compilations.delete': { ok: true };
   'compilations.retry': Compilation;
+  'compilations.createUpload': CompilationUpload;
+  'compilations.completeUpload': Compilation;
   search: SearchHit[];
   'changes.list': Change[];
   'changes.revert': Change;

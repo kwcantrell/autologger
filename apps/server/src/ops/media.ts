@@ -30,6 +30,7 @@ import {
   isYoutubeUrl,
   listPlaylist,
   type Playlist,
+  type PlaylistEntry,
   videoDuration,
   watchUrl,
   YoutubeAuthError,
@@ -134,17 +135,26 @@ defineOp({
 defineOp({
   name: 'media.createUpload',
   description:
-    'Start uploading one audio segment (a recording chunk or a local file). Returns a presigned PUT URL valid for 15 minutes; PUT the bytes with the given headers, then call media.completeUpload.',
+    'Start uploading one audio segment of a session (sessionId from sessions_list; needs write access). Returns {segment, uploadUrl, headers}: a presigned PUT URL valid for 15 minutes; PUT the bytes with exactly those headers, then call media_completeUpload with segment.id (that queues transcription and the waveform, as for any upload). mimeType must be audio/* or video/*. origin "recorded" (a recording chunk) or "file" (a local file) is what the web app uses. origin "youtube" with youtube {url, title?, uploadDate?, private?} is for audio the client downloaded from YouTube itself — normally the AutoLogger import helper (autologger-import, docs/importer.md), which does all of this for you; use it when the server cannot download a video (media_importYoutube / media_importPlaylist fail with YouTube\'s bot check or a sign-in for a private, members-only or age-restricted video). url is the video\'s YouTube URL; title becomes the segment fileName; uploadDate (YYYY-MM-DD) replaces the session\'s episodeDate while it is still its default (the day the session was created); private: true marks audio the server could never download, so server-built compilations refuse it (compilations_create buildLocally builds them on the user\'s computer). A YouTube upload starts at session second 0 (startSec default) and replaces an unfinished (status "uploading") YouTube upload of the same session; once completed the session keeps the video as its source (sourceKind "youtube", sourceUrl). Media writes are not in the change log.',
   kind: 'write',
-  surfaces: ['web'],
-  async run(ctx, { sessionId, mimeType, origin, fileName, startSec, sizeBytes }) {
+  surfaces: ['web', 'mcp'],
+  async run(ctx, { sessionId, mimeType, origin, fileName, startSec, sizeBytes, youtube }) {
     requireStorage();
     const base = mimeType.split(';')[0]!.trim().toLowerCase();
     if (!base.startsWith('audio/') && !base.startsWith('video/')) {
       throw badRequest('Only audio or video files can be uploaded.');
     }
-    await requireSession(ctx, sessionId, 'write');
+    const videoId = youtube ? youtubeVideoId(youtube.url) : null;
+    if (youtube && !videoId)
+      throw badRequest(
+        'youtube.url is not a YouTube video URL (youtube.com/watch?v=… or youtu.be/…).',
+      );
+    const { session } = await requireSession(ctx, sessionId, 'write');
     await lockSession(ctx.db, sessionId);
+    if (youtube) {
+      await dropUnfinishedYoutubeUploads(ctx, sessionId);
+      await applyUploadDate(ctx, session, youtube.uploadDate);
+    }
     const slot = await nextSegmentSlot(ctx.db, sessionId);
     const id = newId('aud');
     const objectKey = objectKeyFor(sessionId, id, extForMime(mimeType, fileName));
@@ -154,10 +164,12 @@ defineOp({
         id,
         sessionId,
         ordinal: slot.ordinal,
-        startSec: startSec ?? slot.endSec,
+        startSec: startSec ?? (youtube ? 0 : slot.endSec),
         mimeType,
         origin,
-        fileName: fileName ?? null,
+        fileName: youtube?.title ?? fileName ?? null,
+        sourceUrl: videoId ? watchUrl(videoId) : null,
+        sourcePrivate: youtube?.private ?? false,
         objectKey,
         sizeBytes: sizeBytes ?? null,
         status: 'uploading',
@@ -171,12 +183,50 @@ defineOp({
   },
 });
 
+/**
+ * Delete a session's unfinished YouTube uploads (status uploading), so the import helper can
+ * start over after an interrupted upload instead of leaving a dead segment behind.
+ */
+async function dropUnfinishedYoutubeUploads(ctx: Ctx, sessionId: string): Promise<void> {
+  const stale = await ctx.db
+    .delete(audioSegments)
+    .where(
+      and(
+        eq(audioSegments.sessionId, sessionId),
+        eq(audioSegments.origin, 'youtube'),
+        eq(audioSegments.status, 'uploading'),
+      ),
+    )
+    .returning();
+  for (const r of stale)
+    ctx.publish(`session:${sessionId}`, changeMessage('audio_segment', 'delete', r.id));
+  if (stale.length && storageConfigured)
+    ctx.afterCommit(async () => {
+      for (const r of stale) await deleteObject(r.objectKey).catch(() => {});
+    });
+}
+
+/** A YouTube upload date replaces the episode date only while it is the default (creation day). */
+async function applyUploadDate(
+  ctx: Ctx,
+  session: { id: string; episodeDate: string | null; createdAt: Date },
+  uploadDate: string | undefined,
+): Promise<void> {
+  const isDefault =
+    !session.episodeDate || session.episodeDate === session.createdAt.toISOString().slice(0, 10);
+  if (!uploadDate || !isDefault || uploadDate === session.episodeDate) return;
+  await ctx.db
+    .update(sessions)
+    .set({ episodeDate: uploadDate, updatedAt: new Date() })
+    .where(eq(sessions.id, session.id));
+}
+
 defineOp({
   name: 'media.completeUpload',
   description:
-    'Finish an upload started with media.createUpload once the PUT succeeded. Marks the segment ready and queues transcription when Deepgram is configured.',
+    'Finish an upload started with media_createUpload once the PUT succeeded (segmentId = segment.id from media_createUpload; durationSec = the audio length in seconds, when known). Marks the segment ready and queues its transcription (when Deepgram is configured) and waveform; wait for the transcript with jobs_list (kinds ["transcribe"]). A YouTube upload (origin "youtube") also makes the video the session\'s source (sourceKind "youtube", sourceUrl), so it can be compiled. Fails with conflict when the bytes have not arrived in storage (PUT first). Calling it again for a finished segment changes nothing (it only fills in a missing durationSec).',
   kind: 'write',
-  surfaces: ['web'],
+  surfaces: ['web', 'mcp'],
   async run(ctx, { segmentId, durationSec }) {
     requireStorage();
     const { row, session } = await loadSegment(ctx, segmentId, 'write');
@@ -204,7 +254,13 @@ defineOp({
       })
       .where(eq(audioSegments.id, segmentId))
       .returning();
-    if (!session.sourceKind) {
+    if (row.origin === 'youtube' && row.sourceUrl) {
+      // As the worker's import: the latest YouTube audio is the session's source.
+      await ctx.db
+        .update(sessions)
+        .set({ sourceKind: 'youtube', sourceUrl: row.sourceUrl, updatedAt: new Date() })
+        .where(eq(sessions.id, session.id));
+    } else if (!session.sourceKind) {
       await ctx.db
         .update(sessions)
         .set({ sourceKind: row.origin, updatedAt: new Date() })
@@ -263,7 +319,7 @@ defineOp({
 defineOp({
   name: 'media.importYoutube',
   description:
-    'Import the audio of one YouTube video into an existing session. Runs in the background: the worker downloads the audio, stores it and transcribes it. If the session\'s episodeDate is still its default (the day it was created), it is set to the video\'s upload date. Playlist URLs are rejected: use media.importPlaylist to import a whole playlist into a show. Returns the job; wait for it with jobs.list (waitSec; kinds ["youtube_import","transcribe"] leaves out the cosmetic waveform job queued after the download). Before queuing it reads the video length from YouTube (a few seconds, no download) so sessions.get transcriptJob.etaSec can include the transcription time; if that read is slow or fails the import is still queued, with a download-only estimate. That read also checks access: if YouTube demands a sign-in (its bot check on this server, or a private, members-only or age-restricted video) the call fails with bad_request explaining it and queues nothing. That is a server configuration problem (yt-dlp cookies or proxy), not something to retry or work around; report it to the user.',
+    'Import the audio of one YouTube video into an existing session. Runs in the background: the worker downloads the audio, stores it and transcribes it. If the session\'s episodeDate is still its default (the day it was created), it is set to the video\'s upload date. Playlist URLs are rejected: use media.importPlaylist to import a whole playlist into a show. Returns the job; wait for it with jobs.list (waitSec; kinds ["youtube_import","transcribe"] leaves out the cosmetic waveform job queued after the download). Before queuing it reads the video length from YouTube (a few seconds, no download) so sessions.get transcriptJob.etaSec can include the transcription time; if that read is slow or fails the import is still queued, with a download-only estimate. That read also checks access: if YouTube demands a sign-in (its bot check on this server, or a private, members-only or age-restricted video) the call fails with bad_request explaining it and queues nothing. That is a server configuration problem (yt-dlp cookies or proxy), not something to retry; tell the user, who can instead import the video from their own computer with the AutoLogger import helper (`autologger-import video <url> --session <sessionId>`, docs/importer.md), which also reads private videos.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   // Validate and authorize, then read the video length, before the op's transaction opens.
@@ -334,6 +390,32 @@ function prepareCtx(actor: Actor, tx: Ctx['db'], op: Ctx['op']): Ctx {
   };
 }
 
+/** A playlist to import: read by the server's yt-dlp, or listed by the client (`local`). */
+type ImportList = {
+  title: string | null;
+  entries: (PlaylistEntry & { uploadDate?: string })[];
+  local?: boolean;
+};
+
+/** The client's own video list (local import helper) as an import list; no yt-dlp here. */
+function clientList(
+  videos: { url: string; title: string; durationSec?: number | null; uploadDate?: string }[],
+): ImportList {
+  requireStorage();
+  const entries = videos.map((v, i) => {
+    const videoId = youtubeVideoId(v.url);
+    if (!videoId) throw badRequest(`videos[${i}].url is not a YouTube video URL.`);
+    return {
+      videoId,
+      title: v.title,
+      durationSec: v.durationSec ?? null,
+      available: true,
+      ...(v.uploadDate ? { uploadDate: v.uploadDate } : {}),
+    };
+  });
+  return { title: null, entries, local: true };
+}
+
 /** Concurrent yt-dlp playlist resolutions allowed per server process. */
 const MAX_PLAYLIST_RESOLUTIONS = 2;
 let playlistResolutions = 0;
@@ -348,16 +430,17 @@ export function fillTitle(template: string, vars: { title: string; episode: stri
 defineOp({
   name: 'media.importPlaylist',
   description:
-    'Import a whole YouTube playlist into a show in one call: one new session per video, each with a queued youtube_import job (download + transcription run in the background; poll jobs.list with showId, status ["queued","running"] and kinds ["youtube_import","transcribe"] until empty; waveform jobs that follow are cosmetic). showId comes from shows.list (needs write access). url is a YouTube URL with a list= parameter. Videos already in the show (a session whose sourceUrl is the same video, or one with a queued/running import of it) and private/deleted videos are skipped, so calling it again later imports only new videos. Session titles come from titleTemplate (placeholders {title} = video title, {episode} = episode number; default "{title}"); episode numbers are taken from the show counter in import order. order "playlist" (default) keeps the playlist order; "reverse" imports the last video first (use it when the playlist lists newest first, so episode 1 is the oldest). episodeDate is set to each video\'s YouTube upload date when its import job runs. Up to 200 videos per playlist. Agents cannot delete sessions (deleting is web-only), so for an unfamiliar playlist call it first with dryRun: true: it returns the same created/skipped lists (dryRun true, sessionId and jobId null) without writing anything. A session whose import job fails stays in the show (and is skipped on re-runs): retry it with media.importYoutube on that sessionId. Returns {playlistTitle, dryRun, created [{sessionId, title, episode, videoId, durationSec, jobId}], skipped [{videoId, title, reason, sessionId}]}; durationSec is in seconds (null if YouTube did not say). Fails with unavailable when the server is busy reading other playlists: retry shortly. Before creating sessions (not on dryRun) it checks that the first video can be downloaded (a few seconds, no download): if YouTube demands a sign-in (its bot check on this server, or a private/members-only/age-restricted video) the call fails with bad_request explaining it and creates no sessions. That is a server configuration problem (yt-dlp cookies or proxy), not something to retry or work around; report it to the user.',
+    'Import a whole YouTube playlist into a show in one call: one new session per video, each with a queued youtube_import job (download + transcription run in the background; poll jobs.list with showId, status ["queued","running"] and kinds ["youtube_import","transcribe"] until empty; waveform jobs that follow are cosmetic). showId comes from shows.list (needs write access). url is a YouTube URL with a list= parameter. Videos already in the show (a session whose sourceUrl is the same video, or one with a queued/running import of it) and private/deleted videos are skipped, so calling it again later imports only new videos. Session titles come from titleTemplate (placeholders {title} = video title, {episode} = episode number; default "{title}"); episode numbers are taken from the show counter in import order. order "playlist" (default) keeps the playlist order; "reverse" imports the last video first (use it when the playlist lists newest first, so episode 1 is the oldest). episodeDate is set to each video\'s YouTube upload date when its import job runs. Up to 200 videos per playlist. Agents cannot delete sessions (deleting is web-only), so for an unfamiliar playlist call it first with dryRun: true: it returns the same created/skipped lists (dryRun true, sessionId and jobId null) without writing anything. A session whose import job fails stays in the show (and is skipped on re-runs): retry it with media.importYoutube on that sessionId. Returns {playlistTitle, dryRun, created [{sessionId, title, episode, videoId, durationSec, jobId}], skipped [{videoId, title, reason, sessionId}]}; durationSec is in seconds (null if YouTube did not say). Fails with unavailable when the server is busy reading other playlists: retry shortly. Before creating sessions (not on dryRun) it checks that the first video can be downloaded (a few seconds, no download): if YouTube demands a sign-in (its bot check on this server, or a private/members-only/age-restricted video) the call fails with bad_request explaining it and creates no sessions. That is a server configuration problem (yt-dlp cookies or proxy), not something to retry; tell the user, who can import the playlist from their own computer instead with the AutoLogger import helper (`autologger-import playlist <url> --show <showId>`, docs/importer.md) — also the only way to import a private playlist. The helper calls this op with videos instead of url: a list it read itself, each {url (YouTube video URL), title, durationSec?, uploadDate? (YYYY-MM-DD)}, in playlist order. Then sessions are created the same way (same skipping, titles, episodes, order, dryRun; episodeDate = uploadDate, else today) but nothing is downloaded or queued (jobId null; playlistTitle null): the client uploads each video\'s audio with media_createUpload origin "youtube" and media_completeUpload.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   // Authorize, then run yt-dlp, before the op's transaction opens.
-  async prepare(actor, { showId, url, order, dryRun }): Promise<Playlist> {
+  async prepare(actor, { showId, url, videos, order, dryRun }): Promise<ImportList> {
     await db.transaction((tx) =>
       requireShow(prepareCtx(actor, tx, 'media.importPlaylist'), showId, 'write'),
     );
+    if (videos) return clientList(videos);
     requireYoutube();
-    const listId = youtubePlaylistId(url);
+    const listId = youtubePlaylistId(url!);
     if (!listId)
       throw badRequest(
         'That is not a YouTube playlist URL (it needs a list= parameter). Use media.importYoutube for a single video.',
@@ -396,6 +479,7 @@ defineOp({
     return playlist;
   },
   async run(ctx, { showId, order, titleTemplate, dryRun }, playlist): Promise<PlaylistImport> {
+    const local = Boolean(playlist.local);
     const { show } = await requireShow(ctx, showId, 'write');
     // Serialize imports into one show, so concurrent calls cannot both import a video.
     await ctx.db.execute(sql`select pg_advisory_xact_lock(hashtext(${show.id}))`);
@@ -473,12 +557,15 @@ defineOp({
           title: item.title,
           episode,
           // Replaced by the upload date when the import job runs.
-          episodeDate: today,
+          episodeDate: e.uploadDate ?? today,
           frameRate: show.defaultFrameRate,
           sourceKind: 'youtube',
           sourceUrl: videoUrl,
           createdBy: ctx.actor.user.id,
         });
+        item.sessionId = sessionId;
+        // The import helper uploads the audio itself (media.createUpload origin youtube).
+        if (local) continue;
         const job = await enqueueJob(
           ctx.db,
           {
@@ -493,7 +580,6 @@ defineOp({
           },
           { at: new Date(base + i) },
         );
-        item.sessionId = sessionId;
         item.jobId = job.id;
       }
       if (!dryRun)
