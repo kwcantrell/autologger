@@ -1,0 +1,386 @@
+// The op catalog: every capability of AutoLogger, its input schema and output type.
+// The server implements each op once; HTTP RPC, MCP tools and the Companion socket all
+// dispatch through it. Descriptions live with the server implementation.
+
+import { z } from 'zod';
+import { DashboardQuery, DashboardSpec } from './dashboard.ts';
+import type {
+  AdminUser,
+  ApiToken,
+  AudioSegment,
+  Category,
+  Change,
+  CompanionDevice,
+  Dashboard,
+  Job,
+  Me,
+  SearchHit,
+  Session,
+  SessionEvent,
+  Show,
+  Team,
+  TeamDetail,
+  Topic,
+  TranscriptSegment,
+  WikiPage,
+  WikiPageSummary,
+  WikiRevision,
+} from './entities.ts';
+
+const id = z.string().min(1).max(64);
+const name = z.string().trim().min(1).max(200);
+const teamRole = z.enum(['owner', 'admin', 'member']);
+const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const sec = z.number().min(0).max(7 * 24 * 3600);
+/** A timecode string `HH:MM:SS[:FF]` in the session's frame rate. */
+const timecode = z.string().regex(/^\d{1,2}:\d{2}:\d{2}(?:[:;.]\d{2})?$/);
+
+export const CategoryInput = z.object({
+  id: id.optional(),
+  name: z.string().trim().min(1).max(60),
+  color,
+  kind: z.enum(['button', 'dropdown', 'text', 'toggle']).default('button'),
+  options: z.array(z.string().trim().min(1).max(80)).max(30).default([]),
+  onLabel: z.string().max(20).default('ON'),
+  offLabel: z.string().max(20).default('OFF'),
+});
+
+const EventFields = {
+  /** Category id from the show's event buttons. */
+  categoryId: id.optional(),
+  /** Category name; used when categoryId is not given (matched case-insensitively, or kept as a free label). */
+  category: z.string().trim().max(60).optional(),
+  message: z.string().max(5000).default(''),
+  value: z.string().max(200).nullable().optional(),
+  /** Absolute timecode on the session clock. */
+  timecode: timecode.optional(),
+  /** Session seconds from transport zero (alternative to `timecode`). */
+  atSec: sec.optional(),
+};
+
+const TopicFields = {
+  startSec: sec,
+  durationSec: sec.default(0),
+  level: z.number().int().min(1).max(3).default(1),
+  title: z.string().trim().min(1).max(300),
+  summary: z.string().max(10000).default(''),
+};
+
+export const opInputs = {
+  // ── me / auth ─────────────────────────────────────────────
+  'me.get': z.object({}),
+  'me.update': z.object({ name: name.optional() }),
+
+  // ── teams ────────────────────────────────────────────────
+  'teams.list': z.object({}),
+  'teams.get': z.object({ teamId: id }),
+  'teams.create': z.object({ name }),
+  'teams.rename': z.object({ teamId: id, name }),
+  'teams.delete': z.object({ teamId: id }),
+  'teams.invite': z.object({ teamId: id, email: z.email(), role: teamRole.exclude(['owner']).default('member') }),
+  'teams.revokeInvite': z.object({ teamId: id, email: z.email() }),
+  'teams.setRole': z.object({ teamId: id, userId: id, role: teamRole.exclude(['owner']) }),
+  'teams.removeMember': z.object({ teamId: id, userId: id }),
+  'teams.leave': z.object({ teamId: id }),
+  'teams.transferOwnership': z.object({ teamId: id, userId: id }),
+  'teams.setGrant': z.object({
+    teamId: id,
+    userId: id,
+    showId: id,
+    access: z.enum(['none', 'read', 'write']),
+  }),
+
+  // ── shows + event buttons ─────────────────────────────────
+  'shows.list': z.object({ teamId: id.optional() }),
+  'shows.get': z.object({ showId: id }),
+  'shows.create': z.object({
+    teamId: id,
+    name,
+    code: z.string().trim().max(12).optional(),
+    defaultFrameRate: z.number().positive().max(120).default(24),
+  }),
+  'shows.update': z.object({
+    showId: id,
+    name: name.optional(),
+    code: z.string().trim().min(1).max(12).optional(),
+    defaultFrameRate: z.number().positive().max(120).optional(),
+    titleSuffix: z.enum(['date', 'episode', 'none']).optional(),
+    nextEpisode: z.number().int().min(1).optional(),
+  }),
+  'shows.delete': z.object({ showId: id }),
+  'categories.list': z.object({ showId: id }),
+  'categories.save': z.object({ showId: id, categories: z.array(CategoryInput).max(40) }),
+
+  // ── sessions + transport ──────────────────────────────────
+  'sessions.list': z.object({
+    showId: id.optional(),
+    includeArchived: z.boolean().default(false),
+    limit: z.number().int().min(1).max(500).default(100),
+  }),
+  'sessions.get': z.object({ sessionId: id }),
+  'sessions.create': z.object({
+    showId: id,
+    title: z.string().trim().max(200).optional(),
+    episode: z.string().trim().max(40).optional(),
+    episodeDate: z.iso.date().optional(),
+    frameRate: z.number().positive().max(120).optional(),
+    startTimecode: timecode.optional(),
+    notes: z.string().max(10000).optional(),
+  }),
+  'sessions.update': z.object({
+    sessionId: id,
+    title: z.string().trim().max(200).optional(),
+    episode: z.string().trim().max(40).optional(),
+    episodeDate: z.iso.date().nullable().optional(),
+    notes: z.string().max(10000).optional(),
+    frameRate: z.number().positive().max(120).optional(),
+    startTimecode: timecode.optional(),
+  }),
+  'sessions.archive': z.object({ sessionId: id, archived: z.boolean() }),
+  'sessions.delete': z.object({ sessionId: id }),
+  'transport.start': z.object({ sessionId: id }),
+  'transport.stop': z.object({ sessionId: id }),
+  'transport.reset': z.object({ sessionId: id }),
+
+  // ── events ────────────────────────────────────────────────
+  'events.list': z.object({
+    sessionId: id,
+    categoryIds: z.array(id).optional(),
+    source: z.enum(['operator', 'companion', 'agent', 'import']).optional(),
+  }),
+  'events.create': z.object({ sessionId: id, ...EventFields }),
+  'events.createMany': z.object({
+    sessionId: id,
+    events: z.array(z.object(EventFields)).min(1).max(500),
+  }),
+  'events.update': z.object({
+    eventId: id,
+    categoryId: id.nullable().optional(),
+    category: z.string().trim().max(60).optional(),
+    message: z.string().max(5000).optional(),
+    value: z.string().max(200).nullable().optional(),
+    timecode: timecode.optional(),
+    atSec: sec.optional(),
+  }),
+  'events.delete': z.object({ eventId: id }),
+  'events.importCsv': z.object({ sessionId: id, csv: z.string().max(5_000_000) }),
+
+  // ── transcript ────────────────────────────────────────────
+  'transcript.get': z.object({ sessionId: id, fromSec: sec.optional(), toSec: sec.optional() }),
+  'transcript.text': z.object({ sessionId: id, fromSec: sec.optional(), toSec: sec.optional() }),
+  'transcript.updateSegment': z.object({
+    segmentId: id,
+    text: z.string().max(20000).optional(),
+    speaker: z.string().trim().max(80).optional(),
+  }),
+  'transcript.renameSpeaker': z.object({
+    sessionId: id,
+    from: z.string().max(80),
+    to: z.string().trim().min(1).max(80),
+  }),
+
+  // ── topics ────────────────────────────────────────────────
+  'topics.list': z.object({ sessionId: id }),
+  'topics.create': z.object({ sessionId: id, ...TopicFields }),
+  'topics.update': z.object({
+    topicId: id,
+    startSec: sec.optional(),
+    durationSec: sec.optional(),
+    level: z.number().int().min(1).max(3).optional(),
+    title: z.string().trim().min(1).max(300).optional(),
+    summary: z.string().max(10000).optional(),
+  }),
+  'topics.delete': z.object({ topicId: id }),
+  'topics.replace': z.object({ sessionId: id, topics: z.array(z.object(TopicFields)).max(500) }),
+
+  // ── dashboards ────────────────────────────────────────────
+  'dashboards.list': z.object({ sessionId: id }),
+  'dashboards.get': z.object({ dashboardId: id }),
+  'dashboards.save': z.object({ sessionId: id, dashboardId: id.optional(), spec: DashboardSpec }),
+  'dashboards.delete': z.object({ dashboardId: id }),
+  'dashboards.query': z.object({ sessionId: id, query: DashboardQuery }),
+
+  // ── wiki ──────────────────────────────────────────────────
+  'wiki.list': z.object({
+    showId: id,
+    kind: z.enum(['person', 'topic', 'bit', 'session']).optional(),
+  }),
+  'wiki.get': z.object({ pageId: id.optional(), showId: id.optional(), title: z.string().optional() }),
+  'wiki.upsert': z.object({
+    showId: id,
+    pageId: id.optional(),
+    kind: z.enum(['person', 'topic', 'bit', 'session']),
+    title: z.string().trim().min(1).max(200),
+    bodyMd: z.string().max(100_000),
+    aliases: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
+    sessionId: id.optional(),
+  }),
+  'wiki.delete': z.object({ pageId: id }),
+  'wiki.revisions': z.object({ pageId: id }),
+  'wiki.restore': z.object({ pageId: id, revision: z.number().int().min(1) }),
+
+  // ── media ─────────────────────────────────────────────────
+  'media.list': z.object({ sessionId: id }),
+  'media.createUpload': z.object({
+    sessionId: id,
+    mimeType: z.string().min(3).max(100),
+    origin: z.enum(['recorded', 'file']),
+    fileName: z.string().max(300).optional(),
+    startSec: sec.optional(),
+    sizeBytes: z.number().int().positive().max(5 * 1024 ** 3).optional(),
+  }),
+  'media.completeUpload': z.object({ segmentId: id, durationSec: sec.optional() }),
+  'media.playbackUrl': z.object({ segmentId: id }),
+  'media.importYoutube': z.object({ sessionId: id, url: z.url() }),
+  'media.retranscribe': z.object({ sessionId: id, segmentId: id.optional() }),
+  'media.delete': z.object({ segmentId: id }),
+  'jobs.list': z.object({ sessionId: id }),
+
+  // ── search ────────────────────────────────────────────────
+  search: z.object({
+    query: z.string().trim().min(1).max(200),
+    showId: id.optional(),
+    sessionId: id.optional(),
+    kinds: z.array(z.enum(['event', 'transcript', 'topic', 'wiki', 'session'])).optional(),
+    limit: z.number().int().min(1).max(100).default(30),
+  }),
+
+  // ── change log ────────────────────────────────────────────
+  'changes.list': z.object({
+    sessionId: id.optional(),
+    showId: id.optional(),
+    via: z.enum(['web', 'mcp', 'companion', 'worker', 'system']).optional(),
+    limit: z.number().int().min(1).max(500).default(100),
+  }),
+  'changes.revert': z.object({ changeId: id }),
+
+  // ── tokens (agents) ───────────────────────────────────────
+  'tokens.list': z.object({}),
+  'tokens.createPat': z.object({ name, expiresInDays: z.number().int().min(1).max(3650).optional() }),
+  'tokens.revoke': z.object({ tokenId: id }),
+
+  // ── companion devices ─────────────────────────────────────
+  'companion.list': z.object({ showId: id.optional() }),
+  'companion.create': z.object({ showId: id, name }),
+  'companion.revoke': z.object({ deviceId: id }),
+  'companion.setTarget': z.object({ deviceId: id, sessionId: id.nullable() }),
+  /** Companion-socket only: current state for the device. */
+  'companion.state': z.object({}),
+
+  // ── instance admin ────────────────────────────────────────
+  'admin.users': z.object({}),
+  'admin.setStatus': z.object({ userId: id, status: z.enum(['pending', 'active', 'disabled']) }),
+  'admin.setSuperadmin': z.object({ userId: id, value: z.boolean() }),
+} as const;
+
+export type OpName = keyof typeof opInputs;
+export type OpInput<N extends OpName> = z.input<(typeof opInputs)[N]>;
+export type OpParsed<N extends OpName> = z.output<(typeof opInputs)[N]>;
+
+export interface CompanionState {
+  device: { id: string; name: string };
+  show: { id: string; name: string } | null;
+  session: Pick<
+    Session,
+    'id' | 'title' | 'isRolling' | 'rollStartedAt' | 'elapsedFrames' | 'take' | 'frameRate' | 'startOffsetFrames' | 'eventCount'
+  > | null;
+  categories: Category[];
+  lastEvent: Pick<SessionEvent, 'id' | 'category' | 'message' | 'timecodeFrames'> | null;
+}
+
+export type DashboardRows = Record<string, string | number | boolean | null>[];
+
+export interface OpOutputs {
+  'me.get': Me;
+  'me.update': Me;
+  'teams.list': Team[];
+  'teams.get': TeamDetail;
+  'teams.create': Team;
+  'teams.rename': Team;
+  'teams.delete': { deleted: true };
+  'teams.invite': TeamDetail;
+  'teams.revokeInvite': TeamDetail;
+  'teams.setRole': TeamDetail;
+  'teams.removeMember': TeamDetail;
+  'teams.leave': { left: true };
+  'teams.transferOwnership': TeamDetail;
+  'teams.setGrant': TeamDetail;
+  'shows.list': Show[];
+  'shows.get': Show & { categories: Category[] };
+  'shows.create': Show;
+  'shows.update': Show;
+  'shows.delete': { deleted: true };
+  'categories.list': Category[];
+  'categories.save': Category[];
+  'sessions.list': Session[];
+  'sessions.get': Session;
+  'sessions.create': Session;
+  'sessions.update': Session;
+  'sessions.archive': Session;
+  'sessions.delete': { deleted: true };
+  'transport.start': Session;
+  'transport.stop': Session;
+  'transport.reset': Session;
+  'events.list': SessionEvent[];
+  'events.create': SessionEvent;
+  'events.createMany': SessionEvent[];
+  'events.update': SessionEvent;
+  'events.delete': { deleted: true };
+  'events.importCsv': { imported: number; skipped: { line: number; reason: string }[] };
+  'transcript.get': TranscriptSegment[];
+  'transcript.text': { text: string; segments: number };
+  'transcript.updateSegment': TranscriptSegment;
+  'transcript.renameSpeaker': { updated: number };
+  'topics.list': Topic[];
+  'topics.create': Topic;
+  'topics.update': Topic;
+  'topics.delete': { deleted: true };
+  'topics.replace': Topic[];
+  'dashboards.list': Dashboard[];
+  'dashboards.get': Dashboard;
+  'dashboards.save': Dashboard;
+  'dashboards.delete': { deleted: true };
+  'dashboards.query': DashboardRows;
+  'wiki.list': WikiPageSummary[];
+  'wiki.get': WikiPage;
+  'wiki.upsert': WikiPage;
+  'wiki.delete': { deleted: true };
+  'wiki.revisions': WikiRevision[];
+  'wiki.restore': WikiPage;
+  'media.list': AudioSegment[];
+  'media.createUpload': { segment: AudioSegment; uploadUrl: string; headers: Record<string, string> };
+  'media.completeUpload': AudioSegment;
+  'media.playbackUrl': { url: string; expiresAt: string };
+  'media.importYoutube': Job;
+  'media.retranscribe': Job[];
+  'media.delete': { deleted: true };
+  'jobs.list': Job[];
+  search: SearchHit[];
+  'changes.list': Change[];
+  'changes.revert': Change;
+  'tokens.list': ApiToken[];
+  'tokens.createPat': { token: string; apiToken: ApiToken };
+  'tokens.revoke': { revoked: true };
+  'companion.list': CompanionDevice[];
+  'companion.create': { device: CompanionDevice; token: string };
+  'companion.revoke': { revoked: true };
+  'companion.setTarget': CompanionDevice;
+  'companion.state': CompanionState;
+  'admin.users': AdminUser[];
+  'admin.setStatus': AdminUser;
+  'admin.setSuperadmin': AdminUser;
+}
+
+// Compile-time check: every op has an output type and vice versa.
+type _MissingOutputs = Exclude<OpName, keyof OpOutputs>;
+type _ExtraOutputs = Exclude<keyof OpOutputs, OpName>;
+const _check: [_MissingOutputs, _ExtraOutputs] extends [never, never] ? true : never = true;
+void _check;
+
+export interface RpcError {
+  code: 'bad_request' | 'unauthenticated' | 'forbidden' | 'not_found' | 'conflict' | 'unavailable' | 'internal';
+  message: string;
+  issues?: { path: string; message: string }[];
+}
+
+export type RpcResponse<T> = { ok: true; data: T } | { ok: false; error: RpcError };

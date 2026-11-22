@@ -1,0 +1,22 @@
+{
+  "name": "companion-module-autologger",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "package": "companion-module-build"
+  },
+  "dependencies": {
+    "@companion-module/base": "~1.14.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@companion-module/tools": "^2.0.0",
+    "@types/ws": "^8.18.0"
+  }
+}
