@@ -21,10 +21,18 @@ export type JobSpec =
   | { kind: 'youtube_import'; sessionId: string; actorId: string | null; payload: { url: string } };
 
 /**
- * `at` sets created_at and run_after explicitly. Jobs inserted in one transaction otherwise share
- * now(); give a batch distinct, increasing times so the worker claims them in order.
+ * Queue a job. Pass `after` for follow-up work (an import's transcription): the new job takes
+ * the parent's place in the queue (run_after = parent's created_at) instead of going to the back,
+ * so it runs before anything queued after the parent — a playlist import's first transcript
+ * doesn't wait behind every other download. `at` sets created_at and run_after explicitly: jobs
+ * inserted in one transaction otherwise share now(), so give a batch distinct, increasing times
+ * so the worker claims them in order.
  */
-export async function enqueueJob(tx: DbOrTx, spec: JobSpec, at?: Date): Promise<JobRow> {
+export async function enqueueJob(
+  tx: DbOrTx,
+  spec: JobSpec,
+  opts: { after?: JobRow; at?: Date } = {},
+): Promise<JobRow> {
   const [row] = await tx
     .insert(schema.jobs)
     .values({
@@ -34,7 +42,11 @@ export async function enqueueJob(tx: DbOrTx, spec: JobSpec, at?: Date): Promise<
       payload: spec.payload,
       actorId: spec.actorId,
       progress: 'Queued',
-      ...(at ? { createdAt: at, runAfter: at } : {}),
+      ...(opts.at ? { createdAt: opts.at, runAfter: opts.at } : {}),
+      // Read in SQL: a JS Date would truncate created_at's microseconds.
+      ...(opts.after
+        ? { runAfter: sql`(select created_at from jobs where id = ${opts.after.id})` }
+        : {}),
     })
     .returning();
   // Delivered on commit; harmless when the worker isn't listening.
