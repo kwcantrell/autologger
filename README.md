@@ -60,6 +60,12 @@ Google OAuth redirect URI: `$PUBLIC_URL/auth/google/callback`.
 
 Signed-out visitors at `/` see a public landing page about AutoLogger. For a private instance, set
 `LANDING_PAGE=0` to send them straight to sign-in instead (read at startup; restart the app to apply).
+Its doc links (the Docs menu, "Connect an agent", "Read the docs") point at this repo's `docs/` on
+GitHub; set `DOCS_URL` to the base URL of your own copy of that folder to use it instead. It
+replaces `https://github.com/kwcantrell/autologger/blob/main/docs` and the file names stay the
+same, so `DOCS_URL=https://docs.example.com/autologger` links to
+`https://docs.example.com/autologger/mcp.md`. Links to the upstream repos (plugin marketplace,
+Companion module, architecture, GitHub) don't change.
 
 ## Connecting an agent
 

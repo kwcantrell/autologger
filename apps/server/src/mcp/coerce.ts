@@ -2,7 +2,10 @@
 // new option's type and sends it as a string ("true", "250"). Coerce those strings by the tool's
 // JSON input schema before the op validates them, and when validation still fails on a value the
 // client sent, say that its tool list may be stale. MCP only; HTTP RPC stays strict.
+// The tool list also has a version (a hash of the tools), so a client or agent can tell that the
+// list it loaded at connect time differs from the server's.
 
+import { createHash } from 'node:crypto';
 import type { z } from 'zod';
 
 type Schema = Record<string, unknown>;
@@ -75,8 +78,33 @@ export function coerceArguments(
   return coerceValue(args, alternatives(schema, schema), schema) as Record<string, unknown>;
 }
 
-export const STALE_TOOL_LIST_HINT =
-  "Hint: this option may be newer than your client's tool list. If the tool's input schema you were given doesn't list it (or gives it another type), reconnect the AutoLogger MCP server (/mcp in Claude Code) to refresh the tools, then retry.";
+/** JSON with object keys sorted, so equal values always serialize the same way. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+/** The tool-list version: the first 8 hex chars of a SHA-256 over every tool's name, description
+ * and input schema (order-independent). It changes whenever a deploy adds, removes or changes a
+ * tool, and stays the same across restarts of the same build. */
+export function toolListVersion(
+  tools: readonly { name: string; description?: string; inputSchema: unknown }[],
+): string {
+  const canonical = tools
+    .map((t) => ({ name: t.name, description: t.description ?? '', inputSchema: t.inputSchema }))
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return createHash('sha256').update(canonicalJson(canonical)).digest('hex').slice(0, 8);
+}
+
+export function staleToolListHint(version: string): string {
+  return `Hint: this option may be newer than your client's tool list. The server's tool list is now version ${version} (serverInfo.version ends in +tools.${version}); if the version your client got at connect time differs, or the tool's input schema you were given doesn't list this option (or gives it another type), reconnect the AutoLogger MCP server (/mcp in Claude Code) to refresh the tools, then retry.`;
+}
 
 function valueAt(input: unknown, path: readonly PropertyKey[]): unknown {
   let v = input;

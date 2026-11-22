@@ -4,17 +4,22 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../core/ids.ts';
 import type { Actor } from '../core/op.ts';
 import { db, schema } from '../db/client.ts';
-import { createMcpServer } from '../mcp/server.ts';
+import { createMcpServer, mcpTools } from '../mcp/server.ts';
 import { asAgent, resetDb, setupDb, studio } from './harness.ts';
 
 beforeAll(setupDb);
 beforeEach(resetDb);
 
-async function connect(actor: Actor) {
+async function connectClient(actor: Actor) {
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await createMcpServer(actor).connect(serverSide);
   const client = new Client({ name: 'test', version: '1.0.0' });
   await client.connect(clientSide);
+  return client;
+}
+
+async function connect(actor: Actor) {
+  const client = await connectClient(actor);
   return async (name: string, args: Record<string, unknown>) => {
     const res = (await client.callTool({ name, arguments: args })) as {
       isError?: boolean;
@@ -67,9 +72,23 @@ describe('MCP tolerance for stale client tool lists', () => {
     expect(stale.isError).toBe(true);
     expect(stale.text).toMatch(/^bad_request: .*\n- suspect: /);
     expect(stale.text).toContain("newer than your client's tool list");
+    expect(stale.text).toContain(`tool list is now version ${mcpTools().version}`);
 
     const plain = await callTool('transcript_find', { sessionId: session.id });
     expect(plain.isError).toBe(true);
     expect(plain.text).not.toContain('tool list');
+  });
+});
+
+describe('MCP tool-list version', () => {
+  it('is in serverInfo.version and the instructions', async () => {
+    const { owner } = await studio();
+    const client = await connectClient(asAgent(owner));
+    const version = mcpTools().version;
+    expect(version).toMatch(/^[0-9a-f]{8}$/);
+    expect(client.getServerVersion()?.version).toMatch(
+      new RegExp(`^\\d+\\.\\d+\\.\\d+\\+tools\\.${version}$`),
+    );
+    expect(client.getInstructions()).toContain(`Tool list version: ${version}.`);
   });
 });
