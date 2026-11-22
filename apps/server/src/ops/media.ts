@@ -5,7 +5,7 @@
 // `transcribe`). The worker (src/worker) does the Deepgram and yt-dlp work.
 
 import type { AudioSegment, Job, PlaylistImport } from '@autologger/contract';
-import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { requireSession, requireShow } from '../core/authz.ts';
 import { type BusMessage, changeMessage, subscribeAll, type Topic } from '../core/bus.ts';
 import { badRequest, conflict, notFound, unavailable } from '../core/errors.ts';
@@ -533,12 +533,15 @@ function watchJobs(ms: number, signal?: AbortSignal): OpWatch<Job[]> {
 defineOp({
   name: 'jobs.list',
   description:
-    'Background jobs (transcription, YouTube import), newest first, with status, progress and errors. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"). Optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Queued jobs include queuePosition: how many jobs the worker will start before this one, 0 = next. It counts every runnable queued job on the server (all teams and shows; only the number is exposed); a job waiting to retry after a failure has no queuePosition until its retry time. startedAt is when the current attempt started (null while queued). Queued (with a queuePosition) and running jobs include etaSec: a rough estimate of seconds until the job finishes, from the median duration of the last 20 finished jobs of the same kind (transcriptions scaled by their audio length), the jobs ahead in the queue, the time left on running jobs and the total job slots of the workers currently running; 0 on a running job means it is taking longer than usual. It is absent when there is no finished history to estimate from. Use it to choose waitSec, not as a deadline. To wait for jobs, pass waitSec (1–55): if any listed job is queued or running, the call holds until one of them changes status (starts, finishes, fails) or a new job is queued in one of their sessions, then returns the fresh list — or returns after waitSec seconds when nothing changed. Call it again in a loop until the result is empty / all done; no separate sleep is needed. Without waitSec the call returns at once; do not poll it in a tight loop.',
+    'Background jobs (transcription, YouTube import), newest first, with status, progress and errors. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"). Optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Queued jobs include queuePosition: how many jobs the worker will start before this one, 0 = next. It counts every runnable queued job on the server (all teams and shows; only the number is exposed); a job waiting to retry after a failure has no queuePosition until its retry time. startedAt is when the current attempt started (null while queued). Queued (with a queuePosition) and running jobs include etaSec: a rough estimate of seconds until the job finishes, from the median duration of the last 20 finished jobs of the same kind (transcriptions scaled by their audio length), the jobs ahead in the queue, the time left on running jobs and the total job slots of the workers currently running; 0 on a running job means it is taking longer than usual. It is absent when there is no finished history to estimate from. Use it to choose waitSec, not as a deadline. To wait for jobs, pass waitSec (1–55): if any listed job is queued or running, the call holds until one of them changes status (starts, finishes, fails) or a new job is queued in one of their sessions, then returns the fresh list — or returns after waitSec seconds when nothing changed. Call it again in a loop until the result is empty / all done; no separate sleep is needed. Without waitSec the call returns at once; do not poll it in a tight loop. A failed job that someone acknowledged (jobs.dismiss) has dismissedAt set; hideDismissed: true leaves those failures out (e.g. status ["failed"] with hideDismissed lists the failures nobody has dealt with yet).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   watch: ({ waitSec }, signal) => (waitSec ? watchJobs(waitSec * 1000, signal) : null),
-  async run(ctx, { sessionId, showId, status, limit }) {
-    const statusCond = status ? inArray(jobs.status, status) : undefined;
+  async run(ctx, { sessionId, showId, status, limit, hideDismissed }) {
+    const statusCond = and(
+      status ? inArray(jobs.status, status) : undefined,
+      hideDismissed ? isNull(jobs.dismissedAt) : undefined,
+    );
     if (sessionId) {
       await requireSession(ctx, sessionId, 'read');
       const rows = await ctx.db
@@ -562,5 +565,34 @@ defineOp({
       ctx.db,
       rows.map((r) => ({ ...toJob(r.job), sessionTitle: r.sessionTitle })),
     );
+  },
+});
+
+defineOp({
+  name: 'jobs.dismiss',
+  description:
+    "Acknowledge a failed background job (jobId from jobs.list) so it stops being reported as an open failure: sets its dismissedAt, and jobs.list with hideDismissed: true leaves it out. Use it once a failure has been dealt with or cannot be fixed (e.g. a private or deleted video). It does not retry, delete or change anything else; the job and its error stay readable in jobs.list. Only failed jobs can be dismissed (other states are a conflict error); dismissing one again returns it unchanged. Needs write access to the job's show. Returns the job.",
+  kind: 'write',
+  surfaces: ['web', 'mcp'],
+  async run(ctx, { jobId }) {
+    const [row] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
+    if (!row?.sessionId) throw notFound('Job');
+    try {
+      await requireSession(ctx, row.sessionId, 'write');
+    } catch (e) {
+      if ((e as { code?: string }).code === 'not_found') throw notFound('Job');
+      throw e;
+    }
+    if (row.status !== 'failed') throw conflict('Only failed jobs can be dismissed.');
+    if (row.dismissedAt) return toJob(row);
+    // Not a content write (jobs aren't in the change log), so nothing to record or undo; the
+    // job's updatedAt is left alone so it still says when the job failed.
+    const [next] = await ctx.db
+      .update(jobs)
+      .set({ dismissedAt: new Date() })
+      .where(eq(jobs.id, jobId))
+      .returning();
+    publishJob(ctx, next!);
+    return toJob(next!);
   },
 });
