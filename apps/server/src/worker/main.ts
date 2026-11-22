@@ -5,6 +5,7 @@
 import { eq } from 'drizzle-orm';
 import { newId } from '../core/ids.ts';
 import { db, schema, sqlClient } from '../db/client.ts';
+import { waitForMigrations } from '../db/migrate.ts';
 import { env, storageConfigured, transcriptionConfigured } from '../env.ts';
 import { PermanentError } from '../media/deepgram.ts';
 import { JOBS_CHANNEL, type JobRow, WORKER_HEARTBEAT_SEC } from '../media/jobs.ts';
@@ -33,7 +34,7 @@ const beat = () =>
   beatWorker(WORKER_ID, CONCURRENCY, KIND_CONCURRENCY).catch((e) =>
     console.error('worker heartbeat failed', e),
   );
-const presence = setInterval(beat, WORKER_HEARTBEAT_SEC * 1000);
+let presence: ReturnType<typeof setInterval> | undefined;
 
 const active = new Map<string, { kind: JobRow['kind']; done: Promise<void> }>();
 let stopping = false;
@@ -147,7 +148,10 @@ console.log(
   `autologger worker starting (concurrency ${CONCURRENCY}, per kind ${JSON.stringify(KIND_CONCURRENCY)}; storage ${storageConfigured ? 'on' : 'off'}, ` +
     `transcription ${transcriptionConfigured ? 'on' : 'off'}, youtube ${env.youtubeEnabled ? `on via ${env.ytDlpPath}` : 'off'})`,
 );
+// The API applies migrations; claiming or beating first can hit a missing table or column.
+await waitForMigrations();
 await ensureBucket();
 await beat();
+presence = setInterval(beat, WORKER_HEARTBEAT_SEC * 1000);
 await sqlClient.listen(JOBS_CHANNEL, () => wake?.());
 await loop();
