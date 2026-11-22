@@ -21,6 +21,7 @@ import type {
   Team,
   TeamDetail,
   Topic,
+  TranscriptFindLine,
   TranscriptLine,
   TranscriptSegment,
   WikiPage,
@@ -198,14 +199,20 @@ export const opInputs = {
     text: z.string().max(20000).optional(),
     speaker: z.string().trim().max(80).optional(),
   }),
-  'transcript.find': z.object({
-    sessionId: id,
-    pattern: z.string().min(1).max(500),
-    regex: z.boolean().default(false),
-    fromSec: sec.optional(),
-    toSec: sec.optional(),
-    limit: z.number().int().min(1).max(2000).default(500),
-  }),
+  'transcript.find': z
+    .object({
+      sessionId: id,
+      pattern: z.string().min(1).max(500).optional(),
+      patterns: z.array(z.string().min(1).max(500)).min(1).max(20).optional(),
+      regex: z.boolean().default(false),
+      fromSec: sec.optional(),
+      toSec: sec.optional(),
+      limit: z.number().int().min(1).max(2000).default(500),
+      context: z.number().int().min(0).max(3).default(0),
+    })
+    .refine((v) => (v.pattern === undefined) !== (v.patterns === undefined), {
+      message: 'Pass exactly one of pattern or patterns',
+    }),
   'transcript.updateSegments': z.object({
     sessionId: id,
     updates: z
@@ -396,7 +403,7 @@ export interface OpOutputs {
   'transcript.get': TranscriptSegment[];
   'transcript.text': { text: string; segments: number };
   'transcript.updateSegment': TranscriptSegment;
-  'transcript.find': TranscriptLine[];
+  'transcript.find': TranscriptFindLine[];
   'transcript.updateSegments': { updated: number; segments: TranscriptLine[] };
   'transcript.renameSpeaker': { updated: number };
   'topics.list': Topic[];
