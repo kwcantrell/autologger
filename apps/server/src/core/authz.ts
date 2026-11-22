@@ -111,6 +111,17 @@ export async function canReadSession(actor: Actor, sessionId: string): Promise<b
   });
 }
 
+/** Like canReadSession, for a show (the show WebSocket). */
+export async function canReadShow(actor: Actor, showId: string): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const ctx = { actor, db: tx } as Pick<Ctx, 'actor' | 'db'> as Ctx;
+    return requireShow(ctx, showId, 'read').then(
+      () => true,
+      () => false,
+    );
+  });
+}
+
 /**
  * SQL condition selecting the shows the actor can read; pass the show id column to filter on.
  * Used by list and search queries.

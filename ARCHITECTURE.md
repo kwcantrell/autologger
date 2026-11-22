@@ -95,6 +95,11 @@ Clients open `/ws/session/:id`. After authz the server sends `hello` and then pu
 The web app applies them to the TanStack Query cache. The bus publishes in-process and via
 `NOTIFY autologger`, so writes from the worker arrive too.
 
+The rail opens `/ws/show/:id` for the active show (show read access): job changes and
+session-list invalidations for every session of the show (`ShowServerMessage`). It relays the
+`session:<id>` messages of the show's sessions plus `show_changed` on `show:<id>`, so publishers
+keep publishing per session. While it is open the jobs indicator doesn't poll.
+
 ## Timecode
 
 `sessions` holds the transport: `is_rolling`, `roll_started_at`, `elapsed_frames` (accumulated
