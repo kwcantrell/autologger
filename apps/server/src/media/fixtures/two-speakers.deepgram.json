@@ -1,0 +1,391 @@
+{
+  "metadata": {
+    "transaction_key": "deprecated",
+    "request_id": "00000000-0000-0000-0000-000000000000",
+    "sha256": "sample",
+    "created": "2026-11-22T00:00:00.000Z",
+    "duration": 9.402625,
+    "channels": 1,
+    "models": ["40bd3654-e622-47c4-a111-63a61b23bfe2"],
+    "model_info": {
+      "40bd3654-e622-47c4-a111-63a61b23bfe2": {
+        "name": "general-nova-3",
+        "version": "2025-04-17.21547",
+        "arch": "nova-3"
+      }
+    },
+    "diarize_info": {
+      "model_uuid": "6a5d3c0e-4d0b-4b1c-9a52-2f0f3c1d7e11",
+      "arch": "v2"
+    }
+  },
+  "results": {
+    "channels": [
+      {
+        "alternatives": [
+          {
+            "transcript": "Welcome back to the show. How was your trip to Denver? It was great, thanks. The mountains were beautiful.",
+            "confidence": 0.98,
+            "words": [
+              {
+                "word": "welcome",
+                "start": 0.48,
+                "end": 0.79,
+                "confidence": 0.98,
+                "speaker": 0,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "Welcome"
+              },
+              {
+                "word": "back",
+                "start": 0.83,
+                "end": 1.14,
+                "confidence": 0.98,
+                "speaker": 0,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "back"
+              },
+              {
+                "word": "to",
+                "start": 1.18,
+                "end": 1.49,
+                "confidence": 0.98,
+                "speaker": 0,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "to"
+              },
+              {
+                "word": "the",
+                "start": 1.53,
+                "end": 1.84,
+                "confidence": 0.98,
+                "speaker": 0,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "the"
+              },
+              {
+                "word": "show",
+                "start": 1.88,
+                "end": 2.19,
+                "confidence": 0.98,
+                "speaker": 0,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "show."
+              },
+              {
+                "word": "how",
+                "start": 2.23,
+                "end": 2.53,
+                "confidence": 0.98,
+                "speaker": 0,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "How"
+              },
+              {
+                "word": "was",
+                "start": 2.57,
+                "end": 2.88,
+                "confidence": 0.98,
+                "speaker": 0,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "was"
+              },
+              {
+                "word": "your",
+                "start": 2.92,
+                "end": 3.23,
+                "confidence": 0.98,
+                "speaker": 0,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "your"
+              },
+              {
+                "word": "trip",
+                "start": 3.27,
+                "end": 3.58,
+                "confidence": 0.98,
+                "speaker": 0,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "trip"
+              },
+              {
+                "word": "to",
+                "start": 3.62,
+                "end": 3.93,
+                "confidence": 0.98,
+                "speaker": 0,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "to"
+              },
+              {
+                "word": "denver",
+                "start": 3.97,
+                "end": 4.28,
+                "confidence": 0.98,
+                "speaker": 0,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "Denver?"
+              },
+              {
+                "word": "it",
+                "start": 5.2,
+                "end": 5.62,
+                "confidence": 0.98,
+                "speaker": 1,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "It"
+              },
+              {
+                "word": "was",
+                "start": 5.66,
+                "end": 6.08,
+                "confidence": 0.98,
+                "speaker": 1,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "was"
+              },
+              {
+                "word": "great",
+                "start": 6.12,
+                "end": 6.55,
+                "confidence": 0.98,
+                "speaker": 1,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "great,"
+              },
+              {
+                "word": "thanks",
+                "start": 6.59,
+                "end": 7.01,
+                "confidence": 0.98,
+                "speaker": 1,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "thanks."
+              },
+              {
+                "word": "the",
+                "start": 7.05,
+                "end": 7.47,
+                "confidence": 0.98,
+                "speaker": 1,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "The"
+              },
+              {
+                "word": "mountains",
+                "start": 7.51,
+                "end": 7.94,
+                "confidence": 0.98,
+                "speaker": 1,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "mountains"
+              },
+              {
+                "word": "were",
+                "start": 7.98,
+                "end": 8.4,
+                "confidence": 0.98,
+                "speaker": 1,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "were"
+              },
+              {
+                "word": "beautiful",
+                "start": 8.44,
+                "end": 8.86,
+                "confidence": 0.98,
+                "speaker": 1,
+                "speaker_confidence": 0.9,
+                "punctuated_word": "beautiful."
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "utterances": [
+      {
+        "start": 0.48,
+        "end": 8.86,
+        "confidence": 0.98,
+        "channel": 0,
+        "transcript": "Welcome back to the show. How was your trip to Denver? It was great, thanks. The mountains were beautiful.",
+        "words": [
+          {
+            "word": "welcome",
+            "start": 0.48,
+            "end": 0.79,
+            "confidence": 0.98,
+            "speaker": 0,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "Welcome"
+          },
+          {
+            "word": "back",
+            "start": 0.83,
+            "end": 1.14,
+            "confidence": 0.98,
+            "speaker": 0,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "back"
+          },
+          {
+            "word": "to",
+            "start": 1.18,
+            "end": 1.49,
+            "confidence": 0.98,
+            "speaker": 0,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "to"
+          },
+          {
+            "word": "the",
+            "start": 1.53,
+            "end": 1.84,
+            "confidence": 0.98,
+            "speaker": 0,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "the"
+          },
+          {
+            "word": "show",
+            "start": 1.88,
+            "end": 2.19,
+            "confidence": 0.98,
+            "speaker": 0,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "show."
+          },
+          {
+            "word": "how",
+            "start": 2.23,
+            "end": 2.53,
+            "confidence": 0.98,
+            "speaker": 0,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "How"
+          },
+          {
+            "word": "was",
+            "start": 2.57,
+            "end": 2.88,
+            "confidence": 0.98,
+            "speaker": 0,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "was"
+          },
+          {
+            "word": "your",
+            "start": 2.92,
+            "end": 3.23,
+            "confidence": 0.98,
+            "speaker": 0,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "your"
+          },
+          {
+            "word": "trip",
+            "start": 3.27,
+            "end": 3.58,
+            "confidence": 0.98,
+            "speaker": 0,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "trip"
+          },
+          {
+            "word": "to",
+            "start": 3.62,
+            "end": 3.93,
+            "confidence": 0.98,
+            "speaker": 0,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "to"
+          },
+          {
+            "word": "denver",
+            "start": 3.97,
+            "end": 4.28,
+            "confidence": 0.98,
+            "speaker": 0,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "Denver?"
+          },
+          {
+            "word": "it",
+            "start": 5.2,
+            "end": 5.62,
+            "confidence": 0.98,
+            "speaker": 1,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "It"
+          },
+          {
+            "word": "was",
+            "start": 5.66,
+            "end": 6.08,
+            "confidence": 0.98,
+            "speaker": 1,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "was"
+          },
+          {
+            "word": "great",
+            "start": 6.12,
+            "end": 6.55,
+            "confidence": 0.98,
+            "speaker": 1,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "great,"
+          },
+          {
+            "word": "thanks",
+            "start": 6.59,
+            "end": 7.01,
+            "confidence": 0.98,
+            "speaker": 1,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "thanks."
+          },
+          {
+            "word": "the",
+            "start": 7.05,
+            "end": 7.47,
+            "confidence": 0.98,
+            "speaker": 1,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "The"
+          },
+          {
+            "word": "mountains",
+            "start": 7.51,
+            "end": 7.94,
+            "confidence": 0.98,
+            "speaker": 1,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "mountains"
+          },
+          {
+            "word": "were",
+            "start": 7.98,
+            "end": 8.4,
+            "confidence": 0.98,
+            "speaker": 1,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "were"
+          },
+          {
+            "word": "beautiful",
+            "start": 8.44,
+            "end": 8.86,
+            "confidence": 0.98,
+            "speaker": 1,
+            "speaker_confidence": 0.9,
+            "punctuated_word": "beautiful."
+          }
+        ],
+        "speaker": 0,
+        "id": "00000000-0000-0000-0000-000000000001"
+      }
+    ]
+  }
+}
