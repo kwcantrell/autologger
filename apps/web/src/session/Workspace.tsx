@@ -248,8 +248,8 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
             onValueChange={(v) => switchTab(v as WorkspaceTab)}
             className="min-h-0 flex-[1_1_0] gap-0"
           >
-            <div className="relative z-0 mx-4 mb-3 flex shrink-0 items-end gap-2 pt-[0.3rem] max-md:mx-3 max-md:overflow-x-auto max-md:overflow-y-hidden max-md:[scrollbar-width:none]">
-              <TabsList variant="line" aria-label="Feed tabs" className="max-md:flex-none">
+            <div className="relative z-0 mx-4 mb-3 flex shrink-0 items-end gap-2 pt-[0.3rem] max-md:mx-3 max-lg:overflow-x-auto max-lg:overflow-y-hidden max-lg:[scrollbar-width:none]">
+              <TabsList variant="line" aria-label="Feed tabs" className="max-lg:flex-none">
                 {TABS.map((t) => (
                   <TabsTrigger key={t.id} value={t.id}>
                     {t.label}
@@ -357,7 +357,7 @@ function SessionWikiButton({ session }: { session: Session }) {
       onClick={() => void open()}
     >
       {busy ? <Spinner /> : <BookOpenIcon aria-hidden="true" />}
-      <span className="max-md:sr-only">Wiki page</span>
+      <span className="max-xl:sr-only">Wiki page</span>
     </Button>
   );
 }
