@@ -99,7 +99,14 @@ async function transcriptJob(ctx: Ctx, sessionId: string): Promise<TranscriptJob
   const rows = await ctx.db
     .select()
     .from(jobs)
-    .where(and(eq(jobs.sessionId, sessionId), inArray(jobs.status, ['queued', 'running'])));
+    .where(
+      and(
+        eq(jobs.sessionId, sessionId),
+        inArray(jobs.status, ['queued', 'running']),
+        // Waveform jobs don't lead to the transcript.
+        inArray(jobs.kind, ['transcribe', 'youtube_import']),
+      ),
+    );
   if (!rows.length) return null;
   const list = await withJobEstimates(ctx.db, rows.map(toJob), { untilTranscript: true });
   // No estimate (no history, or waiting out a retry) sorts as the latest.

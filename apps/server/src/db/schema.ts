@@ -230,6 +230,8 @@ export const audioSegments = pgTable(
     origin: text('origin', { enum: ['recorded', 'file', 'youtube'] }).notNull(),
     fileName: text('file_name'),
     objectKey: text('object_key').notNull(),
+    /** S3 key of the waveform peaks object (worker `waveform` job); null until computed. */
+    peaksKey: text('peaks_key'),
     sizeBytes: bigint('size_bytes', { mode: 'number' }),
     status: text('status', {
       enum: ['uploading', 'ready', 'transcribing', 'transcribed', 'failed'],
@@ -498,7 +500,7 @@ export const jobs = pgTable(
   'jobs',
   {
     id: text('id').primaryKey(),
-    kind: text('kind', { enum: ['transcribe', 'youtube_import'] }).notNull(),
+    kind: text('kind', { enum: ['transcribe', 'youtube_import', 'waveform'] }).notNull(),
     status: text('status', { enum: ['queued', 'running', 'done', 'failed'] })
       .notNull()
       .default('queued'),

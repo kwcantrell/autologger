@@ -1,0 +1,1 @@
+ALTER TABLE "audio_segments" ADD COLUMN "peaks_key" text;

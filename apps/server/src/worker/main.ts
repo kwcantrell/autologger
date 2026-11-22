@@ -1,5 +1,5 @@
 // Worker entrypoint: `node src/worker/main.ts`. Runs background jobs from the `jobs` table
-// (transcribe, youtube_import). Several workers may run side by side; claiming uses
+// (transcribe, youtube_import, waveform). Several workers may run side by side; claiming uses
 // FOR UPDATE SKIP LOCKED.
 
 import { eq } from 'drizzle-orm';
@@ -10,7 +10,8 @@ import { env, storageConfigured, transcriptionConfigured } from '../env.ts';
 import { PermanentError } from '../media/deepgram.ts';
 import { JOBS_CHANNEL, type JobRow, WORKER_HEARTBEAT_SEC } from '../media/jobs.ts';
 import { ensureBucket } from '../media/s3.ts';
-import { handlers } from './handlers.ts';
+import { ffmpegAvailable } from '../media/waveform.ts';
+import { backfillWaveforms, handlers } from './handlers.ts';
 import {
   beatWorker,
   claimJob,
@@ -27,6 +28,8 @@ const RECOVER_MS = 60_000;
 const HEARTBEAT_MS = 60_000;
 
 const KIND_CONCURRENCY = env.workerKindConcurrency;
+// Without ffmpeg this worker leaves waveform jobs to workers that have it.
+const hasFfmpeg = await ffmpegAvailable(env.ffmpegPath);
 const WORKER_ID = newId('wrk');
 
 // Heartbeat row in `workers`: tells the API how many job slots are live (jobs.list etaSec).
@@ -72,9 +75,11 @@ async function runJob(job: JobRow): Promise<void> {
 function fullKinds(): JobRow['kind'][] {
   const running = new Map<JobRow['kind'], number>();
   for (const { kind } of active.values()) running.set(kind, (running.get(kind) ?? 0) + 1);
-  return (Object.keys(KIND_CONCURRENCY) as JobRow['kind'][]).filter(
+  const full = (Object.keys(KIND_CONCURRENCY) as JobRow['kind'][]).filter(
     (kind) => (running.get(kind) ?? 0) >= KIND_CONCURRENCY[kind],
   );
+  if (!hasFfmpeg && !full.includes('waveform')) full.push('waveform');
+  return full;
 }
 
 async function fillSlots(): Promise<void> {
@@ -144,14 +149,20 @@ async function shutdown(): Promise<void> {
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => void shutdown());
 
-console.log(
-  `autologger worker starting (concurrency ${CONCURRENCY}, per kind ${JSON.stringify(KIND_CONCURRENCY)}; storage ${storageConfigured ? 'on' : 'off'}, ` +
-    `transcription ${transcriptionConfigured ? 'on' : 'off'}, youtube ${env.youtubeEnabled ? `on via ${env.ytDlpPath}` : 'off'})`,
-);
 // The API applies migrations; claiming or beating first can hit a missing table or column.
 await waitForMigrations();
+console.log(
+  `autologger worker starting (concurrency ${CONCURRENCY}, per kind ${JSON.stringify(KIND_CONCURRENCY)}; storage ${storageConfigured ? 'on' : 'off'}, ` +
+    `transcription ${transcriptionConfigured ? 'on' : 'off'}, youtube ${env.youtubeEnabled ? `on via ${env.ytDlpPath}` : 'off'}, ` +
+    `waveforms ${hasFfmpeg ? `on via ${env.ffmpegPath}` : `off: ffmpeg not found (FFMPEG_PATH=${env.ffmpegPath}), this worker does not claim waveform jobs`})`,
+);
 await ensureBucket();
 await beat();
 presence = setInterval(beat, WORKER_HEARTBEAT_SEC * 1000);
+// Peaks for stored audio that has none yet (older audio, jobs skipped without ffmpeg).
+if (storageConfigured && hasFfmpeg)
+  await backfillWaveforms()
+    .then((n) => n && console.log(`queued ${n} waveform job(s) for audio without peaks`))
+    .catch((e) => console.error('waveform backfill failed', e));
 await sqlClient.listen(JOBS_CHANNEL, () => wake?.());
 await loop();

@@ -47,6 +47,8 @@ export const env = {
   deepgramApiKey: str('DEEPGRAM_API_KEY'),
   ytDlpPath: str('YTDLP_PATH', 'yt-dlp')!,
   youtubeEnabled: str('YOUTUBE_IMPORT', '1') === '1',
+  /** ffmpeg for waveform peaks (worker). Missing → waveform jobs are skipped with a note. */
+  ffmpegPath: str('FFMPEG_PATH', 'ffmpeg')!,
   /**
    * Jobs a worker process runs in parallel. Workers report it in their `workers` heartbeat row;
    * the API uses its own value for etaSec only when no worker row is live.
@@ -59,6 +61,7 @@ export const env = {
   workerKindConcurrency: {
     transcribe: kindConcurrency('WORKER_CONCURRENCY_TRANSCRIBE'),
     youtube_import: kindConcurrency('WORKER_CONCURRENCY_YOUTUBE_IMPORT'),
+    waveform: kindConcurrency('WORKER_CONCURRENCY_WAVEFORM'),
   },
 };
 

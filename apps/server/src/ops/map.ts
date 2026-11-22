@@ -114,6 +114,7 @@ export function toAudioSegment(r: Row<typeof schema.audioSegments>): AudioSegmen
     fileName: r.fileName,
     status: r.status,
     error: r.error,
+    hasWaveform: r.peaksKey !== null,
     createdAt: r.createdAt.toISOString(),
   };
 }

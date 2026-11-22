@@ -15,6 +15,7 @@ import type {
   Job,
   Me,
   SearchHit,
+  SegmentWaveform,
   Session,
   SessionDetail,
   SessionEvent,
@@ -406,6 +407,7 @@ export const opInputs = {
   }),
   'media.completeUpload': z.object({ segmentId: id, durationSec: sec.optional() }),
   'media.playbackUrl': z.object({ segmentId: id }),
+  'media.waveform': z.object({ sessionId: id }),
   'media.importYoutube': z.object({ sessionId: id, url: z.url() }),
   'media.importPlaylist': z.object({
     showId: id,
@@ -629,6 +631,7 @@ export interface OpOutputs {
   };
   'media.completeUpload': AudioSegment;
   'media.playbackUrl': { url: string; expiresAt: string };
+  'media.waveform': SegmentWaveform[];
   'media.importYoutube': Job;
   'media.importPlaylist': PlaylistImport;
   'media.retranscribe': Job[];

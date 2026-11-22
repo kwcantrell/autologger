@@ -25,6 +25,13 @@ export type JobSpec =
       actorId: string | null;
       /** durationSec: the video's length when known up front (playlist imports); estimates only. */
       payload: { url: string; durationSec?: number };
+    }
+  | {
+      /** Waveform peaks of one audio segment (media/waveform.ts). */
+      kind: 'waveform';
+      sessionId: string;
+      actorId: string | null;
+      payload: { segmentId: string };
     };
 
 /**

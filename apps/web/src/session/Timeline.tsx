@@ -1,5 +1,5 @@
 // The scrub lane shown in the transport card while timecode is stopped: current-marker chip,
-// track with audio clips, event markers and the playhead, ticks, and the zoom rail.
+// track with the audio waveform and clips, event markers and the playhead, ticks, and the zoom rail.
 
 import type { Session, SessionEvent } from '@autologger/contract';
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -8,6 +8,8 @@ import { eventSec, fmtSec } from '@/lib/timecode';
 import { cn } from '@/shared/lib/utils';
 import { isOverlayOpen } from '@/shared/ui/overlayOpen';
 import type { PlayerSegment } from './audio/usePlayer';
+import { TimelineWaveform } from './TimelineWaveform';
+import { useWaveform } from './waveform';
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 40;
@@ -58,6 +60,8 @@ export function Timeline({
   const viewportRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
+  const segmentList = useMemo(() => segments.map((p) => p.seg), [segments]);
+  const waveform = useWaveform(session.id, segmentList);
 
   const markers: Marker[] = useMemo(
     () =>
@@ -295,6 +299,14 @@ export function Timeline({
             onPointerLeave={() => setHover(null)}
             onKeyDown={onKeyDown}
           >
+            {waveform.data && waveform.data.length > 0 && (
+              <TimelineWaveform
+                peaks={waveform.data}
+                totalSec={totalSec}
+                view={view}
+                playheadSec={playheadSec}
+              />
+            )}
             <div className="pointer-events-none absolute inset-0 z-[1] before:absolute before:top-1/2 before:right-[0.4rem] before:left-[0.4rem] before:h-px before:-translate-y-1/2 before:bg-[rgba(148,163,184,0.38)] before:content-['']" />
             {/* Audio clips */}
             <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] h-1.5">

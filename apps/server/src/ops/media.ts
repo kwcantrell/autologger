@@ -81,6 +81,17 @@ function publishJob(ctx: Ctx, job: JobRow): void {
     ctx.publish(`session:${job.sessionId}`, changeMessage('job', 'upsert', job.id, toJob(job)));
 }
 
+/** Waveform peaks for a newly stored segment (runs whether or not Deepgram is configured). */
+async function enqueueWaveform(ctx: Ctx, seg: SegmentRow): Promise<void> {
+  const job = await enqueueJob(ctx.db, {
+    kind: 'waveform',
+    sessionId: seg.sessionId,
+    actorId: ctx.actor.user.id,
+    payload: { segmentId: seg.id },
+  });
+  publishJob(ctx, job);
+}
+
 async function enqueueTranscribe(ctx: Ctx, seg: SegmentRow, keyTerms?: string[]): Promise<JobRow> {
   const existing = await activeTranscribeJob(ctx.db, seg.id);
   // The active job runs with its own key terms; don't pretend this one-off list was applied.
@@ -102,7 +113,7 @@ async function enqueueTranscribe(ctx: Ctx, seg: SegmentRow, keyTerms?: string[])
 defineOp({
   name: 'media.list',
   description:
-    'Audio segments of a session in order, with their session start time, duration and transcription status (uploading, ready, transcribing, transcribed, failed).',
+    'Audio segments of a session in order, with their session start time, duration, transcription status (uploading, ready, transcribing, transcribed, failed) and hasWaveform (waveform peaks computed).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId }) {
@@ -196,6 +207,7 @@ defineOp({
         .where(eq(sessions.id, session.id));
     }
     if (transcriptionConfigured) await enqueueTranscribe(ctx, after!);
+    await enqueueWaveform(ctx, after!);
     const out = toAudioSegment(after!);
     publishSegment(ctx, out);
     await publishSession(ctx, session.id);
@@ -214,6 +226,33 @@ defineOp({
     if (row.status === 'uploading') throw conflict('This segment is still uploading.');
     const url = await presignPlayback(row.objectKey);
     return { url, expiresAt: new Date(Date.now() + PLAYBACK_URL_TTL_SEC * 1000).toISOString() };
+  },
+});
+
+defineOp({
+  name: 'media.waveform',
+  description:
+    "Waveform peaks of a session's audio for drawing the timeline: one entry per audio segment whose peaks are computed (the worker's waveform job runs after an upload or import; segments without peaks yet are left out, and media.list shows hasWaveform). Each entry has the segment's session startSec and a presigned GET url (valid 1 hour) to a JSON object {version: 1, peaksPerSec, durationSec, peaks}: peaks is base64 of one byte per 1/peaksPerSec seconds of the segment (max |sample| scaled to 0–255), and peak i sits at session second startSec + i / peaksPerSec.",
+  kind: 'read',
+  surfaces: ['web'],
+  async run(ctx, { sessionId }) {
+    await requireSession(ctx, sessionId, 'read');
+    requireStorage();
+    const rows = await ctx.db
+      .select()
+      .from(audioSegments)
+      .where(and(eq(audioSegments.sessionId, sessionId), isNotNull(audioSegments.peaksKey)))
+      .orderBy(asc(audioSegments.ordinal));
+    const expiresAt = new Date(Date.now() + PLAYBACK_URL_TTL_SEC * 1000).toISOString();
+    return Promise.all(
+      rows.map(async (r) => ({
+        segmentId: r.id,
+        startSec: r.startSec,
+        durationSec: r.durationSec,
+        url: await presignPlayback(r.peaksKey!),
+        expiresAt,
+      })),
+    );
   },
 });
 
@@ -441,7 +480,7 @@ defineOp({
 
 defineOp({
   name: 'media.delete',
-  description: 'Delete one audio segment, its stored audio and its transcript.',
+  description: 'Delete one audio segment, its stored audio, waveform and transcript.',
   kind: 'write',
   surfaces: ['web'],
   async run(ctx, { segmentId }) {
@@ -453,17 +492,20 @@ defineOp({
       .set({ status: 'failed', error: 'Audio segment deleted.', updatedAt: new Date() })
       .where(
         and(
-          eq(jobs.kind, 'transcribe'),
+          inArray(jobs.kind, ['transcribe', 'waveform']),
           eq(jobs.status, 'queued'),
           eq(jobs.sessionId, session.id),
           sql`${jobs.payload}->>'segmentId' = ${segmentId}`,
         ),
       );
     if (storageConfigured) {
-      try {
-        await deleteObject(row.objectKey);
-      } catch (e) {
-        console.warn(`could not delete object ${row.objectKey}: ${(e as Error).message}`);
+      for (const key of [row.objectKey, row.peaksKey]) {
+        if (!key) continue;
+        try {
+          await deleteObject(key);
+        } catch (e) {
+          console.warn(`could not delete object ${key}: ${(e as Error).message}`);
+        }
       }
     }
     ctx.publish(`session:${session.id}`, changeMessage('audio_segment', 'delete', segmentId));
@@ -533,7 +575,7 @@ function watchJobs(ms: number, signal?: AbortSignal): OpWatch<Job[]> {
 defineOp({
   name: 'jobs.list',
   description:
-    'Background jobs (transcription, YouTube import), newest first, with status, progress and errors. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"). Optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Queued jobs include queuePosition: how many jobs the worker will start before this one, 0 = next. It counts every runnable queued job on the server (all teams and shows; only the number is exposed); a job waiting to retry after a failure has no queuePosition until its retry time. startedAt is when the current attempt started (null while queued). Queued (with a queuePosition) and running jobs include etaSec: a rough estimate of seconds until the job finishes, from the median duration of the last 20 finished jobs of the same kind (transcriptions scaled by their audio length), the jobs ahead in the queue, the time left on running jobs and the total job slots of the workers currently running; 0 on a running job means it is taking longer than usual. It is absent when there is no finished history to estimate from. Use it to choose waitSec, not as a deadline. To wait for jobs, pass waitSec (1–55): if any listed job is queued or running, the call holds until one of them changes status (starts, finishes, fails) or a new job is queued in one of their sessions, then returns the fresh list — or returns after waitSec seconds when nothing changed. Call it again in a loop until the result is empty / all done; no separate sleep is needed. Without waitSec the call returns at once; do not poll it in a tight loop.',
+    'Background jobs (transcription, YouTube import, waveform), newest first, with status, progress and errors. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"). Optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Queued jobs include queuePosition: how many jobs the worker will start before this one, 0 = next. It counts every runnable queued job on the server (all teams and shows; only the number is exposed); a job waiting to retry after a failure has no queuePosition until its retry time. startedAt is when the current attempt started (null while queued). Queued (with a queuePosition) and running jobs include etaSec: a rough estimate of seconds until the job finishes, from the median duration of the last 20 finished jobs of the same kind (transcriptions scaled by their audio length), the jobs ahead in the queue, the time left on running jobs and the total job slots of the workers currently running; 0 on a running job means it is taking longer than usual. It is absent when there is no finished history to estimate from. Use it to choose waitSec, not as a deadline. To wait for jobs, pass waitSec (1–55): if any listed job is queued or running, the call holds until one of them changes status (starts, finishes, fails) or a new job is queued in one of their sessions, then returns the fresh list — or returns after waitSec seconds when nothing changed. Call it again in a loop until the result is empty / all done; no separate sleep is needed. Without waitSec the call returns at once; do not poll it in a tight loop.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   watch: ({ waitSec }, signal) => (waitSec ? watchJobs(waitSec * 1000, signal) : null),

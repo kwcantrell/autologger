@@ -44,6 +44,8 @@ export const qk = {
   dashboardQuery: (sessionId: string, query: DashboardQuery) =>
     ['dashboard-query', sessionId, query] as const,
   media: (sessionId: string) => ['media', sessionId] as const,
+  /** `ready`: which segments have peaks, so a new waveform refetches. */
+  waveform: (sessionId: string, ready: string) => ['waveform', sessionId, ready] as const,
   jobs: (sessionId: string) => ['jobs', sessionId] as const,
   showJobsAll: ['show-jobs'] as const,
   showJobs: (showId: string) => ['show-jobs', showId] as const,

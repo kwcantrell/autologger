@@ -160,7 +160,23 @@ export interface AudioSegment {
   fileName: string | null;
   status: SegmentStatus;
   error: string | null;
+  /** Waveform peaks have been computed (read them with media.waveform). */
+  hasWaveform: boolean;
   createdAt: string;
+}
+
+/** One audio segment's waveform peaks (media.waveform). */
+export interface SegmentWaveform {
+  segmentId: string;
+  /** Session second where the segment (peak 0) starts. */
+  startSec: number;
+  durationSec: number | null;
+  /**
+   * Presigned GET (JSON {version: 1, peaksPerSec, durationSec, peaks}; peaks is base64 of one
+   * byte per 1/peaksPerSec s: max |sample| scaled to 0–255).
+   */
+  url: string;
+  expiresAt: string;
 }
 
 export interface TranscriptWord {

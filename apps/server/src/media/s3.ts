@@ -93,6 +93,11 @@ export function objectKeyFor(sessionId: string, segmentId: string, ext: string):
   return `sessions/${sessionId}/${segmentId}.${ext}`;
 }
 
+/** The waveform peaks object of a segment, next to its audio (see media/waveform.ts). */
+export function peaksKeyFor(sessionId: string, segmentId: string): string {
+  return `sessions/${sessionId}/${segmentId}.peaks.json`;
+}
+
 let bucketReady: Promise<void> | null = null;
 
 /** Create the bucket if it is missing. Errors (e.g. no permission) are logged and ignored. */
@@ -126,6 +131,13 @@ export async function presignUpload(key: string, contentType: string): Promise<s
 
 export async function presignPlayback(key: string): Promise<string> {
   return getSignedUrl(browser(), new GetObjectCommand({ Bucket: bucket(), Key: key }), {
+    expiresIn: PLAYBACK_URL_TTL_SEC,
+  });
+}
+
+/** A presigned GET on the server's endpoint, for tools the worker runs (ffmpeg reads by URL). */
+export async function presignServerGet(key: string): Promise<string> {
+  return getSignedUrl(server(), new GetObjectCommand({ Bucket: bucket(), Key: key }), {
     expiresIn: PLAYBACK_URL_TTL_SEC,
   });
 }
@@ -177,6 +189,17 @@ export async function putObjectFromFile(
     }),
   );
   return size;
+}
+
+export async function putObjectBody(
+  key: string,
+  body: string | Uint8Array,
+  contentType: string,
+): Promise<void> {
+  await ensureBucket();
+  await server().send(
+    new PutObjectCommand({ Bucket: bucket(), Key: key, Body: body, ContentType: contentType }),
+  );
 }
 
 export async function deleteObject(key: string): Promise<void> {
