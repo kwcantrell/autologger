@@ -206,6 +206,62 @@ defineOp({
   },
 });
 
+/** Count non-overlapping occurrences of `find` in `text`. */
+function occurrences(text: string, find: string): number {
+  let n = 0;
+  for (let i = text.indexOf(find); i !== -1; i = text.indexOf(find, i + find.length)) n++;
+  return n;
+}
+
+defineOp({
+  name: 'wiki.patch',
+  description:
+    'Fix part of a wiki page without resending its body. edits: [{ find, replace }] are exact, case-sensitive text replacements applied in order; each `find` must occur exactly once in the page at that point (otherwise bad_request saying how often it matched; include more surrounding text to make it unique), and nothing is saved unless every edit applies. append (optional) adds Markdown on a new line at the end. Saved as one new revision, undoable from the change log. pageId comes from wiki_list / wiki_get. Returns the page summary (id, title, revision) without the body; read it with wiki_get if needed.',
+  kind: 'write',
+  surfaces: ['web', 'mcp'],
+  async run(ctx, { pageId, edits, append }) {
+    const row = await loadPage(ctx, pageId, 'write');
+    if (!edits.length && !append) throw badRequest('Give at least one edit or append.');
+    let body = row.bodyMd;
+    for (const [i, e] of edits.entries()) {
+      const n = occurrences(body, e.find);
+      if (n !== 1)
+        throw badRequest(
+          n === 0
+            ? `edits[${i}].find was not found in the page (it must match exactly, including case and whitespace).`
+            : `edits[${i}].find matches ${n} times; include more surrounding text so it matches once.`,
+        );
+      const at = body.indexOf(e.find);
+      body = body.slice(0, at) + e.replace + body.slice(at + e.find.length);
+    }
+    if (append) body = body && !body.endsWith('\n') ? `${body}\n${append}` : body + append;
+    if (body.length > 100_000) throw badRequest('The page would exceed 100000 characters.');
+    const [after] = (await ctx.db
+      .update(pages)
+      .set({
+        bodyMd: body,
+        revision: row.revision + 1,
+        updatedBy: ctx.actor.user.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(pages.id, row.id))
+      .returning()) as [PageRow];
+    await ctx.record({
+      entity: 'wiki_page',
+      entityId: row.id,
+      kind: 'update',
+      summary: `Edited wiki page “${row.title}”`,
+      showId: row.showId,
+      sessionId: row.sessionId,
+      before: snapshot(row),
+      after: snapshot(after),
+    });
+    await addRevision(ctx, after);
+    const [summary] = await summaries(ctx, [after]);
+    return summary!;
+  },
+});
+
 defineOp({
   name: 'wiki.delete',
   description:

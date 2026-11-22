@@ -195,6 +195,24 @@ export const opInputs = {
     timecode: timecode.optional(),
     atSec: sec.optional(),
   }),
+  'events.updateMany': z.object({
+    sessionId: id,
+    events: z
+      .array(
+        z.object({
+          id,
+          categoryId: id.nullable().optional(),
+          category: z.string().trim().max(60).optional(),
+          message: z.string().max(5000).optional(),
+          value: z.string().max(200).nullable().optional(),
+          timecode: timecode.optional(),
+          atSec: sec.optional(),
+        }),
+      )
+      .min(1)
+      .max(500),
+    compact,
+  }),
   'events.delete': z.object({ eventId: id }),
   'events.importCsv': z.object({ sessionId: id, csv: z.string().max(5_000_000) }),
 
@@ -284,6 +302,12 @@ export const opInputs = {
     spec: DashboardSpec,
     compact,
   }),
+  'dashboards.updateWidgets': z.object({
+    dashboardId: id,
+    /** Widget patches: `id` picks the stored widget, other fields replace its fields (null removes one). */
+    widgets: z.array(z.looseObject({ id })).min(1).max(40),
+    compact,
+  }),
   'dashboards.delete': z.object({ dashboardId: id }),
   'dashboards.query': z.object({ sessionId: id, query: DashboardQuery }),
 
@@ -305,6 +329,14 @@ export const opInputs = {
     bodyMd: z.string().max(100_000),
     aliases: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
     sessionId: id.optional(),
+  }),
+  'wiki.patch': z.object({
+    pageId: id,
+    edits: z
+      .array(z.object({ find: z.string().min(1).max(10_000), replace: z.string().max(100_000) }))
+      .max(50)
+      .default([]),
+    append: z.string().max(100_000).optional(),
   }),
   'wiki.delete': z.object({ pageId: id }),
   'wiki.revisions': z.object({ pageId: id }),
@@ -451,6 +483,7 @@ export interface OpOutputs {
   'events.create': SessionEvent;
   'events.createMany': SessionEvent[] | CompactEvent[];
   'events.update': SessionEvent;
+  'events.updateMany': SessionEvent[] | CompactEvent[];
   'events.delete': { deleted: true };
   'events.importCsv': { imported: number; skipped: { line: number; reason: string }[] };
   'transcript.get': TranscriptSegment[];
@@ -472,11 +505,13 @@ export interface OpOutputs {
   'dashboards.list': Dashboard[];
   'dashboards.get': Dashboard;
   'dashboards.save': Dashboard | CompactDashboard;
+  'dashboards.updateWidgets': Dashboard | CompactDashboard;
   'dashboards.delete': { deleted: true };
   'dashboards.query': DashboardRows;
   'wiki.list': WikiPageSummary[];
   'wiki.get': WikiPage;
   'wiki.upsert': WikiPage;
+  'wiki.patch': WikiPageSummary;
   'wiki.delete': { deleted: true };
   'wiki.revisions': WikiRevision[];
   'wiki.restore': WikiPage;
