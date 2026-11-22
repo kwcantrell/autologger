@@ -37,6 +37,8 @@ export type JobSpec =
       /** Build one video compilation (worker/handlers.ts); show-level, so no session. */
       kind: 'compile';
       sessionId: null;
+      /** The compilation's show: jobs.list with showId lists the job (jobs.show_id). */
+      showId: string;
       actorId: string | null;
       payload: { compilationId: string };
     };
@@ -60,6 +62,7 @@ export async function enqueueJob(
       id: newId('job'),
       kind: spec.kind,
       sessionId: spec.sessionId,
+      ...('showId' in spec ? { showId: spec.showId } : {}),
       payload: spec.payload,
       actorId: spec.actorId,
       progress: 'Queued',
@@ -76,13 +79,16 @@ export async function enqueueJob(
 }
 
 export function toJob(r: JobRow): Job {
-  const segmentId = (r.payload as { segmentId?: unknown } | null)?.segmentId;
+  const payload = r.payload as { segmentId?: unknown; compilationId?: unknown } | null;
+  const segmentId = payload?.segmentId;
+  const compilationId = payload?.compilationId;
   return {
     id: r.id,
     kind: r.kind,
     status: r.status,
     sessionId: r.sessionId,
     ...(typeof segmentId === 'string' ? { segmentId } : {}),
+    ...(typeof compilationId === 'string' ? { compilationId } : {}),
     error: r.error,
     progress: r.progress,
     startedAt: r.startedAt?.toISOString() ?? null,
@@ -92,7 +98,30 @@ export function toJob(r: JobRow): Job {
   };
 }
 
+/**
+ * Where a job's realtime changes go: its session's topic, or its show's for show-level jobs
+ * (compile). The show socket and jobs.list waits listen on both.
+ */
+export function jobTopic(job: JobRow): `session:${string}` | `show:${string}` | null {
+  if (job.sessionId) return `session:${job.sessionId}`;
+  return job.showId ? `show:${job.showId}` : null;
+}
+
 const { jobs } = schema;
+
+/**
+ * SQL: the work size of job `alias` in seconds (null when unknown): a transcription's audio
+ * segment length, a compile's compilation length (the sum of its clips until built).
+ */
+const jobSize = (alias: string) => {
+  const j = sql.raw(alias);
+  return sql`case ${j}.kind
+    when 'transcribe' then
+      (select s.duration_sec from audio_segments s where s.id = ${j}.payload->>'segmentId')
+    when 'compile' then
+      (select c.duration_sec from compilations c where c.id = ${j}.payload->>'compilationId')
+    end`;
+};
 
 /** Finished jobs per kind that the duration estimate looks at. */
 const ESTIMATE_SAMPLE = 20;
@@ -113,8 +142,9 @@ export const MAX_WORKER_SLOTS = 256;
  * the future) get no position.
  *
  * etaSec, a rough estimate: a job's own duration is the median of the last ESTIMATE_SAMPLE
- * finished jobs of its kind (for a transcription, the median seconds per audio second times its
- * segment's length, when both are known). Running: own duration minus time since startedAt (at
+ * finished jobs of its kind, or, for kinds with a work size (jobSize: a transcription's audio
+ * length, a compile's total clip seconds), the median seconds per size unit times its size, when
+ * both are known. Running: own duration minus time since startedAt (at
  * least 0). Queued with a position: when a slot is expected to free up for it, plus its own
  * duration. Slots: the summed concurrency of live workers (heartbeat within WORKER_STALE_SEC;
  * WORKER_CONCURRENCY when none is live; at most MAX_WORKER_SLOTS), busy until each running job's
@@ -163,9 +193,9 @@ export async function withJobEstimates<T extends Job>(
       (select coalesce(json_agg(b.left_sec), '[]'::json) from (
         select greatest(0, e.est - extract(epoch from now() - j.started_at)) as left_sec
         from jobs j
-        left join audio_segments s on j.kind = 'transcribe' and s.id = j.payload->>'segmentId'
+        cross join lateral (select ${jobSize('j')} as size) z
         cross join lateral (select coalesce(
-          case when s.duration_sec > 0 then s.duration_sec * (select v from pas) end,
+          case when z.size > 0 then z.size * (select v from per_size ps where ps.kind = j.kind) end,
           (select med from per_kind p where p.kind = j.kind),
           (select v from ovr)) as est) e
         where j.status = 'running' and j.started_at is not null and e.est is not null
@@ -176,8 +206,10 @@ export async function withJobEstimates<T extends Job>(
         where w.last_seen_at > now() - make_interval(secs => ${WORKER_STALE_SEC})) as capacity`;
   const [stats] = await tx.execute<{
     per_job: Record<string, number>;
+    per_size: Record<string, number>;
     per_audio_sec: number | null;
     overall: number | null;
+    /** Listed jobs' work size (jobSize), where known. */
     audio: Record<string, number>;
     video: Record<string, number>;
     elapsed: Record<string, number>;
@@ -188,7 +220,7 @@ export async function withJobEstimates<T extends Job>(
       select r.* from (values ${kinds}) k(kind)
       cross join lateral (
         select j.kind, extract(epoch from j.updated_at - j.started_at)::float as sec,
-          (select s.duration_sec from audio_segments s where s.id = j.payload->>'segmentId') as audio
+          ${jobSize('j')} as audio
         from jobs j
         where j.kind = k.kind and j.status = 'done' and j.started_at is not null
           -- A waveform job skipped for lack of ffmpeg took no time.
@@ -200,17 +232,19 @@ export async function withJobEstimates<T extends Job>(
     per_kind as (
       select kind, percentile_cont(0.5) within group (order by sec) as med
       from recent group by kind),
-    pas as (
-      select percentile_cont(0.5) within group (order by sec / audio) as v
-      from recent where kind = 'transcribe' and audio > 0),
+    per_size as (
+      select kind, percentile_cont(0.5) within group (order by sec / audio) as v
+      from recent where audio > 0 group by kind),
+    pas as (select v from per_size where kind = 'transcribe'),
     ovr as (select percentile_cont(0.5) within group (order by sec) as v from recent)
     select
       (select coalesce(json_object_agg(kind, med), '{}'::json) from per_kind) as per_job,
+      (select coalesce(json_object_agg(kind, v), '{}'::json) from per_size) as per_size,
       (select v from pas) as per_audio_sec,
       (select v from ovr) as overall,
-      (select coalesce(json_object_agg(j.id, s.duration_sec), '{}'::json)
-        from jobs j join audio_segments s on s.id = j.payload->>'segmentId'
-        where j.id in (${ids}) and j.kind = 'transcribe' and s.duration_sec > 0) as audio,
+      (select coalesce(json_object_agg(j.id, z.size), '{}'::json)
+        from jobs j cross join lateral (select ${jobSize('j')} as size) z
+        where j.id in (${ids}) and z.size > 0) as audio,
       (select coalesce(json_object_agg(id, sec), '{}'::json) from (
         select j.id, case when jsonb_typeof(j.payload->'durationSec') = 'number'
           then (j.payload->>'durationSec')::float end as sec
@@ -245,9 +279,9 @@ export async function withJobEstimates<T extends Job>(
   }
 
   const own = (j: Job): number | undefined => {
-    const audio = stats?.audio[j.id];
-    if (j.kind === 'transcribe' && audio && stats?.per_audio_sec != null)
-      return audio * stats.per_audio_sec;
+    const size = stats?.audio[j.id];
+    const rate = stats?.per_size[j.kind];
+    if (size && rate != null) return size * rate;
     return stats?.per_job[j.kind];
   };
   return list.map((j) => {

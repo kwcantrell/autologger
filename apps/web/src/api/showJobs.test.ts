@@ -51,6 +51,17 @@ describe('mergeShowJobs', () => {
     expect(mergeShowJobs([retried], [otherSegment], [failed]).failed).toEqual([]);
   });
 
+  it('keeps a compile failure per compilation (show-level jobs have no session)', () => {
+    const c = (p: Partial<Job> & Pick<Job, 'status'>) =>
+      job({ kind: 'compile', sessionId: null, ...p });
+    const failed = c({ status: 'failed', compilationId: 'cmp_1', createdAt: at(30) });
+    const other = c({ status: 'failed', compilationId: 'cmp_2', createdAt: at(10) });
+    expect(mergeShowJobs([], [], [failed, other]).failed).toEqual([failed, other]);
+    expect(jobsSummary(mergeShowJobs([c({ status: 'running' })], [], [failed]))).toBe(
+      '1 running · 1 failed',
+    );
+  });
+
   it('keeps old failures until they are dismissed', () => {
     const old = job({ status: 'failed', createdAt: at(26 * 60), updatedAt: at(25 * 60) });
     expect(mergeShowJobs([], [], [old]).failed).toEqual([old]);

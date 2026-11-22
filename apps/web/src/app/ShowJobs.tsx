@@ -1,7 +1,8 @@
-// Show-wide background jobs (YouTube imports, transcriptions): the rail indicator, the per-card
-// status mark and the dialog listing every unfinished job and every failure nobody has dismissed,
-// with a retry for failed YouTube imports, transcriptions and waveforms and a dismiss for each
-// failure.
+// Show-wide background jobs (YouTube imports, transcriptions, video compilations): the rail
+// indicator, the per-card status mark and the dialog listing every unfinished job and every
+// failure nobody has dismissed, with a retry for failed YouTube imports, transcriptions and
+// waveforms and a dismiss for each failure. Compile jobs belong to the show, not a session: they
+// link to the Compilations page.
 
 import type { Job, Session } from '@autologger/contract';
 import { CheckIcon, Loader2Icon, RefreshCwIcon, TriangleAlertIcon } from 'lucide-react';
@@ -20,6 +21,7 @@ const KIND_LABEL: Record<string, string> = {
   youtube_import: 'YouTube import',
   transcribe: 'Transcription',
   waveform: 'Waveform',
+  compile: 'Video compilation',
 };
 const kindLabel = (kind: string) => KIND_LABEL[kind] ?? kind;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -38,6 +40,7 @@ function markLabel(j: Job): string {
   if (j.status === 'failed') return 'Failed';
   if (j.status === 'queued') return 'Queued';
   if (j.kind === 'waveform') return 'Analyzing';
+  if (j.kind === 'compile') return 'Compiling';
   return j.kind === 'youtube_import' ? 'Importing' : 'Transcribing';
 }
 
@@ -78,14 +81,19 @@ export function ShowJobsDialog({
   data,
   error,
   sessions,
+  canWriteShow,
   onOpenSession,
+  onOpenCompilations,
   onClose,
 }: {
   showName: string;
   data: ShowJobs | undefined;
   error: unknown;
   sessions: Session[];
+  /** Write access to the show (dismissing a show-level compile job). */
+  canWriteShow: boolean;
   onOpenSession: (sessionId: string) => void;
+  onOpenCompilations: () => void;
   onClose: () => void;
 }) {
   const byId = new Map(sessions.map((s) => [s.id, s]));
@@ -120,7 +128,10 @@ export function ShowJobsDialog({
 
   const row = (j: Job, status: React.ReactNode, action?: React.ReactNode) => {
     const s = j.sessionId ? byId.get(j.sessionId) : undefined;
-    const title = s?.title || j.sessionTitle || 'Untitled session';
+    const title =
+      j.kind === 'compile'
+        ? j.compilationTitle || 'Deleted compilation'
+        : s?.title || j.sessionTitle || 'Untitled session';
     return (
       <li
         key={j.id}
@@ -132,6 +143,15 @@ export function ShowJobsDialog({
               type="button"
               className="min-w-0 cursor-pointer truncate text-left font-semibold hover:underline focus-visible:underline"
               onClick={() => onOpenSession(j.sessionId as string)}
+            >
+              {title}
+            </button>
+          ) : j.kind === 'compile' && j.compilationTitle ? (
+            <button
+              type="button"
+              className="min-w-0 cursor-pointer truncate text-left font-semibold hover:underline focus-visible:underline"
+              title="Open the Compilations page"
+              onClick={onOpenCompilations}
             >
               {title}
             </button>
@@ -163,7 +183,7 @@ export function ShowJobsDialog({
       open
       onOpenChange={(o) => !o && onClose()}
       title="Background jobs"
-      description={`YouTube imports and transcriptions in ${showName}. Failures stay listed until they are retried or dismissed.`}
+      description={`YouTube imports, transcriptions and video compilations in ${showName}. Failures stay listed until they are retried or dismissed.`}
       className="md:max-w-xl"
     >
       <div className="flex max-h-[60svh] flex-col gap-4 overflow-y-auto pr-1">
@@ -178,14 +198,15 @@ export function ShowJobsDialog({
         ) : null}
         {empty && (
           <p className="m-0 text-sm text-si-muted">
-            Nothing running in this show. Imports and transcriptions appear here while they run.
+            Nothing running in this show. Imports, transcriptions and compilations appear here while
+            they run.
           </p>
         )}
         {section('Failed', failed, (j) => {
           const s = j.sessionId ? byId.get(j.sessionId) : undefined;
           const canRetry = j.kind === 'youtube_import' && !!s?.sourceUrl && s.access !== 'read';
           const pending = retry.isPending && retry.variables?.sessionId === j.sessionId;
-          const readOnly = s?.access === 'read';
+          const readOnly = j.sessionId ? s?.access === 'read' : !canWriteShow;
           const dismissing = dismiss.isPending && dismiss.variables?.jobId === j.id;
           const rewaving = rewave.isPending && rewave.variables?.sessionId === j.sessionId;
           const transcribing =
