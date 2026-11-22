@@ -16,6 +16,11 @@ const workerConcurrency = Math.max(1, Math.floor(Number(str('WORKER_CONCURRENCY'
 const kindConcurrency = (k: string, fallback = workerConcurrency): number =>
   Math.min(workerConcurrency, Math.max(1, Math.floor(Number(str(k)))) || fallback);
 
+const nonNegative = (k: string, d: number): number => {
+  const n = Number(str(k, String(d)));
+  return Number.isFinite(n) && n >= 0 ? n : d;
+};
+
 export const env = {
   nodeEnv: str('NODE_ENV', 'development')!,
   port: Number(str('PORT', '8080')),
@@ -78,6 +83,19 @@ export const env = {
     waveform: kindConcurrency('WORKER_CONCURRENCY_WAVEFORM', 1),
     // Video compilations download and re-encode video: heavy, one at a time by default.
     compile: kindConcurrency('WORKER_CONCURRENCY_COMPILE', 1),
+  },
+  /**
+   * Media sweep (worker, src/worker/sweep.ts): removes uploads stuck in `uploading` and stored
+   * objects whose session, show or compilation no longer exists. MEDIA_SWEEP_INTERVAL_MIN=0 turns
+   * it off; MEDIA_SWEEP_DRY_RUN=1 only logs what it would remove.
+   */
+  mediaSweep: {
+    intervalMin: nonNegative('MEDIA_SWEEP_INTERVAL_MIN', 60),
+    /** Age after which an upload still `uploading` is abandoned (its PUT URL lasts 15 min). */
+    uploadAgeHours: nonNegative('MEDIA_SWEEP_UPLOAD_AGE_HOURS', 24),
+    /** Orphan objects are removed only when the newest one under the prefix is this old. */
+    orphanGraceHours: nonNegative('MEDIA_SWEEP_ORPHAN_GRACE_HOURS', 24),
+    dryRun: str('MEDIA_SWEEP_DRY_RUN') === '1',
   },
 };
 

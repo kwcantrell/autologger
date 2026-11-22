@@ -21,11 +21,13 @@ import {
   releaseJob,
   removeWorker,
 } from './queue.ts';
+import { sweepMedia } from './sweep.ts';
 
 const CONCURRENCY = env.workerConcurrency;
 const POLL_MS = 5000;
 const RECOVER_MS = 60_000;
 const HEARTBEAT_MS = 60_000;
+const SWEEP_FIRST_MS = 5 * 60_000;
 
 const KIND_CONCURRENCY = env.workerKindConcurrency;
 // Without ffmpeg this worker leaves waveform and compile jobs to workers that have it.
@@ -155,7 +157,8 @@ await waitForMigrations();
 console.log(
   `autologger worker starting (concurrency ${CONCURRENCY}, per kind ${JSON.stringify(KIND_CONCURRENCY)}; storage ${storageConfigured ? 'on' : 'off'}, ` +
     `transcription ${transcriptionConfigured ? 'on' : 'off'}, youtube ${env.youtubeEnabled ? `on via ${env.ytDlpPath}` : 'off'}, ` +
-    `waveforms ${hasFfmpeg ? `on via ${env.ffmpegPath}` : `off: ffmpeg not found (FFMPEG_PATH=${env.ffmpegPath}), this worker does not claim waveform or compile jobs`})`,
+    `waveforms ${hasFfmpeg ? `on via ${env.ffmpegPath}` : `off: ffmpeg not found (FFMPEG_PATH=${env.ffmpegPath}), this worker does not claim waveform or compile jobs`}, ` +
+    `media sweep ${storageConfigured && env.mediaSweep.intervalMin > 0 ? `every ${env.mediaSweep.intervalMin} min${env.mediaSweep.dryRun ? ' (dry run)' : ''}` : 'off'})`,
 );
 await ensureBucket();
 await beat();
@@ -165,5 +168,15 @@ if (storageConfigured && hasFfmpeg)
   await backfillWaveforms()
     .then((n) => n && console.log(`queued ${n} waveform job(s) for audio without peaks`))
     .catch((e) => console.error('waveform backfill failed', e));
+// Abandoned uploads and orphaned objects (src/worker/sweep.ts). First run a few minutes after
+// start, then every MEDIA_SWEEP_INTERVAL_MIN; the sweep's advisory lock keeps workers from overlapping.
+if (storageConfigured && env.mediaSweep.intervalMin > 0) {
+  const sweep = () => void sweepMedia().catch((e) => console.error('media sweep failed', e));
+  setTimeout(() => {
+    if (stopping) return;
+    sweep();
+    setInterval(() => !stopping && sweep(), env.mediaSweep.intervalMin * 60_000).unref();
+  }, SWEEP_FIRST_MS).unref();
+}
 await sqlClient.listen(JOBS_CHANNEL, () => wake?.());
 await loop();
