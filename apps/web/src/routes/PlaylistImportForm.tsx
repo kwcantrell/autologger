@@ -42,7 +42,7 @@ export function PlaylistImportForm({
   const [result, setResult] = useState<{ key: string; data: PlaylistImport } | null>(null);
   // Refresh and toast in the hook, not per call: they must run even if the form has unmounted.
   const run = useOpMutation('media.importPlaylist', {
-    invalidate: (d) => (d.dryRun ? [] : [qk.sessionsAll, qk.shows]),
+    invalidate: (d) => (d.dryRun ? [] : [qk.sessionsAll, qk.shows, qk.showJobsAll]),
     onSuccess: (d) => {
       if (d.dryRun) return;
       const n = d.created.length;

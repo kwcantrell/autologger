@@ -4,6 +4,7 @@
 import type {
   DashboardQuery,
   FullOpInput,
+  Job,
   OpInput,
   OpName,
   OpResult,
@@ -20,7 +21,9 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { getCapabilities, RpcError, rpc } from './rpc';
+import { fetchShowJobs, type ShowJobs, sameJobs, UNFINISHED } from './showJobs';
 
 export const qk = {
   capabilities: ['capabilities'] as const,
@@ -42,6 +45,8 @@ export const qk = {
     ['dashboard-query', sessionId, query] as const,
   media: (sessionId: string) => ['media', sessionId] as const,
   jobs: (sessionId: string) => ['jobs', sessionId] as const,
+  showJobsAll: ['show-jobs'] as const,
+  showJobs: (showId: string) => ['show-jobs', showId] as const,
   changesAll: (sessionId: string) => ['changes', sessionId] as const,
   changes: (sessionId: string, via: Via | 'all') => ['changes', sessionId, via] as const,
   wikiList: (showId: string) => ['wiki', showId] as const,
@@ -158,6 +163,85 @@ export const useMedia = (sessionId: string, enabled = true) =>
   useOpQuery(qk.media(sessionId), 'media.list', { sessionId }, { enabled, retry: false });
 export const useJobs = (sessionId: string) =>
   useOpQuery(qk.jobs(sessionId), 'jobs.list', { sessionId }, { retry: false });
+
+const subscribeVisibility = (onChange: () => void) => {
+  document.addEventListener('visibilitychange', onChange);
+  return () => document.removeEventListener('visibilitychange', onChange);
+};
+const isTabVisible = () => !document.hidden;
+
+/**
+ * Background jobs of a whole show (playlist imports, transcriptions). While any job is unfinished
+ * and the tab is visible it long-polls jobs.list (waitSec) so status changes show up at once;
+ * otherwise it refreshes every minute to notice imports started elsewhere (agents, other tabs).
+ * A hidden tab stops polling and catches up once when it is shown again. Session sockets also
+ * invalidate it (live.ts).
+ */
+export function useShowJobs(showId: string | undefined) {
+  const qc = useQueryClient();
+  const visible = useSyncExternalStore(subscribeVisibility, isTabVisible, () => true);
+  const q = useQuery<ShowJobs, RpcError>({
+    queryKey: qk.showJobs(showId ?? ''),
+    queryFn: () => fetchShowJobs(showId ?? ''),
+    enabled: !!showId,
+    refetchInterval: 60_000,
+    // The visibility effect below does the one catch-up refetch.
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const pending = (q.data?.active.length ?? 0) > 0;
+
+  const wasVisible = useRef(visible);
+  useEffect(() => {
+    if (visible && !wasVisible.current && showId)
+      void qc.invalidateQueries({ queryKey: qk.showJobs(showId) });
+    wasVisible.current = visible;
+  }, [visible, showId, qc]);
+
+  useEffect(() => {
+    if (!showId || !pending || !visible) return;
+    const abort = new AbortController();
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, ms);
+        abort.signal.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(t);
+            resolve();
+          },
+          { once: true },
+        );
+      });
+    void (async () => {
+      while (!abort.signal.aborted) {
+        const started = Date.now();
+        let fresh: Job[] | null = null;
+        try {
+          fresh = await rpc(
+            'jobs.list',
+            { showId, status: [...UNFINISHED], limit: 500, waitSec: 25 },
+            abort.signal,
+          );
+        } catch {
+          if (abort.signal.aborted) return;
+          // Offline or a server error: back off instead of spinning.
+          await sleep(10_000);
+        }
+        if (abort.signal.aborted) return;
+        const cached = qc.getQueryData<ShowJobs>(qk.showJobs(showId));
+        if (!fresh || !cached || !sameJobs(fresh, cached.active))
+          await qc.invalidateQueries({ queryKey: qk.showJobs(showId) });
+        // Never more than one round trip every 2 s, whatever the server answers.
+        const rest = 2_000 - (Date.now() - started);
+        if (rest > 0) await sleep(rest);
+      }
+    })();
+    // Unmount, show change, hidden tab or no more pending jobs: drop the waiting request.
+    return () => abort.abort();
+  }, [showId, pending, visible, qc]);
+  return q;
+}
 export const useChanges = (sessionId: string, via: Via | 'all') =>
   useOpQuery(qk.changes(sessionId, via), 'changes.list', {
     sessionId,

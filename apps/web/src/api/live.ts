@@ -80,6 +80,8 @@ function invalidateDerived(qc: QueryClient, entity: LiveEntity, sessionId: strin
   // session (and the rail, below).
   if (entity === 'audio_segment' || entity === 'job')
     void qc.invalidateQueries({ queryKey: qk.session(sessionId) });
+  // The show-wide job list (rail indicator) includes this session's jobs.
+  if (entity === 'job') void qc.invalidateQueries({ queryKey: qk.showJobsAll });
   if (entity === 'audio_segment' || entity === 'session')
     void qc.invalidateQueries({ queryKey: qk.sessionsAll });
 }
