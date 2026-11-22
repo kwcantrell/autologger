@@ -115,6 +115,22 @@ describe('/ws/show/:id', () => {
     live.ws.close();
   }, 10_000);
 
+  it('hints at new change-log entries of the show, not of other shows', async () => {
+    const { owner, team, show } = await studio();
+    const other = await call(owner, 'shows.create', { teamId: team.id, name: 'Other' });
+    const live = await connect(owner.user.id, show.id);
+    expect(live.got.shift()).toMatchObject({ type: 'hello' });
+
+    const page = { kind: 'person', title: 'Dana', bodyMd: 'Host.' } as const;
+    await call(owner, 'wiki.upsert', { showId: other.id, ...page });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(live.got).toEqual([]);
+    // A show-level change (no session) arrives on the show topic.
+    await call(owner, 'wiki.upsert', { showId: show.id, ...page });
+    await live.next((m) => m.type === 'invalidate' && m.entity === 'change');
+    live.ws.close();
+  });
+
   it('closes with 4403 when the reader loses access to the show', async () => {
     const { owner, team, show } = await studio();
     const member = await makeUser('member@example.com');

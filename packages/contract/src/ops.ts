@@ -514,14 +514,27 @@ export const opInputs = {
   // ── change log ────────────────────────────────────────────
   'changes.list': z
     .object({
-      sessionId: id.optional(),
+      /** null: only show-level changes (wiki pages, event buttons), which belong to no session. */
+      sessionId: id.nullable().optional(),
       showId: id.optional(),
       via: z.enum(['web', 'mcp', 'companion', 'worker', 'system']).optional(),
+      /** Only changes to this kind of item. */
+      entity: z
+        .enum([
+          'event',
+          'topic',
+          'transcript_segment',
+          'dashboard',
+          'wiki_page',
+          'category',
+          'session',
+        ])
+        .optional(),
       groupId: id.optional(),
       grouped: z.boolean().default(false),
       limit: z.number().int().min(1).max(500).default(100),
     })
-    .refine((v) => !v.grouped || v.sessionId !== undefined || v.showId !== undefined, {
+    .refine((v) => !v.grouped || typeof v.sessionId === 'string' || v.showId !== undefined, {
       message: 'grouped: true needs a sessionId or showId.',
     }),
   'changes.revert': z.object({ changeId: id }),

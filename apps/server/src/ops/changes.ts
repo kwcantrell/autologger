@@ -135,17 +135,19 @@ async function toChanges(
 defineOp({
   name: 'changes.list',
   description:
-    'The change log: who changed what, from where (web, mcp agent, companion), newest first. Filter by session, show, surface or groupId. Every change one op call wrote shares a groupId (a bulk call such as transcript_renameSpeaker writes one change per segment). grouped: true (needs sessionId or showId) folds each group into one row — its newest change, with groupSize (how many changes match the filter, set when the group has more than one), groupUndone (how many of those are already undone) and, when the group also reaches other sessions, groupTotal (its size everywhere); revertedAt is then set only when the whole group is undone, and limit counts rows. Undo one change with changes_revert(changeId) or a whole op call with changes_revertGroup(groupId).',
+    "The change log: who changed what, from where (web, mcp agent, companion), newest first. Filter by session, show, surface (via), item kind (entity) or groupId. sessionId: null lists only show-level changes — show wiki pages and event buttons (category), which belong to no session; with showId, that show's. Every change one op call wrote shares a groupId (a bulk call such as transcript_renameSpeaker writes one change per segment). grouped: true (needs sessionId or showId) folds each group into one row — its newest change, with groupSize (how many changes match the filter, set when the group has more than one), groupUndone (how many of those are already undone) and, when the group also reaches other sessions, groupTotal (its size everywhere); revertedAt is then set only when the whole group is undone, and limit counts rows. Undo one change with changes_revert(changeId) or a whole op call with changes_revertGroup(groupId).",
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, showId, via, groupId, grouped, limit }) {
+  async run(ctx, { sessionId, showId, via, entity, groupId, grouped, limit }) {
     if (sessionId) await requireSession(ctx, sessionId, 'read');
     if (showId) await requireShow(ctx, showId, 'read');
     const where = and(
       readableShowCondition(ctx, changes.showId as never),
       sessionId ? eq(changes.sessionId, sessionId) : undefined,
+      sessionId === null ? isNull(changes.sessionId) : undefined,
       showId ? eq(changes.showId, showId) : undefined,
       via ? eq(changes.via, via) : undefined,
+      entity ? eq(changes.entity, entity) : undefined,
       groupId ? eq(changes.groupId, groupId) : undefined,
     );
     if (!grouped) {

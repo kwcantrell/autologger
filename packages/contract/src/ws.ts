@@ -2,7 +2,8 @@
 //
 // Session socket: GET /ws/session/:sessionId (cookie auth). Server → client only, apart from ping.
 // Show socket: GET /ws/show/:showId (cookie auth): job and session-list changes of every session
-// of the show (the rail's jobs indicator and session list). Server → client only, apart from ping.
+// of the show (the rail's jobs indicator and session list) and change-log hints. Server → client
+// only, apart from ping.
 // Companion socket: GET /ws/companion with `Authorization: Bearer <device token>` (or ?token=).
 
 import type { Job, Session } from './entities.ts';
@@ -45,8 +46,10 @@ export type ShowServerMessage =
    * (a session was created, deleted, renamed, archived, imported into or started rolling), or
    * its events changed (event counts; at most one such hint every few seconds per socket).
    * `compilation`: a compilation of the show was created, progressed, finished or was deleted.
+   * `change`: the show's change log grew (a change in any of its sessions, or a show-level one;
+   * at most one such hint every few seconds per socket).
    */
-  | { type: 'invalidate'; entity: 'job' | 'session' | 'compilation' }
+  | { type: 'invalidate'; entity: 'job' | 'session' | 'compilation' | 'change' }
   | { type: 'closed'; reason: 'access_revoked' | 'deleted' }
   | { type: 'pong' };
 
