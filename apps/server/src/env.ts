@@ -12,6 +12,10 @@ const list = (k: string): string[] =>
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
 
+const workerConcurrency = Math.max(1, Math.floor(Number(str('WORKER_CONCURRENCY', '2'))) || 1);
+const kindConcurrency = (k: string): number =>
+  Math.min(workerConcurrency, Math.max(1, Math.floor(Number(str(k)))) || workerConcurrency);
+
 export const env = {
   nodeEnv: str('NODE_ENV', 'development')!,
   port: Number(str('PORT', '8080')),
@@ -44,7 +48,15 @@ export const env = {
   ytDlpPath: str('YTDLP_PATH', 'yt-dlp')!,
   youtubeEnabled: str('YOUTUBE_IMPORT', '1') === '1',
   /** Jobs a worker process runs in parallel (the API also uses it for jobs.list etaSec). */
-  workerConcurrency: Math.max(1, Math.floor(Number(str('WORKER_CONCURRENCY', '2'))) || 1),
+  workerConcurrency,
+  /**
+   * Per job kind, how many of a worker's slots it may fill at once (WORKER_CONCURRENCY_<KIND>,
+   * 1 up to workerConcurrency, which is also the default).
+   */
+  workerKindConcurrency: {
+    transcribe: kindConcurrency('WORKER_CONCURRENCY_TRANSCRIBE'),
+    youtube_import: kindConcurrency('WORKER_CONCURRENCY_YOUTUBE_IMPORT'),
+  },
 };
 
 export const isProd = env.nodeEnv === 'production';

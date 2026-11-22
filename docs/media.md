@@ -17,6 +17,8 @@ the **worker** (`apps/server/src/worker/main.ts`), a second entrypoint of the se
 | `YOUTUBE_IMPORT`                                        | app         | `1` (default) enables `media.importYoutube`.                                                                                                      |
 | `YTDLP_PATH`                                            | worker      | yt-dlp binary (default `yt-dlp` on `PATH`). Best audio is downloaded as-is, ffmpeg is not required.                                               |
 | `WORKER_CONCURRENCY`                                    | worker, api | Jobs run in parallel per worker process (default 2).                                                                                              |
+| `WORKER_CONCURRENCY_TRANSCRIBE`                         | worker      | Of those slots, how many `transcribe` jobs may hold at once (1 to `WORKER_CONCURRENCY`, which is the default).                                    |
+| `WORKER_CONCURRENCY_YOUTUBE_IMPORT`                     | worker      | Same for `youtube_import` jobs. Set it below `WORKER_CONCURRENCY` so slow downloads always leave a slot for transcriptions.                       |
 
 The bucket is created on first use (worker start, or the first upload) if the credentials allow it.
 
@@ -58,7 +60,8 @@ In production: `node src/worker/main.ts` with the same environment as the app (c
   exists, marks the segment `ready`, sets the session's source kind and enqueues `transcribe`.
 - **Jobs** live in the `jobs` table. Ops enqueue with `enqueueJob(tx, …)` (`src/media/jobs.ts`)
   inside their transaction, which also sends `NOTIFY autologger_jobs` to wake workers. Workers claim
-  with `FOR UPDATE SKIP LOCKED`, heartbeat `locked_at` every minute, retry failures up to 3 attempts
+  with `FOR UPDATE SKIP LOCKED` (skipping kinds whose `WORKER_CONCURRENCY_<KIND>` slots are full in
+  that worker, so the next job of another kind runs instead), heartbeat `locked_at` every minute, retry failures up to 3 attempts
   with backoff (30 s, 60 s), and requeue jobs stuck in `running` for more than 15 minutes. Errors
   that cannot succeed on retry (bad Deepgram key, missing yt-dlp) fail immediately.
 - **transcribe**: streams the object from S3 to Deepgram, maps utterances to `transcript_segments`
