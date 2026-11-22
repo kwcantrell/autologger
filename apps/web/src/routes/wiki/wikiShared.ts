@@ -1,14 +1,20 @@
 // Wiki labels, formatting, link resolution and the write hooks shared by the wiki screens.
 
-import { normTitle, type WikiKind, type WikiPageSummary } from '@autologger/contract';
+import {
+  normTitle,
+  type WikiKind,
+  type WikiPageSummary,
+  wikiCitations,
+} from '@autologger/contract';
 import { useMemo } from 'react';
-import { qk, useOpMutation, useWikiList } from '@/api/queries';
+import { qk, useOpMutation, useSessions, useWikiList } from '@/api/queries';
 
 export const WIKI_KIND_LABEL: Record<WikiKind, string> = {
   person: 'Person',
   topic: 'Topic',
   bit: 'Running bit',
   session: 'Session',
+  question: 'Question',
 };
 
 export const wikiHref = (pageId: string) => `/wiki/${encodeURIComponent(pageId)}`;
@@ -52,6 +58,23 @@ export function useWikiResolver(showId: string | undefined): {
         if (!map.has(normTitle(a))) map.set(normTitle(a), { id: p.id, title: p.title });
     return { pages, resolve: (title: string) => map.get(normTitle(title)) ?? null };
   }, [list.data]);
+}
+
+/** Title of a cited session: null when the show has no such session, undefined while loading. */
+export type SessionTitle = (sessionId: string) => string | null | undefined;
+
+/**
+ * Names the sessions a body cites from one sessions.list of its show (cached, shared with the
+ * rest of the app), fetched only when the body has citations.
+ */
+export function useSessionTitles(showId: string, body: string): SessionTitle {
+  const cites = useMemo(() => wikiCitations(body).length > 0, [body]);
+  const sessions = useSessions(cites ? showId : undefined);
+  return useMemo<SessionTitle>(() => {
+    if (!sessions.data) return () => (sessions.isError ? null : undefined);
+    const titles = new Map(sessions.data.map((s) => [s.id, s.title.trim() || 'Untitled session']));
+    return (id) => titles.get(id) ?? null;
+  }, [sessions.data, sessions.isError]);
 }
 
 export function useWikiUpsert() {

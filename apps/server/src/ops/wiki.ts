@@ -4,6 +4,7 @@ import {
   type WikiList,
   type WikiPage,
   type WikiPageSummary,
+  wikiCitations,
   wikiLinkTargets,
 } from '@autologger/contract';
 import { and, asc, desc, eq, inArray, isNull, ne, type SQL, sql } from 'drizzle-orm';
@@ -14,7 +15,7 @@ import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { type Db, schema } from '../db/client.ts';
 import { iso, userRefs } from './map.ts';
 
-const { wikiPages: pages, wikiRevisions: revisions, wikiLinks: links } = schema;
+const { wikiPages: pages, wikiRevisions: revisions, wikiLinks: links, sessions } = schema;
 type PageRow = typeof pages.$inferSelect;
 
 /** Deleted pages are kept (with their revisions) for undo, but are invisible everywhere else. */
@@ -226,7 +227,7 @@ async function findByTitle(ctx: Ctx, showId: string, title: string): Promise<Pag
 defineOp({
   name: 'wiki.list',
   description:
-    'Wiki pages of a show (people, topics, recurring bits, session recaps), sorted by kind then title, as { pages, total, nextOffset }. Paged: limit (default 50, max 200) and offset; when nextOffset is not null, call again with offset = nextOffset for the rest. Metadata only by default. Bulk read: include "summary" adds each page\'s first paragraph (headings skipped, max 400 chars); include "body" adds the full bodyMd of every page, which is large (pages run to several KB each) — narrow it with kind (e.g. kind "session" for all recaps) and a smaller limit. linksTo (a pageId of this show, from wiki_list / wiki_get) keeps only the pages whose [[links]] point to that page: its full backlinks list, of which wiki_get returns only the first 50 (backlinkCount has the total).',
+    'Wiki pages of a show (people, topics, recurring bits, session recaps, answered questions), sorted by kind then title, as { pages, total, nextOffset }. Paged: limit (default 50, max 200) and offset; when nextOffset is not null, call again with offset = nextOffset for the rest. Metadata only by default. Bulk read: include "summary" adds each page\'s first paragraph (headings skipped, max 400 chars); include "body" adds the full bodyMd of every page, which is large (pages run to several KB each) — narrow it with kind (e.g. kind "session" for all recaps, kind "question" for questions already answered — check these before answering a question again) and a smaller limit. linksTo (a pageId of this show, from wiki_list / wiki_get) keeps only the pages whose [[links]] point to that page: its full backlinks list, of which wiki_get returns only the first 50 (backlinkCount has the total).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId, kind, include, linksTo, limit = 50, offset = 0 }): Promise<WikiList> {
@@ -273,10 +274,63 @@ defineOp({
   },
 });
 
+/** Slack for rounding when a citation's range is compared with the session's audio end. */
+const AUDIO_END_SLACK_SEC = 1;
+
+/**
+ * Check every citation of a show's live pages against its sessions: the session must be in this
+ * show (another show's session counts as unknown, revealing nothing about it), `to` must be after
+ * `t`, and the range must end within the session's audio (sessions without measured audio are not
+ * range-checked). Bodies are parsed here; only pages that mention `/sessions/` are read.
+ */
+async function lintCitations(
+  ctx: Ctx,
+  showId: string,
+): Promise<{ count: number; bad: WikiLint['badCitations'] }> {
+  const rows = await ctx.db
+    .select({ id: pages.id, title: pages.title, kind: pages.kind, bodyMd: pages.bodyMd })
+    .from(pages)
+    .where(and(live, eq(pages.showId, showId), sql`${pages.bodyMd} like '%/sessions/%'`))
+    .orderBy(asc(pages.kind), asc(pages.title));
+  const cited = rows.map((r) => ({ ...r, cites: wikiCitations(r.bodyMd) }));
+  const ids = [...new Set(cited.flatMap((r) => r.cites.map((c) => c.sessionId)))];
+  const audioEnd = new Map<string, number | null>();
+  if (ids.length)
+    for (const s of await ctx.db
+      .select({
+        id: sessions.id,
+        // Raw SQL: drizzle leaves columns unqualified in a single-table select, so ${sessions.id}
+        // would bind to the subquery's own id.
+        end: sql<
+          number | null
+        >`(select max(a.start_sec + a.duration_sec)::float from audio_segments a where a.session_id = sessions.id and a.status <> 'failed')`,
+      })
+      .from(sessions)
+      .where(and(eq(sessions.showId, showId), inArray(sessions.id, ids))))
+      audioEnd.set(s.id, s.end);
+  let count = 0;
+  const bad: WikiLint['badCitations'] = [];
+  for (const r of cited) {
+    const problems: WikiLint['badCitations'][number]['citations'] = [];
+    for (const c of r.cites) {
+      count++;
+      const end = audioEnd.get(c.sessionId);
+      if (end === undefined) problems.push({ ...c, problem: 'unknown_session' });
+      else if (c.endSec != null && c.endSec <= c.startSec)
+        problems.push({ ...c, problem: 'bad_range' });
+      else if (end != null && (c.endSec ?? c.startSec) > end + AUDIO_END_SLACK_SEC)
+        problems.push({ ...c, problem: 'past_end' });
+    }
+    if (problems.length)
+      bad.push({ pageId: r.id, title: r.title, kind: r.kind, citations: problems });
+  }
+  return { count, bad };
+}
+
 defineOp({
   name: 'wiki.lint',
   description:
-    'Check the links of a whole show wiki in one call, the way the wiki renders them. unresolved: pages with [[Target]] / [[Target|label]] links (also [[Target\\|label]] in table cells; links inside code are ignored) that match no page title or alias (case-insensitive, spaces collapsed), with the missing targets as written — create those pages with wiki_upsert or fix the links. orphans: person, topic and bit pages no other page links to (session recaps are left out; they are reached from their session). counts: pages, distinct links, unresolved links, orphans. Read-only.',
+    'Check the links of a whole show wiki in one call, the way the wiki renders them. unresolved: pages with [[Target]] / [[Target|label]] links (also [[Target\\|label]] in table cells; links inside code are ignored) that match no page title or alias (case-insensitive, spaces collapsed), with the missing targets as written — create those pages with wiki_upsert or fix the links. orphans: person, topic and bit pages no other page links to (session recaps and question pages are left out). badCitations: pages whose citations ([label](/sessions/<sessionId>?t=<startSec>&to=<endSec>)) are wrong, each with problem "unknown_session" (no session with that id in this show), "bad_range" (to is not greater than t) or "past_end" (the range ends after the session\'s audio; sessions without audio are not range-checked) — fix them with wiki_patch. counts: pages, distinct links, unresolved links, orphans, citations, bad citations. Read-only.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId }): Promise<WikiLint> {
@@ -317,12 +371,21 @@ defineOp({
       }
     }
     const orphans = rows
-      .filter((r) => r.kind !== 'session' && !linked.has(r.id))
+      .filter((r) => r.kind !== 'session' && r.kind !== 'question' && !linked.has(r.id))
       .map((r) => ({ pageId: r.id, title: r.title, kind: r.kind }));
+    const cites = await lintCitations(ctx, showId);
     return {
       unresolved,
       orphans,
-      counts: { pages: rows.length, links: linkCount, unresolvedLinks, orphans: orphans.length },
+      badCitations: cites.bad,
+      counts: {
+        pages: rows.length,
+        links: linkCount,
+        unresolvedLinks,
+        orphans: orphans.length,
+        citations: cites.count,
+        badCitations: cites.bad.reduce((n, p) => n + p.citations.length, 0),
+      },
     };
   },
 });
@@ -346,7 +409,8 @@ defineOp({
 defineOp({
   name: 'wiki.upsert',
   description:
-    'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated (keeping its title), otherwise a new one is created; pass pageId to rename. bodyMd is raw Markdown text, stored exactly as sent: write real newlines and quotes, not JSON escapes like \\n or \\" inside the text. Link other pages with [[Title]] or [[Title|label]]; wiki_lint finds links to missing pages. Kind "session" pages are recaps tied to sessionId. Every save keeps a revision. To fix a few sentences of an existing page, use wiki_patch instead of resending the whole body. ' +
+    'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated (keeping its title), otherwise a new one is created; pass pageId to rename. bodyMd is raw Markdown text, stored exactly as sent: write real newlines and quotes, not JSON escapes like \\n or \\" inside the text. Link other pages with [[Title]] or [[Title|label]]; wiki_lint finds links to missing pages. Kind "session" pages are recaps tied to sessionId. Kind "question" pages store an answered question: title = the question as asked (e.g. "When did Dana talk about her dog?"), bodyMd = the answer, with a citation for every claim. ' +
+    'A citation is a Markdown link to a range of a session: [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), seconds from the session start (the @seconds of transcript_text; `to` optional and greater than t), e.g. [Dana on the dog](/sessions/ses_abc?t=754.2&to=811). The web shows it as a chip with the session title and range (HH:MM:SS–HH:MM:SS) that plays that range, the label as its tooltip. Prefer citations over bare timecodes on every page kind; wiki_lint checks them. Every save keeps a revision. To fix a few sentences of an existing page, use wiki_patch instead of resending the whole body. ' +
     'Returns the saved page with its body and backlinks; pass `compact: true` (recommended for agents) to get only `{ id, title, kind, revision, unresolvedLinks }`, where unresolvedLinks lists the [[link]] targets in the body that match no page title or alias in the show yet (create those pages, or fix the link; wiki_lint checks the whole wiki).',
   kind: 'write',
   surfaces: ['web', 'mcp'],

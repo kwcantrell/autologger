@@ -328,7 +328,7 @@ export const wikiPages = pgTable(
     showId: text('show_id')
       .notNull()
       .references(() => shows.id, { onDelete: 'cascade' }),
-    kind: text('kind', { enum: ['person', 'topic', 'bit', 'session'] }).notNull(),
+    kind: text('kind', { enum: ['person', 'topic', 'bit', 'session', 'question'] }).notNull(),
     title: text('title').notNull(),
     titleNorm: text('title_norm').notNull(),
     bodyMd: text('body_md').notNull().default(''),
