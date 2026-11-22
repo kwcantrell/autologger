@@ -44,12 +44,17 @@ export function selectKeyTerms(keyTerms: string[]): string[] {
  * Build the Deepgram pre-recorded URL for the transcription settings. Punctuation stays on even
  * without smart formatting. Key terms use nova-3 keyterm prompting: one repeated `keyterm`
  * parameter per term (URL-encoded, so multi-word terms stay one term), see `selectKeyTerms`.
+ *
+ * Diarization uses `diarize_model=latest` (for pre-recorded audio currently Deepgram's v2
+ * diarizer): the older boolean `diarize=true` is deprecated and always runs the v1 diarizer, the one
+ * in use when two-person interviews came back with merged and swapped speakers (#169). Deepgram takes no speaker-count
+ * hint; a speaker change inside an utterance is split at word level by `mapDeepgram`.
  */
 export function deepgramUrl(opts: TranscriptionOptions = DEFAULT_TRANSCRIPTION_OPTIONS): string {
   const q = new URLSearchParams({
     model: 'nova-3',
     smart_format: String(opts.smartFormat),
-    diarize: 'true',
+    diarize_model: 'latest',
     utterances: 'true',
     punctuate: 'true',
   });
