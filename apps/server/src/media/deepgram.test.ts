@@ -189,9 +189,12 @@ describe('key term hit counts', () => {
       { term: 'a+b', count: 0 },
     ]);
     expect(describeKeyTermCounts(counts)).toBe(
-      "key terms: Tom Segura ×3, O'Leary ×1, Akinyele ×0, a+b ×0",
+      "key terms: Akinyele ×0, a+b ×0, Tom Segura ×3, O'Leary ×1",
     );
     expect(describeKeyTermCounts([])).toBe('');
+    const many = Array.from({ length: 20 }, (_, i) => ({ term: `t${i}`, count: i === 19 ? 0 : 1 }));
+    const listed = many.slice(0, 14).map((c) => `${c.term} ×1`);
+    expect(describeKeyTermCounts(many)).toBe(`key terms: t19 ×0, ${listed.join(', ')}, +5 more`);
   });
 });
 

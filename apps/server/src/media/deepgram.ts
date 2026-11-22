@@ -72,9 +72,18 @@ export function countKeyTerms(texts: string[], terms: string[]): { term: string;
   });
 }
 
-/** Job-result note, e.g. "key terms: Tom Segura ×41, Olu Dara ×0". */
+const MAX_DESCRIBED_KEY_TERMS = 15;
+
+/**
+ * Job-result note, e.g. "key terms: Olu Dara ×0, Tom Segura ×41, +3 more". Terms that never occur
+ * come first (the useful signal); at most 15 terms are listed.
+ */
 export function describeKeyTermCounts(counts: { term: string; count: number }[]): string {
-  return counts.length ? `key terms: ${counts.map((c) => `${c.term} ×${c.count}`).join(', ')}` : '';
+  if (!counts.length) return '';
+  const ordered = [...counts.filter((c) => c.count === 0), ...counts.filter((c) => c.count > 0)];
+  const shown = ordered.slice(0, MAX_DESCRIBED_KEY_TERMS).map((c) => `${c.term} ×${c.count}`);
+  const more = ordered.length - shown.length;
+  return `key terms: ${shown.join(', ')}${more > 0 ? `, +${more} more` : ''}`;
 }
 
 export interface DeepgramWord {

@@ -177,7 +177,7 @@ defineOp({
 defineOp({
   name: 'sessions.update',
   description:
-    "Edit session metadata; only the fields you pass change. Frame rate and start timecode can only change while the transport is stopped. `keyTerms` replaces this session's transcription key terms (same limits as in sessions_create; [] clears them); they apply to transcriptions that run from now on, so re-transcribe (media_retranscribe) to use them on audio already transcribed.",
+    "Edit session metadata; only the fields you pass change. Frame rate and start timecode can only change while the transport is stopped. `keyTerms` replaces this session's transcription key terms (same limits as in sessions_create; [] clears them); they apply to transcriptions that run from now on, so re-transcribe (media_retranscribe) to use them on audio already transcribed. Metadata and key-term changes are not in the change log and cannot be undone from it.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, startTimecode, ...patch }) {
