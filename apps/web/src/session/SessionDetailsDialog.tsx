@@ -2,13 +2,13 @@
 // transport is stopped, frame rate and start timecode. Key terms keep their own editor
 // (KeyTermsDialog), opened from here.
 
-import type { OpInput, Session } from '@autologger/contract';
+import type { Session } from '@autologger/contract';
 import { InfoIcon, TagsIcon } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { qk, useCapabilities, useJobs, useMedia, useOpMutation } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { NativeSelect } from '@/components/NativeSelect';
-import { FRAME_RATES, formatFrames, parseTimecode } from '@/lib/timecode';
+import { FRAME_RATES, parseTimecode } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
 import { Button } from '@/shared/components/ui/button';
@@ -18,6 +18,15 @@ import { Textarea } from '@/shared/components/ui/textarea';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { Dialog, DialogActions } from '@/shared/ui/Dialog';
 import { KeyTermsDialog } from './KeyTermsDialog';
+import {
+  buildPatch,
+  changedElsewhere,
+  clockChanged,
+  type DetailsForm,
+  formError,
+  formFromSession,
+  reformatStartTc,
+} from './sessionDetails';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -25,48 +34,32 @@ export function SessionDetailsDialog({
   session: s,
   onClose,
 }: {
+  /** The live session: the form diffs against a snapshot taken when the dialog opens. */
   session: Session;
   onClose: () => void;
 }) {
+  const [base] = useState(() => s);
+  const [form, setForm] = useState(() => formFromSession(s));
+  const set = (patch: Partial<DetailsForm>) => setForm((f) => ({ ...f, ...patch }));
+  const { title, episode, date, notes, fps, startTc } = form;
   const canWrite = s.access !== 'read';
-  const initialTc = formatFrames(s.startOffsetFrames, s.frameRate);
-  const [title, setTitle] = useState(s.title);
-  const [episode, setEpisode] = useState(s.episode);
-  const [date, setDate] = useState(s.episodeDate ?? '');
-  const [notes, setNotes] = useState(s.notes);
-  const [fps, setFps] = useState(s.frameRate);
-  const [startTc, setStartTc] = useState(initialTc);
   const [termsOpen, setTermsOpen] = useState(false);
   const { confirm, confirmElement } = useConfirm();
   const update = useOpMutation('sessions.update', {
     invalidate: () => [qk.session(s.id), qk.sessionsAll],
   });
 
-  const rates: number[] = FRAME_RATES.includes(s.frameRate as (typeof FRAME_RATES)[number])
+  const rates: number[] = FRAME_RATES.includes(base.frameRate as (typeof FRAME_RATES)[number])
     ? [...FRAME_RATES]
-    : [...FRAME_RATES, s.frameRate].sort((a, b) => a - b);
-  const tcValid = parseTimecode(startTc, fps) != null;
-  const clockChanged = fps !== s.frameRate || startTc.trim() !== initialTc;
+    : [...FRAME_RATES, base.frameRate].sort((a, b) => a - b);
+  const clockEdited = clockChanged(base, form);
   const clockLocked = s.isRolling;
   // Logged events and the elapsed clock are stored as frames on the session clock.
   const clockInUse = s.eventCount > 0 || s.elapsedFrames > 0;
-
-  const patch: OpInput<'sessions.update'> = {
-    sessionId: s.id,
-    ...(title.trim() !== s.title && { title: title.trim() }),
-    ...(episode.trim() !== s.episode && { episode: episode.trim() }),
-    ...((date || null) !== s.episodeDate && { episodeDate: date || null }),
-    ...(notes !== s.notes && { notes }),
-    ...(fps !== s.frameRate && { frameRate: fps }),
-    // Sent with a frame rate change too, so the start offset is re-read at the new rate.
-    ...(clockChanged && { startTimecode: startTc.trim() }),
-  };
+  const patch = buildPatch(base, form);
   const changed = Object.keys(patch).length > 1;
-  const invalid = !title.trim()
-    ? 'Enter a title.'
-    : clockChanged && !tcValid
-      ? `Use HH:MM:SS:FF for the start timecode, with frames below ${Math.round(fps)}.`
-      : null;
+  const invalid = formError(base, form);
+  const elsewhere = changedElsewhere(base, s);
 
   const requestClose = async () => {
     if (update.isPending) return;
@@ -86,6 +79,7 @@ export function SessionDetailsDialog({
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!canWrite || !changed || invalid || update.isPending) return;
+    if (clockLocked && clockEdited) return;
     update.mutate(patch, {
       onSuccess: () => {
         showToast('Session details saved.');
@@ -113,7 +107,7 @@ export function SessionDetailsDialog({
             disabled={disabled}
             aria-invalid={!title.trim() || undefined}
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => set({ title: e.target.value })}
           />
         </Field>
 
@@ -125,7 +119,7 @@ export function SessionDetailsDialog({
               maxLength={40}
               disabled={disabled}
               value={episode}
-              onChange={(e) => setEpisode(e.target.value)}
+              onChange={(e) => set({ episode: e.target.value })}
             />
           </Field>
           <Field>
@@ -135,7 +129,7 @@ export function SessionDetailsDialog({
               type="date"
               disabled={disabled}
               value={date}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(e) => set({ date: e.target.value })}
             />
           </Field>
         </div>
@@ -149,7 +143,7 @@ export function SessionDetailsDialog({
             placeholder={canWrite ? 'Session notes' : 'No notes.'}
             className="max-h-[40svh]"
             value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+            onChange={(e) => set({ notes: e.target.value })}
           />
         </Field>
 
@@ -162,10 +156,7 @@ export function SessionDetailsDialog({
               value={String(fps)}
               onChange={(e) => {
                 const next = Number(e.target.value);
-                setFps(next);
-                // Same digits, in the new rate's form (29.97 and 59.94 use ';').
-                const f = parseTimecode(startTc, next);
-                if (f != null) setStartTc(formatFrames(f, next));
+                set({ fps: next, startTc: reformatStartTc(startTc, next) });
               }}
             >
               {rates.map((r) => (
@@ -181,13 +172,13 @@ export function SessionDetailsDialog({
               id="sd-tc"
               className="font-tc"
               disabled={disabled || clockLocked}
-              aria-invalid={(clockChanged && !tcValid) || undefined}
+              aria-invalid={(clockEdited && parseTimecode(startTc, fps) == null) || undefined}
               value={startTc}
-              onChange={(e) => setStartTc(e.target.value)}
+              onChange={(e) => set({ startTc: e.target.value })}
             />
           </Field>
         </div>
-        {(clockLocked || (clockChanged && clockInUse)) && (
+        {(clockLocked || (clockEdited && clockInUse)) && (
           <FieldDescription className="-mt-2">
             {clockLocked
               ? 'Stop the transport to change the frame rate or start timecode.'
@@ -214,6 +205,12 @@ export function SessionDetailsDialog({
           <p className="m-0 text-sm text-si-danger">{invalid}</p>
         )}
         {!canWrite && <p className="m-0 text-sm text-si-muted">Read-only access to this show.</p>}
+        {canWrite && elsewhere.length > 0 && (
+          <p className="m-0 text-sm text-si-muted" role="status">
+            Changed elsewhere since you opened this: {elsewhere.join(', ')}. Saving keeps those
+            changes, except in fields you edited here.
+          </p>
+        )}
         {update.error && (
           <Alert variant="destructive">
             <AlertDescription>
@@ -227,7 +224,10 @@ export function SessionDetailsDialog({
             {canWrite ? 'Cancel' : 'Close'}
           </Button>
           {canWrite && (
-            <Button type="submit" disabled={!changed || !!invalid || update.isPending}>
+            <Button
+              type="submit"
+              disabled={!changed || !!invalid || update.isPending || (clockLocked && clockEdited)}
+            >
               {update.isPending ? 'Saving…' : 'Save'}
             </Button>
           )}
