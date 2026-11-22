@@ -35,6 +35,9 @@ const CompilationsRoute = lazy(() =>
     default: m.CompilationsRoute,
   })),
 );
+const ChangesRoute = lazy(() =>
+  import('@/routes/changes/ChangesRoute').then((m) => ({ default: m.ChangesRoute })),
+);
 const SettingsView = lazy(() =>
   import('@/settings/SettingsView').then((m) => ({ default: m.SettingsView })),
 );
@@ -155,6 +158,7 @@ export function AppShell() {
                 <Route path="/search" component={SearchRoute} />
                 <Route path="/wiki" component={WikiRoute} />
                 <Route path="/compilations" component={CompilationsRoute} />
+                <Route path="/changes" component={ChangesRoute} />
                 <Route path="/wiki/:pageId">
                   {(p) => <WikiPageView pageId={decodeURIComponent(p.pageId)} />}
                 </Route>

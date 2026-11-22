@@ -38,6 +38,14 @@ npm test
 
 Ops tests run against a real Postgres (`TEST_DATABASE_URL`, default `autologger_test` on :54329).
 
+A live Deepgram check (a ~9 s two-speaker clip, a paid call of well under a cent) is skipped unless
+you opt in with `DEEPGRAM_LIVE_TEST=1` and pass a key as `DEEPGRAM_TEST_API_KEY`; the script sets
+the first:
+
+```bash
+DEEPGRAM_TEST_API_KEY=<key> npm run test:deepgram -w @autologger/server
+```
+
 ## Deploy
 
 One host, Docker Compose: app, worker, Postgres, SeaweedFS (S3), Caddy.

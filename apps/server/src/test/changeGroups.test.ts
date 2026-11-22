@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import type { OpInput } from '@autologger/contract';
 import { asc, eq, sql } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../core/ids.ts';
@@ -284,5 +285,43 @@ describe('change groups', () => {
     );
     expect(await speakers(mine.session.id)).toEqual(['Dana', 'Dana']);
     expect(await speakers(theirs.session.id)).toEqual(['Dana', 'Dana']);
+  });
+});
+
+describe('show change log', () => {
+  it('lists show-level changes by kind and undoes a wiki delete from there', async () => {
+    const { owner, show, session } = await studio();
+    const agent = asAgent(owner);
+    await call(agent, 'events.create', { sessionId: session.id, category: 'Note', message: 'hi' });
+    const dana = { showId: show.id, kind: 'person', title: 'Dana' } as const;
+    const page = await call(agent, 'wiki.upsert', { ...dana, bodyMd: 'Host.' });
+    await call(agent, 'wiki.upsert', { ...dana, bodyMd: 'Host of the show.' });
+    await call(owner, 'wiki.delete', { pageId: page.id });
+    await call(owner, 'categories.save', { showId: show.id, categories: [] });
+
+    const list = (input: Partial<OpInput<'changes.list'>>) =>
+      call(owner, 'changes.list', { showId: show.id, grouped: true, ...input });
+    expect((await list({})).map((c) => c.entity)).toContain('event');
+    const showLevel = await list({ sessionId: null });
+    expect(showLevel.every((c) => c.sessionId === null)).toBe(true);
+    expect(new Set(showLevel.map((c) => c.entity))).toEqual(new Set(['wiki_page', 'category']));
+    const wiki = await list({ sessionId: null, entity: 'wiki_page' });
+    expect(wiki.map((c) => c.kind)).toEqual(['delete', 'update', 'create']);
+    expect(await list({ entity: 'wiki_page', via: 'mcp' })).toHaveLength(2);
+
+    const outsider = await makeUser('outsider@example.com');
+    await failsWith(
+      call(outsider, 'changes.list', { showId: show.id, sessionId: null }),
+      'not_found',
+    );
+    await failsWith(
+      call(outsider, 'changes.revertGroup', { groupId: wiki[0]!.groupId! }),
+      'not_found',
+    );
+
+    await call(owner, 'changes.revertGroup', { groupId: wiki[0]!.groupId! });
+    expect(
+      (await call(owner, 'wiki.revisions', { pageId: page.id })).map((r) => r.revision),
+    ).toEqual([2, 1]);
   });
 });

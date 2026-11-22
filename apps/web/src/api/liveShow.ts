@@ -1,6 +1,6 @@
-// The show's live socket: /ws/show/:id. Keeps the rail's jobs indicator and session list current
-// for every session of the show (imports and sessions started by agents or other tabs) without
-// polling. Reconnects with capped exponential backoff; useShowJobs falls back to polling while it
+// The show's live socket: /ws/show/:id. Keeps the rail's jobs indicator, session list and the
+// show's change log (/changes) current for every session of the show (imports and sessions
+// started by agents or other tabs) without polling. Reconnects with capped exponential backoff; useShowJobs falls back to polling while it
 // is not open, and for good after repeated failed handshakes.
 
 import type { ShowServerMessage } from '@autologger/contract';
@@ -39,7 +39,9 @@ function applyShowMessage(
         ? jobsKey
         : m.entity === 'compilation'
           ? qk.compilations(showId)
-          : qk.sessions(showId),
+          : m.entity === 'change'
+            ? qk.showChangesAll(showId)
+            : qk.sessions(showId),
     );
   }
 }
@@ -87,7 +89,7 @@ export function useLiveShow(showId: string | undefined): ShowLiveStatus {
         if (m.type === 'hello') {
           // Catch up on anything that changed before the socket was listening (always after a
           // reconnect: pushes sent while offline are gone).
-          for (const key of [qk.showJobs(showId), qk.sessions(showId)])
+          for (const key of [qk.showJobs(showId), qk.sessions(showId), qk.showChangesAll(showId)])
             if (attempt > 0 || (qc.getQueryState(key)?.dataUpdatedAt ?? 0) < connectedAt)
               refetch(key);
           gotHello = true;

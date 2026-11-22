@@ -86,6 +86,10 @@ In production: `node src/worker/main.ts` with the same environment as the app (c
   word keeps its speaker in `words[].sp`; transcripts made before that have none, so they can only
   be re-segmented by re-transcribing (`media.retranscribe`). Agents spot likely merged turns with
   `transcript.find` `suspect: true` and split them with `transcript.splitSegment`.
+  `src/media/deepgram.live.test.ts` checks this end to end on a synthetic two-speaker clip: word
+  speakers change at the turn, rows split there, and `metadata.diarize_info.arch` is not `v1`. It
+  runs against a sample response by default and against Deepgram only with `DEEPGRAM_LIVE_TEST=1`
+  and `DEEPGRAM_TEST_API_KEY` (`npm run test:deepgram -w @autologger/server`).
 - **youtube_import**: yt-dlp downloads the audio to a temp dir, the worker uploads it, creates an
   `origin = 'youtube'` segment at `startSec` 0, sets `sessions.source_kind/source_url` and enqueues
   `transcribe` and `waveform`.

@@ -13,7 +13,6 @@ import { selectShow, useActive } from '@/app/useActive';
 import { PageFrame } from '@/components/RouteState';
 import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription, AlertTitle } from '@/shared/components/ui/alert';
-import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
@@ -23,13 +22,12 @@ import { MakeVideoDialog, useMakeVideoBlocked } from '../compilations/MakeVideoD
 import { type WikiDraft, WikiEditor } from './WikiEditor';
 import { WikiHistorySheet } from './WikiHistorySheet';
 import { WikiMarkdown } from './WikiMarkdown';
+import { BacklinksSection, WikiPageHeader } from './WikiPageParts';
 import {
-  fmtWhen,
   useSessionTitles,
   useWikiDelete,
   useWikiResolver,
   useWikiUpsert,
-  WIKI_KIND_LABEL,
   wikiHref,
 } from './wikiShared';
 
@@ -192,38 +190,7 @@ function PageBody({ page }: { page: WikiPage }) {
         </Alert>
       )}
 
-      <header className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline">{WIKI_KIND_LABEL[page.kind]}</Badge>
-        </div>
-        <h1 className="m-0 text-[1.35rem] font-semibold break-words text-si-fg">{page.title}</h1>
-        {page.aliases.length > 0 && (
-          <ul aria-label="Aliases" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
-            {page.aliases.map((a) => (
-              <li key={a}>
-                <Badge variant="outline" className="normal-case tracking-normal">
-                  {a}
-                </Badge>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="m-0 text-xs text-si-dim">
-          Last changed by <span className="text-si-muted">{page.updatedBy?.name ?? 'someone'}</span>
-          , <time dateTime={page.updatedAt}>{fmtWhen(page.updatedAt)}</time> · r{page.revision}
-          {page.sessionId && (
-            <>
-              {' · '}
-              <Link
-                href={`/sessions/${encodeURIComponent(page.sessionId)}`}
-                className="text-si-muted underline underline-offset-2 hover:text-si-fg"
-              >
-                Open session
-              </Link>
-            </>
-          )}
-        </p>
-      </header>
+      <WikiPageHeader page={page} />
 
       {!edit && (
         <div className="flex flex-col gap-2">
@@ -331,46 +298,24 @@ function Backlinks({ page }: { page: WikiPage }) {
   const list = showAll && all.data ? all.data : page.backlinks;
   const hidden = page.backlinkCount - list.length;
   return (
-    <section
-      aria-labelledby="wiki-backlinks"
-      className="flex flex-col gap-1 border-t border-si-line pt-4"
-    >
-      <h2
-        id="wiki-backlinks"
-        className="m-0 text-xs font-semibold tracking-wide text-si-dim uppercase"
-      >
-        Linked from
-      </h2>
-      <ul className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0">
-        {list.map((b) => (
-          <li key={b.id} className="flex items-baseline gap-1.5 text-sm">
-            <Link
-              href={wikiHref(b.id)}
-              className="text-si-fg underline decoration-(--si-line-strong) underline-offset-2 hover:text-si-accent"
-            >
-              {b.title}
-            </Link>
-            <span className="text-xs text-si-dim">{WIKI_KIND_LABEL[b.kind]}</span>
-          </li>
-        ))}
-        {hidden > 0 && (
-          <li className="flex items-baseline gap-1.5 text-sm text-si-dim">
-            {all.isError && <span role="alert">Couldn’t load the other {hidden}.</span>}
-            <button
-              type="button"
-              disabled={all.isFetching}
-              aria-busy={all.isFetching}
-              onClick={() => (showAll ? void all.refetch() : setShowAll(true))}
-              className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-sm text-si-dim underline decoration-(--si-line-strong) underline-offset-2 hover:text-si-fg disabled:cursor-default"
-            >
-              {all.isFetching && (
-                <Spinner role="presentation" aria-hidden="true" className="size-3" />
-              )}
-              {all.isError ? 'Try again' : `and ${hidden} more`}
-            </button>
-          </li>
-        )}
-      </ul>
-    </section>
+    <BacklinksSection backlinks={list}>
+      {hidden > 0 && (
+        <li className="flex items-baseline gap-1.5 text-sm text-si-dim">
+          {all.isError && <span role="alert">Couldn’t load the other {hidden}.</span>}
+          <button
+            type="button"
+            disabled={all.isFetching}
+            aria-busy={all.isFetching}
+            onClick={() => (showAll ? void all.refetch() : setShowAll(true))}
+            className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-sm text-si-dim underline decoration-(--si-line-strong) underline-offset-2 hover:text-si-fg disabled:cursor-default"
+          >
+            {all.isFetching && (
+              <Spinner role="presentation" aria-hidden="true" className="size-3" />
+            )}
+            {all.isError ? 'Try again' : `and ${hidden} more`}
+          </button>
+        </li>
+      )}
+    </BacklinksSection>
   );
 }
