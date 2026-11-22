@@ -406,6 +406,8 @@ export interface Job {
   sessionId: string | null;
   /** Set when listing a whole show (jobs.list with showId). */
   sessionTitle?: string;
+  /** Jobs about one audio segment (transcribe, waveform): that segment's id (media.list). */
+  segmentId?: string;
   /** Queued jobs only (jobs.list): jobs ahead of this one in the worker queue, 0 = next. */
   queuePosition?: number;
   /**
