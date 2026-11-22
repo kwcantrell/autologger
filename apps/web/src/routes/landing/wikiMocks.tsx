@@ -65,6 +65,7 @@ export function CompileMock() {
     id: 'comp-mock',
     showId: 'mock',
     title: 'The Parking Ticket Saga',
+    buildLocally: false,
     status: 'running',
     progress: 'Cutting clip 2 of 3',
     etaSec: 60,

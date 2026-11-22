@@ -1,6 +1,8 @@
 // All configuration comes from the environment. Optional integrations stay off when unset,
 // and the ops that need them answer `unavailable`.
 
+import { fileURLToPath } from 'node:url';
+
 const str = (k: string, d?: string): string | undefined => {
   const v = process.env[k]?.trim();
   return v ? v : d;
@@ -29,6 +31,10 @@ export const env = {
   publicUrl: str('PUBLIC_URL', 'http://localhost:8080')!.replace(/\/$/, ''),
   /** Built SPA to serve; unset in dev (Vite serves the web app and proxies /api). */
   webDist: str('WEB_DIST'),
+  /** The local import helper served at /api/importer/autologger-import.mjs (apps/importer). */
+  importerFile:
+    str('IMPORTER_FILE') ??
+    fileURLToPath(new URL('../../importer/autologger-import.mjs', import.meta.url)),
 
   google: {
     clientId: str('GOOGLE_CLIENT_ID'),

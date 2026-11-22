@@ -113,6 +113,8 @@ export function toAudioSegment(r: Row<typeof schema.audioSegments>): AudioSegmen
     mimeType: r.mimeType,
     origin: r.origin,
     fileName: r.fileName,
+    sourceUrl: r.sourceUrl,
+    sourcePrivate: r.sourcePrivate,
     status: r.status,
     error: r.error,
     hasWaveform: r.peaksKey !== null,
@@ -156,6 +158,7 @@ export function toCompilation(
       ? { progress: r.progress }
       : {}),
     ...(r.error && r.status === 'failed' ? { error: r.error } : {}),
+    buildLocally: r.buildLocally,
     clips: r.clips.map((c) => ({
       sessionId: c.sessionId,
       sessionTitle: titles.get(c.sessionId) ?? c.sessionTitle,

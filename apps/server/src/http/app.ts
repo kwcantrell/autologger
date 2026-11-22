@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Capabilities, OpName } from '@autologger/contract';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -18,6 +19,9 @@ import { actorFromSessionToken, authRoutes, SESSION_COOKIE } from './auth.ts';
 import { exportRoutes } from './exports.ts';
 
 type Env = { Variables: { actor: Actor | null } };
+
+/** Where the import helper is downloaded from (docs/importer.md). */
+export const IMPORTER_ROUTE = '/api/importer/autologger-import.mjs';
 
 /** Extra route groups registered by feature modules (MCP, OAuth). */
 const extraRoutes: Hono[] = [];
@@ -96,6 +100,22 @@ export function createApp(): Hono<Env> {
   });
 
   app.route('/', exportRoutes);
+
+  // The local import helper (apps/importer) as one dependency-free file: `node
+  // autologger-import.mjs …` on the user's computer. A file download, not an op; no sign-in needed.
+  app.get(IMPORTER_ROUTE, async (c) => {
+    const body = await readFile(env.importerFile).catch(() => null);
+    if (!body)
+      return c.json(
+        { ok: false, error: { code: 'not_found', message: 'The import helper is not bundled.' } },
+        404,
+      );
+    return c.body(body, 200, {
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="autologger-import.mjs"',
+      'Cache-Control': 'no-cache',
+    });
+  });
 
   app.all('/api/*', (c) =>
     c.json({ ok: false, error: { code: 'not_found', message: 'No such endpoint.' } }, 404),

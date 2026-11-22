@@ -1,5 +1,7 @@
 // Video compilations: which YouTube video (and where in it) a session range comes from, and the
-// ffmpeg steps the worker's `compile` job runs on the downloaded sections.
+// ffmpeg steps the worker's `compile` job runs on the downloaded sections. The local import
+// helper (apps/importer) builds `buildLocally` compilations with the same steps on the user's
+// computer; keep its ffmpeg arguments in step with these.
 //
 // Time mapping: a YouTube import stores the video's audio as one audio segment placed at
 // `segment.startSec` on the session clock, so session second s is video second s − startSec.
@@ -53,6 +55,7 @@ export async function resolveClipSources(
   db: DbOrTx,
   clips: ClipRange[],
   showId?: string,
+  opts: { allowPrivate?: boolean } = {},
 ): Promise<(ClipSource | { error: string })[]> {
   const ids = [...new Set(clips.map((c) => c.sessionId))];
   const sessionRows = ids.length
@@ -74,6 +77,7 @@ export async function resolveClipSources(
           sessionId: audioSegments.sessionId,
           startSec: audioSegments.startSec,
           durationSec: audioSegments.durationSec,
+          sourcePrivate: audioSegments.sourcePrivate,
         })
         .from(audioSegments)
         .where(
@@ -95,6 +99,7 @@ export async function resolveClipSources(
       return { error: 'the session was not imported from YouTube' };
     const seg = segRows.find((r) => r.sessionId === c.sessionId);
     if (!seg) return { error: 'the session has no stored YouTube audio' };
+    if (seg.sourcePrivate && !opts.allowPrivate) return { error: PRIVATE_SOURCE };
     const segEnd = seg.durationSec === null ? null : seg.startSec + seg.durationSec;
     if (c.startSec < seg.startSec || (segEnd !== null && c.endSec > segEnd + END_SLACK_SEC))
       return {
@@ -111,6 +116,10 @@ export async function resolveClipSources(
     };
   });
 }
+
+/** Why the server cannot build a clip of a session the import helper uploaded from a private video. */
+export const PRIVATE_SOURCE =
+  'the video is private (imported with the local import helper), so the server cannot download it; create the compilation with buildLocally: true and build it on your computer with the import helper (autologger-import compile <compilationId>)';
 
 const fmt = (n: number) => String(Math.round(n * 10) / 10);
 

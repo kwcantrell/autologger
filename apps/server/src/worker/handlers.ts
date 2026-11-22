@@ -229,6 +229,7 @@ const youtubeImport: Handler = {
             mimeType: dl.mimeType,
             origin: 'youtube',
             fileName: dl.title,
+            sourceUrl: url,
             objectKey,
             sizeBytes: size,
             status: 'ready',

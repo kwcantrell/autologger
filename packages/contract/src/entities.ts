@@ -159,6 +159,13 @@ export interface AudioSegment {
   mimeType: string;
   origin: MediaSource;
   fileName: string | null;
+  /** YouTube origin: the video URL the audio came from (null for older imports). */
+  sourceUrl: string | null;
+  /**
+   * Uploaded by the local import helper from a video the server cannot download (private):
+   * compilations of it must be built locally (compilations.create buildLocally).
+   */
+  sourcePrivate: boolean;
   status: SegmentStatus;
   error: string | null;
   /** Waveform peaks have been computed (read them with media.waveform). */
@@ -515,6 +522,11 @@ export interface Compilation {
   progress?: string;
   /** When failed: why. */
   error?: string;
+  /**
+   * Built by the local import helper (`autologger-import compile <id>`) instead of the server:
+   * it stays queued until the helper uploads the MP4 (compilations.completeUpload).
+   */
+  buildLocally: boolean;
   clips: CompilationClip[];
   /** Seconds: the sum of the clip lengths, then the built video's measured length once ready. */
   durationSec: number;

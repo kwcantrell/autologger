@@ -229,6 +229,13 @@ export const audioSegments = pgTable(
     mimeType: text('mime_type').notNull(),
     origin: text('origin', { enum: ['recorded', 'file', 'youtube'] }).notNull(),
     fileName: text('file_name'),
+    /** YouTube origin: the video URL the audio came from (server import or the import helper). */
+    sourceUrl: text('source_url'),
+    /**
+     * Uploaded by the local import helper from a video the server cannot download (private,
+     * members-only…): server-side compilations refuse it; build those locally.
+     */
+    sourcePrivate: boolean('source_private').notNull().default(false),
     objectKey: text('object_key').notNull(),
     /** S3 key of the waveform peaks object (worker `waveform` job); null until computed. */
     peaksKey: text('peaks_key'),
@@ -590,6 +597,8 @@ export const compilations = pgTable(
       .default('queued'),
     progress: text('progress'),
     error: text('error'),
+    /** Built by the local import helper (compilations.createUpload/completeUpload), not the worker. */
+    buildLocally: boolean('build_locally').notNull().default(false),
     /** S3 key of the MP4; set once it is stored. */
     objectKey: text('object_key'),
     /** Sum of the clip lengths until the video exists, then the video's measured length. */
