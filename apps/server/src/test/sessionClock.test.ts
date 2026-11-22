@@ -85,6 +85,37 @@ describe('session clock changes', () => {
     expect(await atSecs(owner, session.id)).toEqual([4200]);
   });
 
+  it('keep the start timecode when only the frame rate changes', async () => {
+    const { owner, session } = await studio();
+    await call(owner, 'events.create', { sessionId: session.id, category: 'Laugh', atSec: 600 });
+    const s = await call(owner, 'sessions.update', { sessionId: session.id, frameRate: 30 });
+    expect(s).toMatchObject({ frameRate: 30, startOffsetFrames: 30 * 3600 });
+    expect(await atSecs(owner, session.id)).toEqual([600]);
+    const row = await lastGroup(owner, session.id);
+    await call(owner, 'changes.revertGroup', { groupId: row.groupId! });
+    expect(await call(owner, 'sessions.get', { sessionId: session.id })).toMatchObject({
+      frameRate: 24,
+      startOffsetFrames: 24 * 3600,
+    });
+
+    // :29 does not exist at 24 fps: ask for an explicit start timecode.
+    await call(owner, 'sessions.update', {
+      sessionId: session.id,
+      frameRate: 30,
+      startTimecode: '01:00:00:29',
+    });
+    await failsWith(
+      call(owner, 'sessions.update', { sessionId: session.id, frameRate: 24 }),
+      'bad_request',
+    );
+    const t = await call(owner, 'sessions.update', {
+      sessionId: session.id,
+      frameRate: 24,
+      startTimecode: '01:00:00:23',
+    });
+    expect(t.startOffsetFrames).toBe(24 * 3600 + 23);
+  });
+
   it('undo restores elapsed frames exactly, and refuses while rolling or after new events', async () => {
     const { owner, session } = await studio();
     await setElapsed(session.id, 1);
@@ -148,8 +179,8 @@ describe('session clock changes', () => {
     const t0 = Date.now();
     await call(owner, 'sessions.update', { sessionId: session.id, frameRate: 29.97 });
     const row = await lastGroup(owner, session.id);
-    // The event at the start offset keeps its frames: 2999 retimed events plus the clock.
-    expect(row.groupSize).toBe(3000);
+    // The start timecode stays 01:00:00:00, so every event is retimed: 3000 events plus the clock.
+    expect(row.groupSize).toBe(3001);
     const undo = await call(owner, 'changes.revertGroup', { groupId: row.groupId! });
     // Redo (undo of the undo), then undo again.
     await call(owner, 'changes.revertGroup', { groupId: undo.groupId });
