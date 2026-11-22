@@ -562,10 +562,32 @@ describe('question pages and citations', () => {
     });
     const saved = `${cite('t=6100&to=6184.8')} ${cite('t=6100&to=6200')} ${cite('t=6100&to=6184.5')}`;
     expect(page.bodyMd).toBe(saved);
+    const clampedTo = { sessionId: session.id, endSec: 6184.8, label: 'x' };
+    expect(page.clampedCitations).toEqual([{ ...clampedTo, startSec: 6100, sentEndSec: 6185 }]);
     const lint = await call(owner, 'wiki.lint', { showId: show.id });
     expect(lint.badCitations[0]!.citations).toEqual([
       { sessionId: session.id, startSec: 6100, endSec: 6200, label: 'x', problem: 'past_end' },
     ]);
+
+    // A `t` past the end without `to` is not clamped (only reported); short forms are clamped too.
+    const short = await call(agent, 'wiki.patch', {
+      pageId: page.id,
+      append: `[x](/sessions/${session.id}?t=6188) [x](@6000-6186.4)`,
+    });
+    expect(short.clampedCitations).toEqual([{ ...clampedTo, startSec: 6000, sentEndSec: 6186.4 }]);
+    expect(short.badCitations.map((c) => [c.startSec, c.problem])).toEqual([
+      [6100, 'past_end'],
+      [6188, 'past_end'],
+    ]);
+    const compact = await call(agent, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'session',
+      sessionId: session.id,
+      title: 'Ep 3 recap',
+      bodyMd: saved,
+      compact: true,
+    });
+    expect(compact.clampedCitations).toEqual([]);
 
     await call(agent, 'wiki.patch', { pageId: page.id, append: cite('t=10&to=6189') });
     const patched = await call(owner, 'wiki.get', { pageId: page.id });

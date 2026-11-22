@@ -143,6 +143,7 @@ describe('compact responses for bulk writes', () => {
       unresolvedLinks: ['Tom Talks'],
       citationCount: 0,
       badCitations: [],
+      clampedCitations: [],
     });
     const updated = await call(agent, 'wiki.upsert', {
       showId: show.id,

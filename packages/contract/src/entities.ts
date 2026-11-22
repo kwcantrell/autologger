@@ -369,6 +369,12 @@ export interface WikiSavedCitations {
   citationCount: number;
   /** The saved page's citations that wiki.lint flags, in body order. */
   badCitations: (WikiCitation & { problem: WikiCitationProblem })[];
+  /**
+   * Citations whose `to` this save clamped to the session's audio end (it overshot by at most
+   * 5 s), in body order: `endSec` is the stored end, `sentEndSec` the end as sent. The stored body
+   * then differs from what was sent there (e.g. `to=6184.8` instead of `to=6185`).
+   */
+  clampedCitations: (Required<WikiCitation> & { sentEndSec: number })[];
 }
 
 export interface WikiPage extends WikiPageSummary {
