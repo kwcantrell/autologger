@@ -318,4 +318,63 @@ describe('job timing', () => {
     await completeJob((await claimJob())!);
     expect((await call(agent, 'sessions.get', { sessionId: session.id })).transcriptJob).toBeNull();
   });
+
+  it('sessions.get etaSec for an unfinished import includes the transcription when the length is known', async () => {
+    const { owner, session } = await studio();
+    const agent = asAgent(owner);
+    // History: transcriptions take 0.1 s per audio second, imports 30 s.
+    const ago = (sec: number) => new Date(Date.now() - sec * 1000);
+    const segmentId = newId('aud');
+    await db.insert(schema.audioSegments).values({
+      id: segmentId,
+      sessionId: session.id,
+      ordinal: 0,
+      durationSec: 600,
+      mimeType: 'audio/mpeg',
+      origin: 'file',
+      objectKey: `test/${segmentId}`,
+      status: 'ready',
+    });
+    await db.insert(schema.jobs).values([
+      {
+        id: newId('job'),
+        kind: 'transcribe',
+        status: 'done',
+        sessionId: session.id,
+        payload: { segmentId },
+        startedAt: ago(1000),
+        updatedAt: ago(940),
+      },
+      {
+        id: newId('job'),
+        kind: 'youtube_import',
+        status: 'done',
+        sessionId: session.id,
+        payload: { url: 'https://youtu.be/x' },
+        startedAt: ago(1000),
+        updatedAt: ago(970),
+      },
+    ]);
+    const imp = await enqueueJob(db, {
+      kind: 'youtube_import',
+      sessionId: session.id,
+      actorId: owner.user.id,
+      payload: { url: 'https://youtu.be/y', durationSec: 1200 },
+    });
+    // jobs.list: the download only. sessions.get: download + 1200 s × 0.1 of transcription.
+    const [listed] = await call(agent, 'jobs.list', { sessionId: session.id, status: ['queued'] });
+    expect(listed).toMatchObject({ id: imp.id, queuePosition: 0, etaSec: 30 });
+    const get = () => call(agent, 'sessions.get', { sessionId: session.id });
+    expect((await get()).transcriptJob).toMatchObject({ id: imp.id, etaSec: 150 });
+
+    // Unknown length (media.importYoutube): the download only.
+    await db
+      .update(schema.jobs)
+      .set({ payload: { url: 'https://youtu.be/y' } })
+      .where(eq(schema.jobs.id, imp.id));
+    expect((await get()).transcriptJob).toMatchObject({ id: imp.id, etaSec: 30 });
+
+    const outsider = asAgent(await makeUser('outsider@example.com'));
+    await failsWith(call(outsider, 'sessions.get', { sessionId: session.id }), 'not_found');
+  });
 });

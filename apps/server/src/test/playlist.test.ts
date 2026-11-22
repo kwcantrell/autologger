@@ -113,6 +113,8 @@ describe('media.importPlaylist', () => {
     expect(rows.map((r) => r.id)).toEqual(first.created.map((c) => c.jobId));
     expect(rows[1]!.createdAt.getTime()).toBeGreaterThan(rows[0]!.createdAt.getTime());
     expect(rows[1]!.runAfter.getTime()).toBeGreaterThan(rows[0]!.runAfter.getTime());
+    // The video length rides along for the session-level transcript estimate.
+    expect(rows[0]!.payload).toMatchObject({ durationSec: 4200 });
 
     // The import job sets the session date from the YouTube upload date.
     const [jobRow] = await db
