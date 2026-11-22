@@ -1,11 +1,8 @@
 import type { Category, Session, SessionEvent } from '@autologger/contract';
 import type { UseQueryResult } from '@tanstack/react-query';
-import { Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { errorMessage, type RpcError, rpc } from '@/api/rpc';
-import { eventSec, formatFrames, parseTimecode } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
-import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import {
   DropdownMenu,
@@ -17,17 +14,9 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/shared/components/ui/dropdown-menu';
-import { cn } from '@/shared/lib/utils';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
-import { formatWallUtcYmdHms } from '@/shared/utils/timecode';
 import { useWorkspace } from '../context';
 import {
-  FEED_CELL,
-  FEED_CELL_LABEL,
-  FEED_CELL_TEXT,
-  FEED_INLINE_INPUT,
-  FEED_ROW,
-  FEED_TC,
   FeedShell,
   FeedTable,
   feedCountLabel,
@@ -35,12 +24,9 @@ import {
   IconClock,
   IconFilter,
   IconPencil,
-  JUMP_COLUMN,
-  JumpButton,
   ToolbarCaption,
 } from '../feed';
-
-type TimeMode = 'session' | 'world';
+import { EventRow, eventColumns, type TimeMode } from './EventRow';
 
 export function EventsTab({
   session,
@@ -177,17 +163,7 @@ export function EventsTab({
         </p>
       ) : (
         <FeedTable
-          columns={[
-            JUMP_COLUMN,
-            {
-              key: 'time',
-              label: timeMode === 'session' ? 'Session Time' : 'World Clock',
-              className: 'w-[6.5rem]',
-            },
-            { key: 'event', label: 'Event', className: 'w-32 max-md:hidden' },
-            { key: 'message', label: 'Message' },
-            { key: 'actions', label: 'Actions', srOnly: true, className: 'w-8' },
-          ]}
+          columns={eventColumns(timeMode)}
           loading={events.isPending}
           empty={shown.length === 0}
           emptyMessage={
@@ -212,6 +188,12 @@ export function EventsTab({
                 else rowRefs.current.delete(e.id);
               }}
               onJump={(sec) => seek(sec, true)}
+              onSave={(patch) =>
+                rpc('events.update', patch).catch((err) => {
+                  showToast(`Update failed. ${errorMessage(err)}`, true);
+                  throw err;
+                })
+              }
               onDelete={() => void remove(e)}
             />
           ))}
@@ -219,180 +201,5 @@ export function EventsTab({
       )}
       {confirmElement}
     </FeedShell>
-  );
-}
-
-function EventRow({
-  e,
-  session,
-  categories,
-  timeMode,
-  editable,
-  canWrite,
-  rowRef,
-  onJump,
-  onDelete,
-}: {
-  e: SessionEvent;
-  session: Session;
-  categories: Category[];
-  timeMode: TimeMode;
-  editable: boolean;
-  canWrite: boolean;
-  rowRef: (el: HTMLTableRowElement | null) => void;
-  onJump: (sec: number) => void;
-  onDelete: () => void;
-}) {
-  const sec = eventSec(e.timecodeFrames, session);
-  const tc = e.timecodeFrames != null ? formatFrames(e.timecodeFrames, session.frameRate) : '—';
-  const timeText =
-    timeMode === 'session' ? tc.replace(/[:;]\d{2}$/, '') : formatWallUtcYmdHms(e.wallTime);
-  const [msg, setMsg] = useState(e.message);
-  const [tcText, setTcText] = useState(tc);
-  useEffect(() => setMsg(e.message), [e.message]);
-  useEffect(() => setTcText(tc), [tc]);
-
-  const save = async (patch: Parameters<typeof rpc<'events.update'>>[1]) => {
-    try {
-      await rpc('events.update', patch);
-    } catch (err) {
-      showToast(`Update failed. ${errorMessage(err)}`, true);
-      setMsg(e.message);
-      setTcText(tc);
-    }
-  };
-
-  const agent = e.source === 'agent';
-  const messageText = [e.value && e.value !== e.message ? e.value : null, e.message]
-    .filter(Boolean)
-    .join(' — ');
-
-  return (
-    <tr ref={rowRef} className={cn(FEED_ROW, 'group')} data-event-id={e.id}>
-      <td className={cn(FEED_CELL, 'align-middle')}>
-        <JumpButton
-          sec={sec}
-          label={timeText}
-          onJump={onJump}
-          unavailable={session.isRolling ? 'Playback is off while timecode rolls.' : null}
-        />
-      </td>
-      <td className={cn(FEED_CELL, FEED_TC, 'align-middle')}>
-        {editable && timeMode === 'session' ? (
-          <input
-            className={cn(FEED_INLINE_INPUT, 'min-w-[calc(11ch+0.6rem+2px)] tabular-nums')}
-            aria-label="Timecode"
-            value={tcText}
-            onChange={(ev) => setTcText(ev.target.value)}
-            onBlur={() => {
-              if (tcText === tc) return;
-              if (parseTimecode(tcText, session.frameRate) == null) {
-                showToast('Enter a timecode like 00:12:03:07.', true);
-                setTcText(tc);
-                return;
-              }
-              void save({ eventId: e.id, timecode: tcText.trim() });
-            }}
-          />
-        ) : (
-          <span
-            title={timeMode === 'session' ? `${tc} · ${formatWallUtcYmdHms(e.wallTime)} UTC` : tc}
-          >
-            {timeText}
-          </span>
-        )}
-        <span className="block text-[0.68rem] font-semibold md:hidden" style={{ color: e.color }}>
-          {e.category}
-        </span>
-      </td>
-      <td
-        className={cn(FEED_CELL, FEED_CELL_LABEL, 'align-middle whitespace-nowrap max-md:hidden')}
-        style={{ color: e.color }}
-      >
-        {editable ? (
-          <select
-            className={cn(FEED_INLINE_INPUT, 'bg-si-panel')}
-            aria-label="Category"
-            value={e.categoryId ?? ''}
-            style={{ color: e.color }}
-            onChange={(ev) =>
-              void save({
-                eventId: e.id,
-                categoryId: ev.target.value || null,
-                ...(ev.target.value ? {} : { category: e.category }),
-              })
-            }
-          >
-            {!e.categoryId && <option value="">{e.category}</option>}
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        ) : (
-          e.category
-        )}
-      </td>
-      <td
-        className={cn(
-          FEED_CELL,
-          FEED_CELL_TEXT,
-          'max-w-[min(28rem,38vw)] align-middle max-md:max-w-none',
-        )}
-      >
-        <span className="flex items-center gap-1.5">
-          {editable ? (
-            <input
-              className={FEED_INLINE_INPUT}
-              aria-label="Message"
-              value={msg}
-              placeholder={e.value ?? ''}
-              onChange={(ev) => setMsg(ev.target.value)}
-              onBlur={() => {
-                if (msg !== e.message) void save({ eventId: e.id, message: msg });
-              }}
-              onKeyDown={(ev) => {
-                if (ev.key === 'Enter') (ev.target as HTMLInputElement).blur();
-                if (ev.key === 'Escape') setMsg(e.message);
-              }}
-            />
-          ) : (
-            <span className="min-w-0 break-words">{messageText}</span>
-          )}
-          {agent && (
-            <Badge
-              variant="outline"
-              className="shrink-0 px-1 py-px text-[0.6rem]"
-              title={`Logged by an agent${e.createdBy ? ` acting as ${e.createdBy.name}` : ''}`}
-            >
-              agent
-            </Badge>
-          )}
-          {e.source === 'companion' && (
-            <Badge
-              variant="outline"
-              className="shrink-0 px-1 py-px text-[0.6rem]"
-              title="Logged from a Companion device"
-            >
-              deck
-            </Badge>
-          )}
-        </span>
-      </td>
-      <td className={cn(FEED_CELL, 'align-middle')}>
-        {canWrite && (
-          <Button
-            variant="unstyled"
-            aria-label="Delete row"
-            title="Delete row"
-            className="inline-flex size-6 items-center justify-center rounded-[0.35rem] text-si-dim opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover-always:bg-[color-mix(in_oklab,var(--si-danger)_12%,transparent)] hover-always:text-si-danger max-md:opacity-100"
-            onClick={onDelete}
-          >
-            <Trash2 className="size-3" aria-hidden="true" />
-          </Button>
-        )}
-      </td>
-    </tr>
   );
 }

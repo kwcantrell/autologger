@@ -3,7 +3,7 @@
 // Toggle flips between its on/off labels (state derived from the last logged value).
 
 import type { Category, Session, SessionEvent } from '@autologger/contract';
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { errorMessage, rpc } from '@/api/rpc';
 import { isTypingTarget } from '@/lib/keys';
 import { settingsOpen } from '@/lib/store';
@@ -11,12 +11,9 @@ import { showToast } from '@/shared/components/Toast';
 import { Button } from '@/shared/components/ui/button';
 import { Field, FieldLabel } from '@/shared/components/ui/field';
 import { Input } from '@/shared/components/ui/input';
-import { Kbd } from '@/shared/components/ui/kbd';
 import { Dialog, DialogActions } from '@/shared/ui/Dialog';
 import { isOverlayOpen } from '@/shared/ui/overlayOpen';
-
-const CAT_TILE =
-  'min-h-(--h-ctl) min-w-0 max-w-full gap-2 whitespace-normal py-1.5 pr-3 pl-2 text-left';
+import { LogButton } from './LogButton';
 
 type Pending = { cat: Category; atSec: number };
 
@@ -142,30 +139,21 @@ export function CategoryStrip({
                 : cat.offLabel || cat.name
               : cat.name;
           return (
-            <Button
+            <LogButton
               key={cat.id}
               ref={(el: HTMLButtonElement | null) => {
                 if (el) btnRefs.current.set(cat.id, el);
                 else btnRefs.current.delete(cat.id);
               }}
-              variant="log"
-              size={null}
-              className={CAT_TILE}
-              style={{ '--cat': cat.color } as CSSProperties}
-              data-latched={cat.kind === 'toggle' ? (on ? 'on' : 'off') : undefined}
+              hotkey={idx < 9 ? idx + 1 : undefined}
+              color={cat.color}
+              label={label}
+              srName={cat.kind === 'toggle' ? cat.name : undefined}
+              latched={cat.kind === 'toggle' ? (on ? 'on' : 'off') : undefined}
               disabled={!enabled}
               title={disabledReason ?? (idx < 9 ? `${cat.name} (${idx + 1})` : cat.name)}
               onClick={() => press(cat)}
-            >
-              <span className="flex items-center gap-2" aria-hidden="true">
-                {idx < 9 && <Kbd>{idx + 1}</Kbd>}
-                <span className="size-2 shrink-0 rounded-[2px] bg-(--cat)" />
-              </span>
-              <span className="min-w-0 break-words leading-tight">
-                {cat.kind === 'toggle' && <span className="sr-only">{cat.name}: </span>}
-                {label}
-              </span>
-            </Button>
+            />
           );
         })}
       </div>
