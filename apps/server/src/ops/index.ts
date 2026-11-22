@@ -11,5 +11,6 @@ import './search.ts';
 import './changes.ts';
 import './admin.ts';
 import './media.ts';
+import './compilations.ts';
 import './tokens.ts';
 import './companion.ts';

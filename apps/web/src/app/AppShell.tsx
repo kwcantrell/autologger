@@ -30,6 +30,11 @@ const WikiRoute = lazy(() =>
 const WikiPageView = lazy(() =>
   import('@/routes/wiki/WikiPageView').then((m) => ({ default: m.WikiPageView })),
 );
+const CompilationsRoute = lazy(() =>
+  import('@/routes/compilations/CompilationsRoute').then((m) => ({
+    default: m.CompilationsRoute,
+  })),
+);
 const SettingsView = lazy(() =>
   import('@/settings/SettingsView').then((m) => ({ default: m.SettingsView })),
 );
@@ -149,6 +154,7 @@ export function AppShell() {
                 </Route>
                 <Route path="/search" component={SearchRoute} />
                 <Route path="/wiki" component={WikiRoute} />
+                <Route path="/compilations" component={CompilationsRoute} />
                 <Route path="/wiki/:pageId">
                   {(p) => <WikiPageView pageId={decodeURIComponent(p.pageId)} />}
                 </Route>

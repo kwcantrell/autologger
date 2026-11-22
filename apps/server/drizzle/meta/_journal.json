@@ -85,6 +85,13 @@
       "when": 1795343128195,
       "tag": "0011_audio_peaks",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795347260049,
+      "tag": "0012_compilations",
+      "breakpoints": true
     }
   ]
 }

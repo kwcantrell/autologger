@@ -221,3 +221,51 @@ export async function listPlaylist(
   }
   return { title: typeof info.title === 'string' ? info.title : null, entries };
 }
+
+/** yt-dlp format for compilation clips: at most 720p, preferring streams that mux into MP4. */
+const SECTION_FORMAT =
+  'bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/b[height<=720]/bv*+ba/b';
+
+/**
+ * Download only [fromSec, toSec) of a video (seconds of the video's own time) with video and
+ * audio, cut on exact frames (`--force-keyframes-at-cuts` re-encodes around the cuts; yt-dlp uses
+ * ffmpeg for sections). Returns the path of the file written into `dir` as `<name>.<ext>`.
+ */
+export async function downloadSection(
+  ytDlpPath: string,
+  ffmpegPath: string,
+  url: string,
+  fromSec: number,
+  toSec: number,
+  dir: string,
+  name: string,
+  timeoutMs = 30 * 60_000,
+): Promise<string> {
+  await run(
+    ytDlpPath,
+    [
+      '-f',
+      SECTION_FORMAT,
+      '--merge-output-format',
+      'mp4',
+      '--download-sections',
+      `*${fromSec.toFixed(3)}-${toSec.toFixed(3)}`,
+      '--force-keyframes-at-cuts',
+      ...(ffmpegPath !== 'ffmpeg' ? ['--ffmpeg-location', ffmpegPath] : []),
+      '--no-playlist',
+      '--no-progress',
+      '--no-warnings',
+      '-o',
+      join(dir, `${name}.%(ext)s`),
+      '--',
+      url,
+    ],
+    timeoutMs,
+  );
+  // `<name>.<ext>`, not yt-dlp's leftovers (`<name>.f137.mp4`, `<name>.mp4.part`).
+  const file = (await readdir(dir)).find(
+    (f) => f.startsWith(`${name}.`) && /^[a-z0-9]+$/i.test(f.slice(name.length + 1)),
+  );
+  if (!file) throw new Error('yt-dlp finished but produced no video file.');
+  return join(dir, file);
+}

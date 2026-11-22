@@ -39,12 +39,14 @@ describe('stored media of deleted sessions', () => {
     const { owner, team, show, session } = await studio();
     const second = await call(owner, 'sessions.create', { showId: show.id });
     await call(owner, 'shows.delete', { showId: show.id });
-    expect(deleted.sort()).toEqual([`sessions/${session.id}/`, `sessions/${second.id}/`].sort());
+    expect(deleted.sort()).toEqual(
+      [`sessions/${session.id}/`, `sessions/${second.id}/`, `shows/${show.id}/`].sort(),
+    );
 
     deleted.length = 0;
     const other = await call(owner, 'shows.create', { teamId: team.id, name: 'Other' });
     const third = await call(owner, 'sessions.create', { showId: other.id });
     await call(owner, 'teams.delete', { teamId: team.id });
-    expect(deleted).toEqual([`sessions/${third.id}/`]);
+    expect(deleted).toEqual([`sessions/${third.id}/`, `shows/${other.id}/`]);
   });
 });

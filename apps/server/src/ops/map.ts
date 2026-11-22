@@ -3,6 +3,7 @@
 import {
   type AudioSegment,
   type Category,
+  type Compilation,
   type Dashboard,
   type DashboardSpec,
   framesToAtSec,
@@ -132,6 +133,39 @@ export function toDashboard(
     createdBy: ref(users, r.createdBy),
     updatedBy: ref(users, r.updatedBy),
     via: r.via as Via,
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * A compilation without its playback url (compilations.ts adds it). `titles`: current titles of
+ * the clips' sessions; a deleted session keeps the title stored with the clip.
+ */
+export function toCompilation(
+  r: Row<typeof schema.compilations>,
+  users: Map<string, UserRef>,
+  titles: Map<string, string>,
+): Compilation {
+  return {
+    id: r.id,
+    showId: r.showId,
+    title: r.title,
+    status: r.status,
+    ...(r.progress && (r.status === 'queued' || r.status === 'running')
+      ? { progress: r.progress }
+      : {}),
+    ...(r.error && r.status === 'failed' ? { error: r.error } : {}),
+    clips: r.clips.map((c) => ({
+      sessionId: c.sessionId,
+      sessionTitle: titles.get(c.sessionId) ?? c.sessionTitle,
+      startSec: c.startSec,
+      endSec: c.endSec,
+      ...(c.label ? { label: c.label } : {}),
+    })),
+    durationSec: Math.round(r.durationSec * 1000) / 1000,
+    ...(r.sizeBytes !== null ? { sizeBytes: r.sizeBytes } : {}),
+    createdBy: ref(users, r.createdBy),
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
   };

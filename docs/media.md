@@ -20,6 +20,7 @@ the **worker** (`apps/server/src/worker/main.ts`), a second entrypoint of the se
 | `WORKER_CONCURRENCY_TRANSCRIBE`                         | worker      | Of those slots, how many `transcribe` jobs may hold at once (1 to `WORKER_CONCURRENCY`, which is the default).                                    |
 | `WORKER_CONCURRENCY_YOUTUBE_IMPORT`                     | worker      | Same for `youtube_import` jobs. Set it below `WORKER_CONCURRENCY` so slow downloads always leave a slot for transcriptions.                       |
 | `WORKER_CONCURRENCY_WAVEFORM`                           | worker      | Same for `waveform` jobs (default 1).                                                                                                             |
+| `WORKER_CONCURRENCY_COMPILE`                            | worker      | Same for `compile` jobs (video compilations; default 1).                                                                                          |
 | `FFMPEG_PATH`                                           | worker      | ffmpeg binary for waveform peaks (default `ffmpeg` on `PATH`; in the worker image). Without it, the worker doesn't claim waveform jobs.           |
 
 The bucket is created on first use (worker start, or the first upload) if the credentials allow it.
@@ -86,5 +87,14 @@ In production: `node src/worker/main.ts` with the same environment as the app (c
   left out of etaSec medians). On start, a worker with ffmpeg queues up to 200 waveform jobs for
   stored segments that have no peaks and no queued, running or failed waveform job (older audio,
   skipped jobs). ffmpeg errors are stored with URLs redacted (they carry presigned signatures).
+- **compile** (video compilations, `compilations.*`, payload `{compilationId}`, no session):
+  each clip is a range in session seconds of a session imported from YouTube; video second =
+  session second − the YouTube audio segment's `startSec`. yt-dlp downloads only that section
+  (`--download-sections`, ≤720p, `--force-keyframes-at-cuts`), ffmpeg re-encodes every part to
+  1280×720 30 fps H.264 + 48 kHz stereo AAC and concatenates them (`-c copy`, `+faststart`) into
+  `shows/<showId>/compilations/<id>.mp4`. Progress ("clip 3/12: downloading") goes to the job and
+  the `compilations` row; changes are published as `compilation_changed` on `show:<id>` (show
+  socket → the web Compilations page; `compilations.get` waitSec). Needs ffmpeg (and ffprobe for
+  the measured length) and yt-dlp; a worker without ffmpeg does not claim compile jobs.
 - Realtime: the worker publishes `audio_segment` / `job` changes and `transcript_segment` /
   `session` invalidations through the bus (Postgres NOTIFY), so open session pages update live.

@@ -22,7 +22,12 @@ registerWs(
     };
     const stopBeat = heartbeat(ws);
     const offSession = subscribe(`session:${sessionId}`, (m) => {
-      if (m.type === 'access_changed' || m.type === 'show_changed') return;
+      if (
+        m.type === 'access_changed' ||
+        m.type === 'show_changed' ||
+        m.type === 'compilation_changed'
+      )
+        return;
       send(m);
       if (m.type === 'closed') ws.close(4404, m.reason);
     });

@@ -527,13 +527,56 @@ export const companionDevices = pgTable(
   (t) => [index('companion_devices_show').on(t.showId)],
 );
 
+// ── video compilations ──────────────────────────────────────
+
+/** One clip of a compilation: a range of a session in session seconds (as transcript_text). */
+export interface CompilationClipRow {
+  sessionId: string;
+  /** The session's title when the compilation was created (kept if the session is deleted). */
+  sessionTitle: string;
+  startSec: number;
+  endSec: number;
+  label?: string;
+}
+
+/**
+ * A video built by the worker (`compile` job) from ranges of YouTube-sourced sessions of a show:
+ * each clip's section is downloaded with yt-dlp, normalised and concatenated into one MP4 stored
+ * at `objectKey` (compilationKeyFor). Not content in the change-log sense (no undo).
+ */
+export const compilations = pgTable(
+  'compilations',
+  {
+    id: text('id').primaryKey(),
+    showId: text('show_id')
+      .notNull()
+      .references(() => shows.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    clips: jsonb('clips').$type<CompilationClipRow[]>().notNull(),
+    status: text('status', { enum: ['queued', 'running', 'ready', 'failed'] })
+      .notNull()
+      .default('queued'),
+    progress: text('progress'),
+    error: text('error'),
+    /** S3 key of the MP4; set once it is stored. */
+    objectKey: text('object_key'),
+    /** Sum of the clip lengths until the video exists, then the video's measured length. */
+    durationSec: doublePrecision('duration_sec').notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: created(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [index('compilations_show').on(t.showId, t.createdAt)],
+);
+
 // ── background jobs ─────────────────────────────────────────
 
 export const jobs = pgTable(
   'jobs',
   {
     id: text('id').primaryKey(),
-    kind: text('kind', { enum: ['transcribe', 'youtube_import', 'waveform'] }).notNull(),
+    kind: text('kind', { enum: ['transcribe', 'youtube_import', 'waveform', 'compile'] }).notNull(),
     status: text('status', { enum: ['queued', 'running', 'done', 'failed'] })
       .notNull()
       .default('queued'),
