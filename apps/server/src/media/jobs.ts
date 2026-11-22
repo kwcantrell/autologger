@@ -69,11 +69,13 @@ export async function enqueueJob(
 }
 
 export function toJob(r: JobRow): Job {
+  const segmentId = (r.payload as { segmentId?: unknown } | null)?.segmentId;
   return {
     id: r.id,
     kind: r.kind,
     status: r.status,
     sessionId: r.sessionId,
+    ...(typeof segmentId === 'string' ? { segmentId } : {}),
     error: r.error,
     progress: r.progress,
     startedAt: r.startedAt?.toISOString() ?? null,

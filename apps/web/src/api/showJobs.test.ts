@@ -42,6 +42,15 @@ describe('mergeShowJobs', () => {
     expect(mergeShowJobs([], [], [failed, again]).failed).toEqual([again]);
   });
 
+  it('keeps a transcription failure until that audio segment is transcribed again', () => {
+    const t = (p: Partial<Job> & Pick<Job, 'status'>) => job({ kind: 'transcribe', ...p });
+    const failed = t({ status: 'failed', segmentId: 'aud_1', createdAt: at(30) });
+    const otherSegment = t({ status: 'done', segmentId: 'aud_2', createdAt: at(10) });
+    expect(mergeShowJobs([], [otherSegment], [failed]).failed).toEqual([failed]);
+    const retried = t({ status: 'queued', segmentId: 'aud_1', createdAt: at(5) });
+    expect(mergeShowJobs([retried], [otherSegment], [failed]).failed).toEqual([]);
+  });
+
   it('keeps old failures until they are dismissed', () => {
     const old = job({ status: 'failed', createdAt: at(26 * 60), updatedAt: at(25 * 60) });
     expect(mergeShowJobs([], [], [old]).failed).toEqual([old]);

@@ -1,11 +1,11 @@
 // Show-wide background jobs (YouTube imports, transcriptions): the rail indicator, the per-card
 // status mark and the dialog listing every unfinished job and every failure nobody has dismissed,
-// with a retry for failed YouTube imports and a dismiss for each failure.
+// with a retry for failed YouTube imports and transcriptions and a dismiss for each failure.
 
 import type { Job, Session } from '@autologger/contract';
 import { CheckIcon, Loader2Icon, RefreshCwIcon, TriangleAlertIcon } from 'lucide-react';
 import { useState } from 'react';
-import { qk, useOpMutation } from '@/api/queries';
+import { qk, useCapabilities, useOpMutation } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import type { ShowJobs } from '@/api/showJobs';
 import { showToast } from '@/shared/components/Toast';
@@ -92,6 +92,11 @@ export function ShowJobsDialog({
     invalidate: () => [qk.showJobsAll],
     onSuccess: () => showToast('Import queued again.'),
   });
+  const retranscribe = useOpMutation('media.retranscribe', {
+    invalidate: () => [qk.showJobsAll],
+    onSuccess: () => showToast('Transcription queued again.'),
+  });
+  const transcription = useCapabilities().data?.transcription;
   const [retried, setRetried] = useState<Set<string>>(() => new Set());
   const dismiss = useOpMutation('jobs.dismiss', {
     invalidate: () => [qk.showJobsAll],
@@ -177,8 +182,35 @@ export function ShowJobsDialog({
           const pending = retry.isPending && retry.variables?.sessionId === j.sessionId;
           const readOnly = s?.access === 'read';
           const dismissing = dismiss.isPending && dismiss.variables?.jobId === j.id;
+          const transcribing =
+            retranscribe.isPending && retranscribe.variables?.segmentId === j.segmentId;
           const retryAction =
-            j.kind === 'youtube_import' && s?.sourceUrl ? (
+            j.kind === 'transcribe' && j.segmentId && s ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={readOnly || !transcription || transcribing || retried.has(j.id)}
+                title={
+                  readOnly
+                    ? 'Read-only access to this show.'
+                    : transcription === false
+                      ? "Transcription isn't configured on this server."
+                      : 'Transcribe this audio segment again (only this segment)'
+                }
+                onClick={() =>
+                  retranscribe.mutate(
+                    { sessionId: s.id, segmentId: j.segmentId },
+                    {
+                      onSuccess: () => setRetried((r) => new Set(r).add(j.id)),
+                      onError: (e) => showToast(errorMessage(e), true),
+                    },
+                  )
+                }
+              >
+                <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
+                {transcribing ? 'Queuing…' : 'Transcribe again'}
+              </Button>
+            ) : j.kind === 'youtube_import' && s?.sourceUrl ? (
               <Button
                 size="sm"
                 variant="outline"
