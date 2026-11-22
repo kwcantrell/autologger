@@ -1,7 +1,7 @@
 // Value helpers for dashboard widgets. Spec values are plain data: they are only ever coerced to
 // numbers or rendered as text, never executed or injected as markup.
 
-import type { DashboardRows } from '@autologger/contract';
+import type { DashboardRows, ValueFormat } from '@autologger/contract';
 import { useSyncExternalStore } from 'react';
 import { fmtShort } from '@/lib/timecode';
 
@@ -48,6 +48,34 @@ export function fmtValue(v: Scalar | undefined, key?: string): string {
   if (typeof v === 'number') return key && isSecondsKey(key) && v >= 60 ? fmtShort(v) : fmtNum(v);
   if (typeof v === 'boolean') return v ? 'Yes' : 'No';
   return v;
+}
+
+const MIN = new Intl.NumberFormat(undefined, {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+const PCT = new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 1 });
+
+/** A number in an explicit spec `format`; non-numeric values fall back to plain text. */
+export function fmtFormat(v: Scalar | undefined, format: ValueFormat): string {
+  const n = toNum(v);
+  if (n == null) return fmtValue(v);
+  switch (format) {
+    case 'duration':
+      return (n < 0 ? '-' : '') + fmtShort(Math.abs(n));
+    case 'minutes':
+      return MIN.format(n / 60);
+    case 'percent':
+      return PCT.format(n);
+    case 'number':
+      return fmtNum(n);
+  }
+}
+
+/** Shorten a label to at most `max` characters, ending in an ellipsis when cut. */
+export function truncateLabel(s: string, max?: number): string {
+  if (!max || s.length <= max) return s;
+  return `${s.slice(0, Math.max(1, max - 1)).trimEnd()}…`;
 }
 
 /** Group rows by `x` (as text) and sum `y`; keeps first-seen order. */
