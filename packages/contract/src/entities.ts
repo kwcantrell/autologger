@@ -252,8 +252,20 @@ export interface TranscriptReplaceCompactResult {
 export interface TranscriptFindLine extends TranscriptLine {
   matches?: string[];
   patternIndexes?: number[];
+  /** With `suspect: true`: why this turn may hold two speakers (see SUSPECT_TURN_REASONS). */
+  reasons?: SuspectTurnReason[];
   context?: true;
 }
+
+/**
+ * transcript.find `suspect: true` heuristics, in `counts` order: `question` — a question followed
+ * by at least SUSPECT_QUESTION_WORDS more words in the same turn (a question and its answer);
+ * `long` — a turn longer than SUSPECT_LONG_SEC seconds.
+ */
+export const SUSPECT_TURN_REASONS = ['question', 'long'] as const;
+export type SuspectTurnReason = (typeof SUSPECT_TURN_REASONS)[number];
+export const SUSPECT_QUESTION_WORDS = 20;
+export const SUSPECT_LONG_SEC = 60;
 
 /** A transcript.find line with `idsOnly: true`: enough to target an edit, no text. */
 export interface TranscriptFindId {
@@ -309,6 +321,8 @@ export interface WikiListItem extends WikiPageSummary {
   bodyMd?: string;
   /** With `citesSession`: this page's citations of that session, in body order. */
   citations?: Omit<WikiCitation, 'sessionId'>[];
+  /** With `citesSession` and `countOnly`: how many times this page cites that session. */
+  citationCount?: number;
 }
 
 /** A page of wiki.list. `nextOffset` is null on the last page. */
@@ -316,6 +330,8 @@ export interface WikiList {
   pages: WikiListItem[];
   total: number;
   nextOffset: number | null;
+  /** With `citesSession`: citations of that session across all matching pages (not just this page). */
+  citationTotal?: number;
 }
 
 export interface WikiLint {

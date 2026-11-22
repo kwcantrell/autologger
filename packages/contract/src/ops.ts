@@ -266,9 +266,16 @@ export const opInputs = {
       context: z.number().int().min(0).max(3).default(0),
       countOnly: z.boolean().default(false),
       idsOnly: z.boolean().default(false),
+      /** Instead of a pattern: turns likely to hold two speakers (see SUSPECT_TURN_REASONS). */
+      suspect: z.boolean().default(false),
     })
-    .refine((v) => (v.pattern === undefined) !== (v.patterns === undefined), {
-      message: 'Pass exactly one of pattern or patterns',
+    .refine(
+      (v) =>
+        [v.pattern !== undefined, v.patterns !== undefined, v.suspect].filter(Boolean).length === 1,
+      { message: 'Pass exactly one of pattern, patterns or suspect: true' },
+    )
+    .refine((v) => !(v.suspect && v.regex), {
+      message: 'regex applies to pattern or patterns, not to suspect',
     })
     .refine((v) => !(v.countOnly && v.idsOnly), {
       message: 'Pass at most one of countOnly or idsOnly',
@@ -369,6 +376,8 @@ export const opInputs = {
     include: z.enum(['summary', 'body']).optional(),
     linksTo: id.optional(),
     citesSession: id.optional(),
+    /** With citesSession: per-page `citationCount` instead of the `citations` ranges. */
+    countOnly: z.boolean().optional(),
     limit: z.number().int().min(1).max(200).optional(),
     offset: z.number().int().min(0).optional(),
   }),

@@ -637,6 +637,19 @@ describe('question pages and citations', () => {
       ['Recap', [{ startSec: 42, endSec: 50, label: 'x' }]],
     ]);
 
+    // countOnly: per-page counts and the total over every matching page, without the ranges.
+    const counted = await call(owner, 'wiki.list', {
+      showId: show.id,
+      citesSession: session.id,
+      countOnly: true,
+      limit: 1,
+    });
+    expect(counted.pages.map((p) => [p.title, p.citationCount, p.citations])).toEqual([
+      ['Q', 2, undefined],
+    ]);
+    expect([counted.total, counted.citationTotal]).toEqual([2, 3]);
+    await failsWith(call(owner, 'wiki.list', { showId: show.id, countOnly: true }), 'bad_request');
+
     // Pages saved before the index: the backfill rebuilds it, and a rerun is a no-op.
     await db.delete(schema.wikiCitations);
     expect(await citing()).toEqual([]);
