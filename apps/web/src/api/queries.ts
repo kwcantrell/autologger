@@ -166,12 +166,13 @@ export const useChanges = (sessionId: string, via: Via | 'all') =>
     limit: 300,
   });
 /** Every page of a show's wiki (wiki.list is paged; the screens need all of it for links). */
-export async function listAllWikiPages(showId: string, kind?: WikiKind) {
+export async function listAllWikiPages(showId: string, kind?: WikiKind, linksTo?: string) {
   const out: WikiListItem[] = [];
   for (let offset: number | null = 0; offset !== null; ) {
     const page: WikiList = await rpc('wiki.list', {
       showId,
       ...(kind ? { kind } : {}),
+      ...(linksTo ? { linksTo } : {}),
       limit: 200,
       offset,
     });
@@ -185,6 +186,16 @@ export const useWikiList = (showId: string | undefined, kind?: WikiKind) =>
     queryKey: [...qk.wikiList(showId ?? ''), kind ?? 'all'],
     queryFn: () => listAllWikiPages(showId ?? '', kind),
     enabled: !!showId,
+  });
+/** Every page linking to a page (wiki.get lists only the first 50 backlinks), by title. */
+export const useWikiBacklinks = (showId: string, pageId: string, enabled: boolean) =>
+  useQuery<WikiListItem[], RpcError>({
+    queryKey: [...qk.wikiList(showId), 'linksTo', pageId],
+    queryFn: async () =>
+      (await listAllWikiPages(showId, undefined, pageId)).sort((a, b) =>
+        a.title.localeCompare(b.title),
+      ),
+    enabled,
   });
 export const useWikiPage = (pageId: string | undefined) =>
   useOpQuery(
