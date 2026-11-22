@@ -11,6 +11,7 @@ import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
 import { checkRules } from '../media/rules.ts';
 import { toCategory } from './map.ts';
+import { deleteSessionMedia } from './sessions.ts';
 
 const { shows, teams, categories } = schema;
 
@@ -191,12 +192,21 @@ defineOp({
 
 defineOp({
   name: 'shows.delete',
-  description: 'Delete a show and all its sessions (owner/admin).',
+  description:
+    'Delete a show and all its sessions (owner/admin), including their stored audio and waveforms.',
   kind: 'write',
   surfaces: ['web'],
   async run(ctx, { showId }) {
     await requireShow(ctx, showId, 'manage');
+    const doomed = await ctx.db
+      .select({ id: schema.sessions.id })
+      .from(schema.sessions)
+      .where(eq(schema.sessions.showId, showId));
     await ctx.db.delete(shows).where(eq(shows.id, showId));
+    deleteSessionMedia(
+      ctx,
+      doomed.map((s) => s.id),
+    );
     ctx.publish(`show:${showId}`, { type: 'closed', reason: 'deleted' });
     return { deleted: true };
   },

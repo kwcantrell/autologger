@@ -18,7 +18,9 @@ import { badRequest, conflict } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
+import { storageConfigured } from '../env.ts';
 import { toJob, withJobEstimates } from '../media/jobs.ts';
+import { deletePrefix, sessionPrefix } from '../media/s3.ts';
 import { iso, userRefs } from './map.ts';
 
 const { events, jobs, sessions, shows } = schema;
@@ -378,14 +380,33 @@ defineOp({
   },
 });
 
+/**
+ * Remove the stored objects (audio, waveform peaks) of deleted sessions once the deletion
+ * commits. Their rows cascade in Postgres; the bucket does not.
+ */
+export function deleteSessionMedia(ctx: Ctx, sessionIds: string[]): void {
+  if (!storageConfigured || sessionIds.length === 0) return;
+  ctx.afterCommit(async () => {
+    for (const id of sessionIds) {
+      try {
+        await deletePrefix(sessionPrefix(id));
+      } catch (e) {
+        console.warn(`could not delete objects of session ${id}: ${(e as Error).message}`);
+      }
+    }
+  });
+}
+
 defineOp({
   name: 'sessions.delete',
-  description: 'Permanently delete a session and everything in it (owner/admin).',
+  description:
+    'Permanently delete a session and everything in it (owner/admin), including its stored audio and waveforms.',
   kind: 'write',
   surfaces: ['web'],
   async run(ctx, { sessionId }) {
     const { session } = await requireSession(ctx, sessionId, 'manage');
     await ctx.db.delete(sessions).where(eq(sessions.id, sessionId));
+    deleteSessionMedia(ctx, [sessionId]);
     ctx.publish(`session:${sessionId}`, { type: 'closed', reason: 'deleted' });
     // The show's session list and jobs (deleted with the session) changed: show socket.
     ctx.publish(`show:${session.showId}`, {
