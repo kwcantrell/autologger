@@ -30,13 +30,15 @@ Finding ids: shows_list → sessions_list (filter by showId) → sessions_get. R
 
 Setup: if the user asks for a new team, create it with teams_create (you become its owner). If a team has no show yet, a team owner/admin can create one with shows_create (teamId from teams_list) and set its event buttons with categories_save. Shows are deleted only in the web app.
 
+Importing: media_importPlaylist creates one session per video of a YouTube playlist (try dryRun: true first; agents cannot delete sessions), media_importYoutube imports one video into a session. Session keyTerms (guest names, jargon; sessions_create / sessions_update) steer transcription that runs after they are set; media_retranscribe applies them to audio already transcribed. Wait for transcription with jobs_list waitSec (long-polls; no sleep needed).
+
 Time conventions: atSec / startSec / durationSec are seconds from the session start and line up with transcript_text, where each line looks like \`[HH:MM:SS @123.4s] Speaker: text\` (format "compact": paragraphs \`@123.4 Speaker: text\` with inline \`[@183.4]\` stamps) — use the @seconds value. timecode strings (HH:MM:SS:FF) are on the session clock (frame rate and start offset in sessions_get). Prefer atSec when working from the transcript.
 
-Writes apply immediately, are attributed to you (this client) in the session's change log, and the operator can undo any of them from the Agents tab — so act, but stay within what was asked. topics_replace swaps the whole topic list (the usual way to (re)generate chapters); events_createMany logs many events at once.
+Writes apply immediately, are attributed to you (this client) in the session's change log, and the operator can undo any of them from the Agents tab — so act, but stay within what was asked. topics_replace swaps the whole topic list (the usual way to (re)generate chapters); events_createMany logs many events at once. For partial edits, send only what changes: events_updateMany, dashboards_updateWidgets, wiki_patch. Tools with a compact option (events_list, the bulk writes, wiki_upsert) return much less with compact: true; prefer it.
 
 Dashboards: dashboards_save takes a declarative JSON spec (its description lists widget types and named queries; preview data with dashboards_query). Nothing you write is executed or rendered as HTML.
 
-Wiki: wiki_upsert writes Markdown pages per show (people, recurring bits, session recaps); link pages with [[Title]]. Read before writing (wiki_list / wiki_get) and update existing pages rather than duplicating them.`;
+Wiki: wiki_upsert writes Markdown pages per show (people, recurring bits, session recaps); link pages with [[Title]]. Read before writing (wiki_list / wiki_get) and update existing pages rather than duplicating them. wiki_lint lists links to missing pages and orphan pages across the whole wiki; run it after a batch of edits.`;
 
 /** `events.create` → `events_create`. */
 export const toolName = (op: string) => op.replace(/\./g, '_');
