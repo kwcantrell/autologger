@@ -119,4 +119,5 @@ Postgres and the web and Companion builds in CI.
 | `apps/server`       | API, WebSockets, MCP + OAuth, worker (`src/worker`)                         |
 | `apps/web`          | React SPA                                                                   |
 | `apps/companion`    | Bitfocus Companion module                                                   |
-| `docs/`             | Feature notes (MCP, media, companion, UI inventory)                         |
+| `apps/importer`     | Local import helper CLI (yt-dlp on the user's computer; docs/importer.md)   |
+| `docs/`             | Feature notes (MCP, media, importer, companion, UI inventory)               |

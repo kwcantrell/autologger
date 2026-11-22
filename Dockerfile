@@ -8,6 +8,7 @@ COPY packages/contract/package.json packages/contract/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 COPY apps/companion/package.json apps/companion/
+COPY apps/importer/package.json apps/importer/
 RUN npm ci --no-audit --no-fund
 
 FROM deps AS web
@@ -31,6 +32,8 @@ COPY --from=deps /app/node_modules node_modules
 COPY package.json tsconfig.base.json ./
 COPY packages/contract packages/contract
 COPY apps/server apps/server
+# The local import helper, served at /api/importer/autologger-import.mjs (docs/importer.md).
+COPY apps/importer/autologger-import.mjs apps/importer/
 COPY --from=web /app/apps/web/dist apps/web/dist
 USER node
 EXPOSE 8080
