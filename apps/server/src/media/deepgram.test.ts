@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest';
-import { type DeepgramResponse, deepgramUrl, mapDeepgram } from './deepgram.ts';
+import { keyTermsChars, MAX_KEY_TERMS_TOTAL_CHARS, opInputs } from '@autologger/contract';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  type DeepgramResponse,
+  deepgramUrl,
+  mapDeepgram,
+  PermanentError,
+  transcribeAudio,
+} from './deepgram.ts';
 import { isYoutubeUrl } from './youtube.ts';
 
 const fixture: DeepgramResponse = {
@@ -156,5 +163,55 @@ describe('deepgramUrl', () => {
       'keyterm',
     );
     expect(long).toHaveLength(50);
+  });
+
+  it('drops key terms past the total character budget', () => {
+    // 30 distinct 40-character terms = 1200 characters; only 25 fit in 1000.
+    const terms = Array.from({ length: 30 }, (_, i) => `${i}`.padStart(40, 'k'));
+    const sent = params(deepgramUrl({ smartFormat: true, keyTerms: terms })).getAll('keyterm');
+    expect(sent).toEqual(terms.slice(0, 25));
+    expect(keyTermsChars(sent)).toBeLessThanOrEqual(MAX_KEY_TERMS_TOTAL_CHARS);
+  });
+});
+
+describe('shows.update key term validation', () => {
+  const input = opInputs['shows.update'];
+  it('rejects a list over the total character budget with a clear message', () => {
+    const over = input.safeParse({
+      showId: 'show_1',
+      keyTerms: Array.from({ length: 21 }, (_, i) => `${i}`.padStart(50, 'k')),
+    });
+    expect(over.success).toBe(false);
+    expect(over.error?.issues[0]?.message).toMatch(/at most 1000 characters/);
+    expect(
+      input.safeParse({ showId: 'show_1', keyTerms: Array(20).fill('k'.repeat(50)) }).success,
+    ).toBe(true);
+  });
+});
+
+describe('transcribeAudio errors', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const call = () => transcribeAudio('key', new Blob(['x']).stream(), 'audio/mpeg', 1);
+  const answer = (status: number, body: string) =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status })),
+    );
+
+  it('makes a 4xx permanent, with Deepgram’s (truncated) reason', async () => {
+    answer(400, `{"err_msg":"Too many keyterm tokens"}${' '.repeat(10)}${'x'.repeat(500)}`);
+    const err = await call().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PermanentError);
+    expect((err as Error).message).toMatch(/rejected the request \(400\).*Too many keyterm tokens/);
+    expect((err as Error).message.length).toBeLessThan(500);
+  });
+
+  it('keeps rate limiting and server errors retryable', async () => {
+    for (const status of [429, 503]) {
+      answer(status, 'busy');
+      const err = await call().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(PermanentError);
+    }
   });
 });

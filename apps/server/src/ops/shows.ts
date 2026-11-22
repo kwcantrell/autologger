@@ -149,16 +149,22 @@ defineOp({
 defineOp({
   name: 'shows.update',
   description:
-    'Update show settings (owner/admin); omitted fields stay as they are. Transcription settings apply to transcription jobs queued from now on (re-run existing audio with media.retranscribe): `smartFormat` (default true) toggles Deepgram smart formatting of numbers, dates and currency; turn it off for technical or math talk, where it turns "x squared" into "x2". `keyTerms` replaces the list of key terms (names and jargon such as "dx" or "L’Hôpital") the transcriber should favour: at most 50 terms of up to 50 characters, duplicates dropped, [] clears it.',
+    'Update show settings (owner/admin); omitted fields stay as they are. Transcription settings apply to transcriptions that run from now on; to apply them to audio already transcribed, re-transcribe the session (media_retranscribe). `smartFormat` (default true) toggles Deepgram smart formatting of numbers, dates and currency; turn it off for technical or math talk, where it turns "x squared" into "x2". `keyTerms` replaces the list of key terms (names and jargon such as "dx" or "L’Hôpital") the transcriber should favour: at most 50 terms of up to 50 characters and 1000 characters in total, duplicates dropped, [] clears it.',
   kind: 'write',
   surfaces: ['web'],
   async run(ctx, { showId, ...patch }) {
     await requireShow(ctx, showId, 'manage');
-    const set: Record<string, unknown> = Object.fromEntries(
-      Object.entries(patch).filter(([, v]) => v !== undefined),
-    );
-    if (set.code) set.code = String(set.code).toUpperCase();
-    if (patch.keyTerms) set.keyTerms = [...new Set(patch.keyTerms)];
+    const set: Partial<typeof shows.$inferInsert> = {
+      name: patch.name,
+      code: patch.code?.toUpperCase(),
+      defaultFrameRate: patch.defaultFrameRate,
+      titleSuffix: patch.titleSuffix,
+      nextEpisode: patch.nextEpisode,
+      smartFormat: patch.smartFormat,
+      keyTerms: patch.keyTerms && [...new Set(patch.keyTerms)],
+    };
+    for (const k of Object.keys(set) as (keyof typeof set)[])
+      if (set[k] === undefined) delete set[k];
     if (Object.keys(set).length) await ctx.db.update(shows).set(set).where(eq(shows.id, showId));
     ctx.publish(`show:${showId}`, { type: 'show_changed', showId, entity: 'show' });
     return getShow(ctx, showId);

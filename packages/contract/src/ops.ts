@@ -33,6 +33,11 @@ const name = z.string().trim().min(1).max(200);
 /** Show transcription key terms (Deepgram keyterm prompting caps a request at ~500 tokens). */
 export const MAX_KEY_TERMS = 50;
 export const MAX_KEY_TERM_LENGTH = 50;
+/** Budget for all key terms together (trimmed characters), keeping a request under ~500 tokens. */
+export const MAX_KEY_TERMS_TOTAL_CHARS = 1000;
+/** Characters a key term list spends of MAX_KEY_TERMS_TOTAL_CHARS. */
+export const keyTermsChars = (terms: string[]): number =>
+  terms.reduce((n, t) => n + t.trim().length, 0);
 const teamRole = z.enum(['owner', 'admin', 'member']);
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 const sec = z
@@ -121,6 +126,9 @@ export const opInputs = {
     keyTerms: z
       .array(z.string().trim().min(1).max(MAX_KEY_TERM_LENGTH))
       .max(MAX_KEY_TERMS)
+      .refine((terms) => keyTermsChars(terms) <= MAX_KEY_TERMS_TOTAL_CHARS, {
+        message: `Key terms may total at most ${MAX_KEY_TERMS_TOTAL_CHARS} characters (Deepgram limits key terms to about 500 tokens per request).`,
+      })
       .optional(),
   }),
   'shows.delete': z.object({ showId: id }),

@@ -1,4 +1,11 @@
-import { MAX_KEY_TERM_LENGTH, MAX_KEY_TERMS, type OpInput, type Show } from '@autologger/contract';
+import {
+  keyTermsChars,
+  MAX_KEY_TERM_LENGTH,
+  MAX_KEY_TERMS,
+  MAX_KEY_TERMS_TOTAL_CHARS,
+  type OpInput,
+  type Show,
+} from '@autologger/contract';
 import { TvIcon } from 'lucide-react';
 import { useState } from 'react';
 import { qk, useOpMutation } from '@/api/queries';
@@ -16,6 +23,7 @@ import {
   EmptyState,
   FpsSelect,
   LoadingState,
+  plural,
   RoleLockNotice,
   SectionSaveBar,
   SettingRow,
@@ -128,12 +136,15 @@ function ShowDetails({
   const value = draft.value ?? draftOf(show);
   const keyTerms = parseKeyTerms(value.keyTerms);
   const longTerm = keyTerms.find((t) => t.length > MAX_KEY_TERM_LENGTH);
+  const charsLeft = MAX_KEY_TERMS_TOTAL_CHARS - keyTermsChars(keyTerms);
   const keyTermsError =
     keyTerms.length > MAX_KEY_TERMS
       ? `At most ${MAX_KEY_TERMS} key terms; this list has ${keyTerms.length}.`
       : longTerm
         ? `“${longTerm.slice(0, 24)}…” is longer than ${MAX_KEY_TERM_LENGTH} characters.`
-        : null;
+        : charsLeft < 0
+          ? `Key terms can total ${MAX_KEY_TERMS_TOTAL_CHARS} characters; remove ${-charsLeft} more.`
+          : null;
 
   async function save() {
     setError(null);
@@ -281,7 +292,7 @@ function ShowDetails({
               htmlFor="settings-show-key-terms"
               description={
                 keyTermsError ??
-                `Names and jargon the transcriber should listen for, one per line (up to ${MAX_KEY_TERMS}). Applies to new transcriptions.`
+                `Names and jargon the transcriber should listen for, one per line (up to ${MAX_KEY_TERMS}; ${plural(charsLeft, 'character')} left). Applies to new transcriptions.`
               }
               disabled={!canEdit}
             >
