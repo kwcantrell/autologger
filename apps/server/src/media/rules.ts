@@ -45,14 +45,18 @@ const isUpper = (c: string) => c !== c.toLowerCase() && c === c.toUpperCase();
 const isLower = (c: string) => c !== c.toUpperCase() && c === c.toLowerCase();
 
 /**
- * `replace` cased like `match`: upper-cased for an ALL CAPS match (two or more letters, none
- * lower case), first letter capitalised for a match starting with a capital, else as written.
+ * `replace` cased like `match`. A replacement with a capital after its first character
+ * ("iPhone", "FUBU") goes in as written. Otherwise an ALL CAPS match (two or more letters, none
+ * lower case) upper-cases a one-word replacement, and a match starting with a capital (or an ALL
+ * CAPS match of a several-word replacement) capitalises its first letter.
  */
 export function matchCase(match: string, replace: string): string {
+  const [rFirst = '', ...rRest] = replace;
+  if (rRest.some(isUpper)) return replace;
   const letters = [...match].filter((c) => isUpper(c) || isLower(c));
-  if (letters.length > 1 && letters.every(isUpper)) return replace.toUpperCase();
+  if (letters.length > 1 && letters.every(isUpper) && /^\S+$/.test(replace))
+    return replace.toUpperCase();
   const [first = ''] = match;
-  const [rFirst = ''] = replace;
   if (isUpper(first) && isLower(rFirst)) return rFirst.toUpperCase() + replace.slice(rFirst.length);
   return replace;
 }

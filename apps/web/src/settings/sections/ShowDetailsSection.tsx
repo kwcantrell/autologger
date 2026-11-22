@@ -58,8 +58,8 @@ interface RuleDraft {
   regex: boolean;
   wholeWord: boolean;
   caseSensitive: boolean;
-  /** Not editable here; kept so a rule an agent saved with `preserveCase: false` survives a save. */
-  preserveCase?: boolean;
+  /** Keep a match's leading capital / ALL CAPS (literal rules that ignore case). Default true. */
+  preserveCase: boolean;
 }
 
 const ruleDraftOf = (r: TranscriptRule, i: number): RuleDraft => ({
@@ -69,7 +69,7 @@ const ruleDraftOf = (r: TranscriptRule, i: number): RuleDraft => ({
   regex: r.regex ?? false,
   wholeWord: r.wholeWord ?? false,
   caseSensitive: r.caseSensitive ?? false,
-  preserveCase: r.preserveCase,
+  preserveCase: r.preserveCase ?? true,
 });
 
 /** The rule to save (false flags left out), or null for a row left completely blank. */
@@ -79,7 +79,7 @@ function ruleOf(d: RuleDraft): TranscriptRule | null {
   if (d.regex) rule.regex = true;
   if (d.wholeWord) rule.wholeWord = true;
   if (d.caseSensitive) rule.caseSensitive = true;
-  if (d.preserveCase === false) rule.preserveCase = false;
+  if (!d.preserveCase) rule.preserveCase = false;
   return rule;
 }
 
@@ -367,7 +367,7 @@ function ShowDetails({
             <SettingRow
               label="Replacement rules"
               labelId="settings-show-rules-label"
-              description="Fix words the transcriber keeps getting wrong, such as “doctor” for “dr”. Rules run in order when a session is transcribed, and again whenever it is re-transcribed; they ignore case unless Aa is on, and then keep a match’s leading capital or ALL CAPS (“The doctor” → “The dr”). With .* on, Find is a PostgreSQL regular expression (as in transcript search) and \1 in Replace inserts the first group. To fix sessions already transcribed without re-transcribing, an agent can apply them with transcript_replace."
+              description="Fix words the transcriber keeps getting wrong, such as “doctor” for “dr”. Rules run in order when a session is transcribed, and again whenever it is re-transcribed; they ignore case unless Aa is on, and then keep a match’s leading capital or ALL CAPS (“The doctor” → “The dr”) unless Ab is off. With .* on, Find is a PostgreSQL regular expression (as in transcript search) and \1 in Replace inserts the first group. To fix sessions already transcribed without re-transcribing, an agent can apply them with transcript_replace."
               disabled={!canEdit}
             />
             <TranscriptRulesEditor
@@ -400,6 +400,7 @@ function ShowDetails({
 
 const RULE_FLAGS = [
   { flag: 'caseSensitive', short: 'Aa', label: 'Match case' },
+  { flag: 'preserveCase', short: 'Ab', label: 'Keep case: “The doctor” → “The dr”' },
   { flag: 'wholeWord', short: 'Word', label: 'Whole words only' },
   { flag: 'regex', short: '.*', label: 'Regular expression' },
 ] as const;
@@ -463,7 +464,11 @@ function TranscriptRulesEditor({
                   className="font-tc"
                   aria-label={`Rule ${n}: ${label}`}
                   title={label}
-                  disabled={disabled}
+                  disabled={
+                    disabled ||
+                    // Only literal rules that ignore case adapt the replacement's case.
+                    (flag === 'preserveCase' && (rule.regex || rule.caseSensitive))
+                  }
                   pressed={rule[flag]}
                   onPressedChange={(pressed) => patch(i, { [flag]: pressed })}
                 >
@@ -504,6 +509,7 @@ function TranscriptRulesEditor({
                 regex: false,
                 wholeWord: true,
                 caseSensitive: false,
+                preserveCase: true,
               },
             ])
           }

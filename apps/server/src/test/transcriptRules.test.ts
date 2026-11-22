@@ -179,7 +179,7 @@ describe('rule matching in PostgreSQL', () => {
       ),
     );
     expect(run.texts).toEqual([
-      'The 5711 and the 5711. THE 5711!',
+      'The 5711 and the 5711. The 5711!', // ALL CAPS only for one-word replacements
       'FUBU, FUBU and FUBU.',
       'ask dr Smith, the dr.',
       'the y\uFDD0 marker',
