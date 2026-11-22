@@ -1,10 +1,19 @@
+import type { OpInput, TranscriptFindLine } from '@autologger/contract';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../core/ids.ts';
+import type { Actor } from '../core/op.ts';
 import { db, schema } from '../db/client.ts';
 import { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
 
 beforeAll(setupDb);
 beforeEach(resetDb);
+
+/** transcript.find's matched (and context) lines, without the total. */
+async function findLines(actor: Actor, input: OpInput<'transcript.find'>) {
+  const res = await call(actor, 'transcript.find', input);
+  if (!('lines' in res)) throw new Error('expected lines');
+  return res.lines as TranscriptFindLine[];
+}
 
 async function seedTranscript(sessionId: string, lines: string[]) {
   const rows = lines.map((text, i) => ({
@@ -30,18 +39,16 @@ describe('transcript find and batch update', () => {
       'the doctor said 50% off',
     ]);
 
-    const plain = await call(agent, 'transcript.find', {
+    const plain = await findLines(agent, {
       sessionId: session.id,
       pattern: 'DOCTOR',
     });
     expect(plain.map((l) => l.id)).toEqual([a, c]);
     expect(plain[0]).not.toHaveProperty('words');
-    expect(
-      await call(agent, 'transcript.find', { sessionId: session.id, pattern: '50%' }),
-    ).toHaveLength(1);
+    expect(await findLines(agent, { sessionId: session.id, pattern: '50%' })).toHaveLength(1);
     expect(
       (
-        await call(agent, 'transcript.find', {
+        await findLines(agent, {
           sessionId: session.id,
           pattern: '\\mx2\\M',
           regex: true,
@@ -95,7 +102,7 @@ describe('transcript find and batch update', () => {
       'more filler',
     ]);
 
-    const many = await call(owner, 'transcript.find', {
+    const many = await findLines(owner, {
       sessionId: session.id,
       patterns: ['\\mdoctor\\M', '\\mm\\M', '^-one'],
       regex: true,
@@ -105,17 +112,17 @@ describe('transcript find and batch update', () => {
       [c, ['doctor', '-one'], [0, 2]],
     ]);
     // Empty-string hits (`z*` matches everywhere) are neither matches nor a reason to return a line.
-    const empties = await call(owner, 'transcript.find', {
+    const empties = await findLines(owner, {
       sessionId: session.id,
       patterns: ['z*', 'x+'],
       regex: true,
     });
     expect(empties.map((l) => [l.id, l.matches, l.patternIndexes])).toEqual([[b, ['x'], [1]]]);
     // Plain text: literal metacharacters, each distinct matched substring once.
-    const [plain] = await call(owner, 'transcript.find', { sessionId: session.id, pattern: 'X' });
+    const [plain] = await findLines(owner, { sessionId: session.id, pattern: 'X' });
     expect(plain).toMatchObject({ id: b, matches: ['x'], patternIndexes: [0] });
 
-    const withContext = await call(owner, 'transcript.find', {
+    const withContext = await findLines(owner, {
       sessionId: session.id,
       pattern: '-one',
       context: 1,
@@ -149,9 +156,7 @@ describe('transcript find and batch update', () => {
       showId: show.id,
       access: 'read',
     });
-    expect(
-      await call(reader, 'transcript.find', { sessionId: session.id, pattern: 'hello' }),
-    ).toHaveLength(1);
+    expect(await findLines(reader, { sessionId: session.id, pattern: 'hello' })).toHaveLength(1);
     await failsWith(
       call(reader, 'transcript.updateSegments', {
         sessionId: session.id,

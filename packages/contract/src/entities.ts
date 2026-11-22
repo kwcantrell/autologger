@@ -218,6 +218,13 @@ export interface TranscriptFindLine extends TranscriptLine {
   context?: true;
 }
 
+/** A transcript.find line with `idsOnly: true`: enough to target an edit, no text. */
+export interface TranscriptFindId {
+  id: string;
+  startSec: number;
+  speaker: string;
+}
+
 export interface Topic {
   id: string;
   sessionId: string;
