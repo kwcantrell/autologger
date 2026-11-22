@@ -41,7 +41,8 @@ export function HomeRoute() {
                   {recent.title || 'Untitled session'}
                 </h2>
                 <p className="m-0 text-[0.72rem] leading-[1.35] text-si-muted">
-                  {fmtDateOnly(recent.episodeDate ?? recent.createdAt)} · {recent.eventCount} events
+                  {fmtDateOnly(recent.episodeDate ?? recent.createdAt)} · {recent.eventCount}{' '}
+                  {recent.eventCount === 1 ? 'event' : 'events'}
                 </p>
                 <Link
                   href={`/sessions/${encodeURIComponent(recent.id)}`}
