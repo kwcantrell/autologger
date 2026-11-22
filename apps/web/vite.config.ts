@@ -17,6 +17,7 @@ export default defineConfig({
       '/oauth/register': API,
       '/oauth/authorize': API,
       '/oauth/token': API,
+      '/oauth/revoke': API,
       '/.well-known': API,
       '/mcp': API,
       '/ws': { target: API, ws: true },

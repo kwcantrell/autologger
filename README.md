@@ -15,7 +15,7 @@ docker compose -f compose.dev.yaml up -d   # Postgres :54329, S3 (SeaweedFS) :90
 cp .env.example .env                       # DEV_LOGIN=1 lets you sign in with any email
 npm install
 npm run db:migrate
-npm run dev:server                         # API on :8080 (migrates on boot)
+npm run dev:server                         # API on :18081 (migrates on boot)
 npm run dev:web                            # SPA on :5173, proxies /api and /ws
 npm run dev:worker -w @autologger/server   # transcription + YouTube jobs
 ```
