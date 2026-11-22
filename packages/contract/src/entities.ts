@@ -287,6 +287,8 @@ export interface Job {
   kind: string;
   status: 'queued' | 'running' | 'done' | 'failed';
   sessionId: string | null;
+  /** Set when listing a whole show (jobs.list with showId). */
+  sessionTitle?: string;
   error: string | null;
   progress: string | null;
   createdAt: string;
