@@ -53,6 +53,9 @@ export function Timeline({
 }) {
   const [zoom, setZoom] = useState(1);
   const [zoomText, setZoomText] = useState('100%');
+  // Enter/Escape set the zoom text themselves; the blur they trigger must not reset it from the
+  // zoom captured in this render, which is still the old value.
+  const zoomTextSet = useRef(false);
   const [hover, setHover] = useState<{ sec: number; x: number; y: number } | null>(null);
   const [tip, setTip] = useState<{ m: Marker; x: number; y: number } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -435,13 +438,18 @@ export function Timeline({
               const n = Number.parseFloat(zoomText);
               if (Number.isFinite(n)) applyZoom(n / 100);
               else setZoomText(`${Math.round(zoom * 100)}%`);
+              zoomTextSet.current = true;
               (e.target as HTMLInputElement).blur();
             } else if (e.key === 'Escape') {
               setZoomText(`${Math.round(zoom * 100)}%`);
+              zoomTextSet.current = true;
               (e.target as HTMLInputElement).blur();
             }
           }}
-          onBlur={() => setZoomText(`${Math.round(zoom * 100)}%`)}
+          onBlur={() => {
+            if (zoomTextSet.current) zoomTextSet.current = false;
+            else setZoomText(`${Math.round(zoom * 100)}%`);
+          }}
         />
         <div
           ref={railRef}
