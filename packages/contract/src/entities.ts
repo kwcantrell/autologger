@@ -462,6 +462,8 @@ export interface Job {
   sessionTitle?: string;
   /** Jobs about one audio segment (transcribe, waveform): that segment's id (media.list). */
   segmentId?: string;
+  /** youtube_import jobs: the video URL being imported (pass it to media.importYoutube to retry). */
+  sourceUrl?: string;
   /** compile jobs (show-level, sessionId null): the compilation they build. */
   compilationId?: string;
   /** compile jobs listed by showId: the compilation's title; absent once it was deleted. */

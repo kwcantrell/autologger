@@ -79,15 +79,21 @@ export async function enqueueJob(
 }
 
 export function toJob(r: JobRow): Job {
-  const payload = r.payload as { segmentId?: unknown; compilationId?: unknown } | null;
+  const payload = r.payload as {
+    segmentId?: unknown;
+    compilationId?: unknown;
+    url?: unknown;
+  } | null;
   const segmentId = payload?.segmentId;
   const compilationId = payload?.compilationId;
+  const sourceUrl = r.kind === 'youtube_import' ? payload?.url : undefined;
   return {
     id: r.id,
     kind: r.kind,
     status: r.status,
     sessionId: r.sessionId,
     ...(typeof segmentId === 'string' ? { segmentId } : {}),
+    ...(typeof sourceUrl === 'string' ? { sourceUrl } : {}),
     ...(typeof compilationId === 'string' ? { compilationId } : {}),
     error: r.error,
     progress: r.progress,
