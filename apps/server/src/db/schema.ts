@@ -394,11 +394,14 @@ export const changes = pgTable(
     after: jsonb('after'),
     revertedAt: ts('reverted_at'),
     revertOf: text('revert_of'),
+    /** Shared by every change one op call wrote (null on rows from before groups existed). */
+    groupId: text('group_id'),
   },
   (t) => [
     index('changes_session').on(t.sessionId, t.at),
     index('changes_show').on(t.showId, t.at),
     index('changes_entity').on(t.entity, t.entityId, t.at),
+    index('changes_group').on(t.groupId),
   ],
 );
 

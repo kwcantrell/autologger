@@ -162,6 +162,7 @@ export const useChanges = (sessionId: string, via: Via | 'all') =>
   useOpQuery(qk.changes(sessionId, via), 'changes.list', {
     sessionId,
     ...(via === 'all' ? {} : { via }),
+    grouped: true,
     limit: 300,
   });
 /** Every page of a show's wiki (wiki.list is paged; the screens need all of it for links). */

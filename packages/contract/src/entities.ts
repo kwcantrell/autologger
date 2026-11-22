@@ -347,6 +347,17 @@ export interface Change {
   showId: string;
   revertedAt: string | null;
   revertOf: string | null;
+  /** Shared by every change one op call wrote; null on changes logged before groups existed. */
+  groupId: string | null;
+  /** changes.list with grouped: true — how many changes this row stands for (only when > 1). */
+  groupSize?: number;
+  /** With groupSize: how many of them are already undone. */
+  groupUndone?: number;
+  /**
+   * With groupSize: how many changes the whole group has, in every session (the session filter
+   * only counts its own). changes.revertGroup undoes all of them.
+   */
+  groupTotal?: number;
 }
 
 export interface ApiToken {
