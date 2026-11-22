@@ -3,7 +3,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { changeMessage, publish } from '../core/bus.ts';
 import { db, schema } from '../db/client.ts';
-import { type JobRow, toJob } from '../media/jobs.ts';
+import { type JobRow, jobTopic, toJob } from '../media/jobs.ts';
 
 const { jobs, workers } = schema;
 
@@ -12,8 +12,8 @@ export const STUCK_AFTER_MIN = 15;
 const BACKOFF_BASE_SEC = 30;
 
 function publishJob(job: JobRow): void {
-  if (job.sessionId)
-    publish(`session:${job.sessionId}`, changeMessage('job', 'upsert', job.id, toJob(job)));
+  const topic = jobTopic(job);
+  if (topic) publish(topic, changeMessage('job', 'upsert', job.id, toJob(job)));
 }
 
 /**

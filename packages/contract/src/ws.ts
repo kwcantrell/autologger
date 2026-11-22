@@ -38,7 +38,7 @@ export type SessionClientMessage = { type: 'ping' };
 
 export type ShowServerMessage =
   | { type: 'hello'; showId: string; serverTime: string }
-  /** A job of one of the show's sessions changed (data: the Job, without estimates). */
+  /** A job of one of the show's sessions, or a show-level (compile) job, changed (data: the Job, without estimates). */
   | { type: 'change'; entity: 'job'; op: 'upsert' | 'delete'; id: string; data?: Job }
   /**
    * `job`: jobs of the show changed, refetch them. `session`: the show's session list changed

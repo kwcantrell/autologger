@@ -72,6 +72,17 @@ describe('/ws/show/:id', () => {
     publish(`session:${session.id}`, changeMessage('job', 'upsert', job.id, job));
     const pushed = await live.next((m) => m.type === 'change');
     expect(pushed).toEqual({ type: 'change', entity: 'job', op: 'upsert', id: 'job_x', data: job });
+    // Show-level (compile) jobs: on the show topic; another show's are not sent.
+    const compile = { id: 'job_c', status: 'queued', compilationId: 'cmp_x' };
+    publish(`show:${other.id}`, changeMessage('job', 'upsert', 'job_c_other', compile));
+    publish(`show:${show.id}`, changeMessage('job', 'upsert', compile.id, compile));
+    expect(await live.next((m) => m.type === 'change' && m.id !== 'job_x')).toEqual({
+      type: 'change',
+      entity: 'job',
+      op: 'upsert',
+      id: 'job_c',
+      data: compile,
+    });
 
     // Sessions created (e.g. by an agent) and deleted elsewhere.
     const created = await call(owner, 'sessions.create', { showId: show.id });

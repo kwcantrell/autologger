@@ -13,7 +13,7 @@ import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp, type OpWatch } from '../core/op.ts';
 import { db, schema } from '../db/client.ts';
 import { env, storageConfigured, transcriptionConfigured } from '../env.ts';
-import { enqueueJob, type JobRow, toJob, withJobEstimates } from '../media/jobs.ts';
+import { enqueueJob, type JobRow, jobTopic, toJob, withJobEstimates } from '../media/jobs.ts';
 import {
   deleteObject,
   extForMime,
@@ -36,7 +36,7 @@ import {
 import { toAudioSegment } from './map.ts';
 import { publishSession, reserveEpisodes } from './sessions.ts';
 
-const { audioSegments, jobs, sessions } = schema;
+const { audioSegments, compilations, jobs, sessions } = schema;
 
 const MAX_PLAYLIST_VIDEOS = 200;
 const PLAYLIST_TIMEOUT_MS = 60_000;
@@ -77,8 +77,8 @@ function publishSegment(ctx: Ctx, seg: AudioSegment): void {
 }
 
 function publishJob(ctx: Ctx, job: JobRow): void {
-  if (job.sessionId)
-    ctx.publish(`session:${job.sessionId}`, changeMessage('job', 'upsert', job.id, toJob(job)));
+  const topic = jobTopic(job);
+  if (topic) ctx.publish(topic, changeMessage('job', 'upsert', job.id, toJob(job)));
 }
 
 /** Waveform peaks for a newly stored segment (runs whether or not Deepgram is configured). */
@@ -555,11 +555,12 @@ defineOp({
 /**
  * Long-poll for jobs.list. Starts listening on the realtime bus before the op's transaction (so
  * a change committed meanwhile isn't missed); `wait` then resolves when a listed unfinished job
- * changes status or is deleted, or a job is queued in one of their sessions — or on timeout or
- * abort. Worker updates reach the bus through Postgres NOTIFY on the shared LISTEN connection, so
- * waiting holds no database connection.
+ * changes status or is deleted, or a job is queued in one of their sessions (or, listing a show,
+ * a show-level job such as a compile is queued in the show) — or on timeout or abort. Worker
+ * updates reach the bus through Postgres NOTIFY on the shared LISTEN connection, so waiting holds
+ * no database connection.
  */
-function watchJobs(ms: number, signal?: AbortSignal): OpWatch<Job[]> {
+function watchJobs(ms: number, showId: string | undefined, signal?: AbortSignal): OpWatch<Job[]> {
   const seen: [Topic, BusMessage][] = [];
   let onMessage = (topic: Topic, m: BusMessage) => void seen.push([topic, m]);
   const unsubscribe = subscribeAll((topic, m) => onMessage(topic, m));
@@ -578,9 +579,13 @@ function watchJobs(ms: number, signal?: AbortSignal): OpWatch<Job[]> {
       const pending = new Map(
         list.filter((j) => j.status === 'queued' || j.status === 'running').map((j) => [j.id, j]),
       );
-      const topics = new Set(
-        [...pending.values()].flatMap((j) => (j.sessionId ? [`session:${j.sessionId}`] : [])),
+      const topics = new Set<Topic>(
+        [...pending.values()].flatMap((j): Topic[] =>
+          j.sessionId ? [`session:${j.sessionId}`] : [],
+        ),
       );
+      // Show-level jobs (compile) publish on the show's topic.
+      if (showId && pending.size) topics.add(`show:${showId}`);
       if (!topics.size || signal?.aborted) return null;
       const relevant = (topic: Topic, m: BusMessage) => {
         if (!topics.has(topic)) return false;
@@ -611,10 +616,11 @@ function watchJobs(ms: number, signal?: AbortSignal): OpWatch<Job[]> {
 defineOp({
   name: 'jobs.list',
   description:
-    'Background jobs (transcription, YouTube import, waveform), newest first, with status, progress and errors. waveform jobs only draw the timeline waveform in the web app (cosmetic, run after everything else): when waiting for imports or transcripts, pass kinds ["youtube_import","transcribe"] or ignore them. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"). Transcribe and waveform jobs include segmentId, the audio segment they are for (media_list); retry a failed transcription of just that segment with media_retranscribe and that segmentId (without segmentId it redoes every segment and loses manual edits). Optional kinds filters to the given job kinds; optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Queued jobs include queuePosition: how many jobs the worker will start before this one, 0 = next. It counts every runnable queued job on the server (all teams and shows; only the number is exposed); a job waiting to retry after a failure has no queuePosition until its retry time. startedAt is when the current attempt started (null while queued). Queued (with a queuePosition) and running jobs include etaSec: a rough estimate of seconds until the job finishes, from the median duration of the last 20 finished jobs of the same kind (transcriptions scaled by their audio length), the jobs ahead in the queue, the time left on running jobs and the total job slots of the workers currently running; 0 on a running job means it is taking longer than usual. It is absent when there is no finished history to estimate from. Use it to choose waitSec, not as a deadline. To wait for jobs, pass waitSec (1–55): if any listed job is queued or running, the call holds until one of them changes status (starts, finishes, fails) or a new job is queued in one of their sessions, then returns the fresh list — or returns after waitSec seconds when nothing changed. Call it again in a loop until the result is empty / all done; no separate sleep is needed. Without waitSec the call returns at once; do not poll it in a tight loop. A failed job that someone acknowledged (jobs.dismiss) has dismissedAt set; hideDismissed: true leaves those failures out (e.g. status ["failed"] with hideDismissed lists the failures nobody has dealt with yet).',
+    'Background jobs (transcription, YouTube import, waveform, video compilation), newest first, with status, progress and errors. waveform jobs only draw the timeline waveform in the web app (cosmetic, run after everything else): when waiting for imports or transcripts, pass kinds ["youtube_import","transcribe"] or ignore them. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"; it also lists the show\'s compile jobs, which have sessionId null and instead compilationId and compilationTitle (absent once the compilation was deleted) — the compilation itself is compilations_get). Transcribe and waveform jobs include segmentId, the audio segment they are for (media_list); retry a failed transcription of just that segment with media_retranscribe and that segmentId (without segmentId it redoes every segment and loses manual edits). Optional kinds filters to the given job kinds; optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Queued jobs include queuePosition: how many jobs the worker will start before this one, 0 = next. It counts every runnable queued job on the server (all teams and shows; only the number is exposed); a job waiting to retry after a failure has no queuePosition until its retry time. startedAt is when the current attempt started (null while queued). Queued (with a queuePosition) and running jobs include etaSec: a rough estimate of seconds until the job finishes, from the median duration of the last 20 finished jobs of the same kind (transcriptions scaled by their audio length), the jobs ahead in the queue, the time left on running jobs and the total job slots of the workers currently running (compile jobs scaled by their total clip seconds); 0 on a running job means it is taking longer than usual. It is absent when there is no finished history to estimate from. Use it to choose waitSec, not as a deadline. To wait for jobs, pass waitSec (1–55): if any listed job is queued or running, the call holds until one of them changes status (starts, finishes, fails) or a new job is queued in one of their sessions, then returns the fresh list — or returns after waitSec seconds when nothing changed. Call it again in a loop until the result is empty / all done; no separate sleep is needed. Without waitSec the call returns at once; do not poll it in a tight loop. A failed job that someone acknowledged (jobs.dismiss) has dismissedAt set; hideDismissed: true leaves those failures out (e.g. status ["failed"] with hideDismissed lists the failures nobody has dealt with yet).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  watch: ({ waitSec }, signal) => (waitSec ? watchJobs(waitSec * 1000, signal) : null),
+  watch: ({ waitSec, showId }, signal) =>
+    waitSec ? watchJobs(waitSec * 1000, showId, signal) : null,
   async run(ctx, { sessionId, showId, status, kinds, limit, hideDismissed }) {
     const statusCond = and(
       status ? inArray(jobs.status, status) : undefined,
@@ -633,16 +639,41 @@ defineOp({
     }
     // Read access is per show, so every session of a readable show is readable.
     await requireShow(ctx, showId!, 'read');
-    const rows = await ctx.db
-      .select({ job: jobs, sessionTitle: sessions.title })
-      .from(jobs)
-      .innerJoin(sessions, eq(sessions.id, jobs.sessionId))
-      .where(and(eq(sessions.showId, showId!), statusCond))
-      .orderBy(desc(jobs.createdAt))
-      .limit(limit);
+    // Session jobs and show-level jobs (compile: jobs.show_id) as two indexed queries, merged.
+    const [rows, showRows] = await Promise.all([
+      ctx.db
+        .select({ job: jobs, sessionTitle: sessions.title })
+        .from(jobs)
+        .innerJoin(sessions, eq(sessions.id, jobs.sessionId))
+        .where(and(eq(sessions.showId, showId!), statusCond))
+        .orderBy(desc(jobs.createdAt))
+        .limit(limit),
+      ctx.db
+        .select({ job: jobs, compilationTitle: compilations.title })
+        .from(jobs)
+        .leftJoin(compilations, sql`${compilations.id} = ${jobs.payload}->>'compilationId'`)
+        .where(and(eq(jobs.showId, showId!), statusCond))
+        .orderBy(desc(jobs.createdAt))
+        .limit(limit),
+    ]);
+    const merged = [
+      ...rows.map((r) => ({ row: r.job, job: { ...toJob(r.job), sessionTitle: r.sessionTitle } })),
+      ...showRows.map((r) => ({
+        row: r.job,
+        job: {
+          ...toJob(r.job),
+          ...(r.compilationTitle !== null ? { compilationTitle: r.compilationTitle } : {}),
+        },
+      })),
+    ]
+      .sort(
+        (a, b) =>
+          b.row.createdAt.getTime() - a.row.createdAt.getTime() || (a.row.id < b.row.id ? 1 : -1),
+      )
+      .slice(0, limit);
     return withJobEstimates(
       ctx.db,
-      rows.map((r) => ({ ...toJob(r.job), sessionTitle: r.sessionTitle })),
+      merged.map((m) => m.job),
     );
   },
 });
@@ -650,14 +681,15 @@ defineOp({
 defineOp({
   name: 'jobs.dismiss',
   description:
-    "Acknowledge a failed background job (jobId from jobs.list) so it stops being reported as an open failure: sets its dismissedAt, and jobs.list with hideDismissed: true leaves it out. Use it once a failure has been dealt with or cannot be fixed (e.g. a private or deleted video). It does not retry, delete or change anything else; the job and its error stay readable in jobs.list. Only failed jobs can be dismissed (other states are a conflict error); dismissing one again returns it unchanged. Needs write access to the job's show. Returns the job.",
+    "Acknowledge a failed background job (jobId from jobs.list) so it stops being reported as an open failure: sets its dismissedAt, and jobs.list with hideDismissed: true leaves it out. Use it once a failure has been dealt with or cannot be fixed (e.g. a private or deleted video). It does not retry, delete or change anything else; the job and its error stay readable in jobs.list. Only failed jobs can be dismissed (other states are a conflict error); dismissing one again returns it unchanged. Works for session jobs and show-level compile jobs. Needs write access to the job's show. Returns the job.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { jobId }) {
     const [row] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
-    if (!row?.sessionId) throw notFound('Job');
+    if (!row || !(row.sessionId || row.showId)) throw notFound('Job');
     try {
-      await requireSession(ctx, row.sessionId, 'write');
+      if (row.sessionId) await requireSession(ctx, row.sessionId, 'write');
+      else await requireShow(ctx, row.showId!, 'write');
     } catch (e) {
       if ((e as { code?: string }).code === 'not_found') throw notFound('Job');
       throw e;

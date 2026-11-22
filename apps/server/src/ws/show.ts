@@ -4,6 +4,7 @@
 // Job and session changes are published on `session:<id>` topics (by ops and by the worker, which
 // only knows the job's session), so the socket watches every topic and keeps the messages of the
 // show's sessions; session-list changes made by ops also arrive as `show_changed` on `show:<id>`.
+// Show-level jobs (compile, no session) publish their changes on `show:<id>` directly.
 // Event changes only move a rail card's event count, so they become a throttled session-list hint:
 // live logging refetches each open rail's list at most once per EVENT_HINT_MS, not per event.
 
@@ -104,10 +105,11 @@ registerWs(
       if (topic === `show:${showId}`) {
         if (m.type === 'show_changed' && m.entity === 'show')
           push(() => send({ type: 'invalidate', entity: 'session' }));
-        // A session was deleted: its jobs went with it.
-        else if (m.type === 'invalidate' && m.entity === 'job')
-          push(() => send({ type: 'invalidate', entity: 'job' }));
-        else if (m.type === 'compilation_changed')
+        // A show-level (compile) job changed, or a session was deleted and its jobs went with it.
+        else if ((m.type === 'change' || m.type === 'invalidate') && m.entity === 'job') {
+          const out = showMessageFor(m);
+          if (out) push(() => send(out));
+        } else if (m.type === 'compilation_changed')
           push(() => send({ type: 'invalidate', entity: 'compilation' }));
         else if (m.type === 'closed')
           push(() => {

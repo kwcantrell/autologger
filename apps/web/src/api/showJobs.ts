@@ -7,11 +7,11 @@ import { rpc } from './rpc';
 export const UNFINISHED = ['queued', 'running'] as const;
 
 export interface ShowJobs {
-  /** Queued and running jobs of every session of the show, newest first. */
+  /** Queued and running jobs of every session of the show and of the show (compile), newest first. */
   active: Job[];
   /**
    * Undismissed failures not superseded by a newer job of the same kind in that session (for
-   * transcriptions and waveforms: of the same audio segment).
+   * transcriptions and waveforms: of the same audio segment; for compiles: of the same compilation).
    */
   failed: Job[];
 }
@@ -28,8 +28,9 @@ const listJobs: ListJobs = (input) => rpc('jobs.list', input);
 export function mergeShowJobs(active: Job[], done: Job[], failures: Job[]): ShowJobs {
   const newest = new Map<string, string>();
   // Per audio segment where the job names one: a session can have several, and a later
-  // transcription of another segment doesn't fix this one.
-  const key = (j: Job) => `${j.sessionId}:${j.kind}:${j.segmentId ?? ''}`;
+  // transcription of another segment doesn't fix this one. Compile jobs have no session: per
+  // compilation.
+  const key = (j: Job) => `${j.sessionId}:${j.kind}:${j.segmentId ?? j.compilationId ?? ''}`;
   for (const j of [...active, ...done, ...failures]) {
     const cur = newest.get(key(j));
     if (!cur || cur < j.createdAt) newest.set(key(j), j.createdAt);

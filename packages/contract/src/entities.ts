@@ -431,6 +431,10 @@ export interface Job {
   sessionTitle?: string;
   /** Jobs about one audio segment (transcribe, waveform): that segment's id (media.list). */
   segmentId?: string;
+  /** compile jobs (show-level, sessionId null): the compilation they build. */
+  compilationId?: string;
+  /** compile jobs listed by showId: the compilation's title; absent once it was deleted. */
+  compilationTitle?: string;
   /** Queued jobs only (jobs.list): jobs ahead of this one in the worker queue, 0 = next. */
   queuePosition?: number;
   /**
@@ -474,6 +478,13 @@ export interface Compilation {
   /** Seconds: the sum of the clip lengths, then the built video's measured length once ready. */
   durationSec: number;
   sizeBytes?: number;
+  /** Queued only: jobs the worker starts before this compilation's build, 0 = next (as jobs.list). */
+  queuePosition?: number;
+  /**
+   * Queued and running: rough seconds until the video is ready, from recent builds' time per clip
+   * second (as jobs.list etaSec). Absent when there is no history to estimate from.
+   */
+  etaSec?: number;
   /** Ready only: presigned GET of the MP4, valid about 1 hour (see urlExpiresAt). */
   url?: string;
   urlExpiresAt?: string;

@@ -3,16 +3,16 @@
 // content, so they are not in the change log; deleting one removes its video for good.
 
 import type { Compilation } from '@autologger/contract';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { requireShow } from '../core/authz.ts';
-import { type BusMessage, subscribeAll, type Topic } from '../core/bus.ts';
+import { type BusMessage, changeMessage, subscribeAll, type Topic } from '../core/bus.ts';
 import { badRequest, notFound, unavailable } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp, type OpWatch } from '../core/op.ts';
 import { schema } from '../db/client.ts';
 import { env, storageConfigured } from '../env.ts';
 import { compilationMessage, resolveClipSources } from '../media/compilations.ts';
-import { enqueueJob } from '../media/jobs.ts';
+import { enqueueJob, toJob, withJobEstimates } from '../media/jobs.ts';
 import {
   deleteObject,
   PLAYBACK_URL_TTL_SEC,
@@ -41,10 +41,11 @@ async function toEntities(ctx: Ctx, rows: Row[]): Promise<Compilation[]> {
         .where(inArray(sessions.id, ids))
     : [];
   const titles = new Map(titleRows.map((t) => [t.id, t.title]));
+  const estimates = await buildEstimates(ctx, rows);
   const expiresAt = new Date(Date.now() + PLAYBACK_URL_TTL_SEC * 1000).toISOString();
   return Promise.all(
     rows.map(async (r) => {
-      const c = toCompilation(r, users, titles);
+      const c = { ...toCompilation(r, users, titles), ...estimates.get(r.id) };
       if (r.status !== 'ready' || !r.objectKey || !storageConfigured) return c;
       return {
         ...c,
@@ -53,6 +54,41 @@ async function toEntities(ctx: Ctx, rows: Row[]): Promise<Compilation[]> {
       };
     }),
   );
+}
+
+/**
+ * queuePosition / etaSec of unfinished compilations, from their queued or running compile job
+ * (jobs.list's estimates). One indexed query (jobs_show) plus the estimate's own.
+ */
+async function buildEstimates(
+  ctx: Ctx,
+  rows: Row[],
+): Promise<Map<string, Pick<Compilation, 'queuePosition' | 'etaSec'>>> {
+  const out = new Map<string, Pick<Compilation, 'queuePosition' | 'etaSec'>>();
+  const open = rows.filter((r) => r.status === 'queued' || r.status === 'running');
+  if (!open.length) return out;
+  const jobRows = await ctx.db
+    .select()
+    .from(jobs)
+    .where(
+      and(
+        inArray(jobs.showId, [...new Set(open.map((r) => r.showId))]),
+        eq(jobs.kind, 'compile'),
+        inArray(jobs.status, ['queued', 'running']),
+        inArray(
+          sql`${jobs.payload}->>'compilationId'`,
+          open.map((r) => r.id),
+        ),
+      ),
+    );
+  for (const j of await withJobEstimates(ctx.db, jobRows.map(toJob))) {
+    if (!j.compilationId) continue;
+    out.set(j.compilationId, {
+      ...(j.queuePosition !== undefined ? { queuePosition: j.queuePosition } : {}),
+      ...(j.etaSec !== undefined ? { etaSec: j.etaSec } : {}),
+    });
+  }
+  return out;
 }
 
 /** The compilation and the actor's access to its show; no access answers not_found. */
@@ -109,12 +145,14 @@ defineOp({
         createdBy: ctx.actor.user.id,
       })
       .returning();
-    await enqueueJob(ctx.db, {
+    const job = await enqueueJob(ctx.db, {
       kind: 'compile',
       sessionId: null,
+      showId,
       actorId: ctx.actor.user.id,
       payload: { compilationId: id },
     });
+    ctx.publish(`show:${showId}`, changeMessage('job', 'upsert', job.id, toJob(job)));
     ctx.publish(`show:${showId}`, compilationMessage(showId, id, 'queued'));
     const [out] = await toEntities(ctx, [row!]);
     return out!;
@@ -178,7 +216,7 @@ defineOp({
 
 defineOp({
   name: 'compilations.list',
-  description: `The video compilations of a show (showId from shows_list), newest first (at most ${LIST_MAX}), each as in compilations_get: status, progress, clips, durationSec and, when ready, a url valid about 1 hour. Needs read access to the show.`,
+  description: `The video compilations of a show (showId from shows_list), newest first (at most ${LIST_MAX}), each as in compilations_get: status, progress, clips, durationSec and, when ready, a url valid about 1 hour. Queued compilations include queuePosition (jobs the worker starts before this build, 0 = next) and queued or running ones etaSec (rough seconds until ready, from recent builds' time per clip second; absent without history) — both also in compilations_get. The build itself is a compile job in jobs_list with showId. Needs read access to the show.`,
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId }) {
@@ -203,16 +241,21 @@ defineOp({
     const row = await loadCompilation(ctx, compilationId, 'write');
     await ctx.db.delete(compilations).where(eq(compilations.id, row.id));
     // A queued build has nothing left to do; a running one finds the row gone and cleans up.
+    // Its failures (and this cancellation) are dismissed: nothing is left to retry.
+    const now = new Date();
+    const ofThis = and(
+      eq(jobs.kind, 'compile'),
+      sql`${jobs.payload}->>'compilationId' = ${row.id}`,
+    );
     await ctx.db
       .update(jobs)
-      .set({ status: 'failed', error: 'Compilation deleted.', updatedAt: new Date() })
-      .where(
-        and(
-          eq(jobs.kind, 'compile'),
-          eq(jobs.status, 'queued'),
-          sql`${jobs.payload}->>'compilationId' = ${row.id}`,
-        ),
-      );
+      .set({ status: 'failed', error: 'Compilation deleted.', dismissedAt: now, updatedAt: now })
+      .where(and(ofThis, eq(jobs.status, 'queued')));
+    await ctx.db
+      .update(jobs)
+      .set({ dismissedAt: now })
+      .where(and(ofThis, eq(jobs.status, 'failed'), isNull(jobs.dismissedAt)));
+    ctx.publish(`show:${row.showId}`, { type: 'invalidate', entity: 'job' });
     const key = row.objectKey;
     if (key && storageConfigured)
       ctx.afterCommit(async () => {
