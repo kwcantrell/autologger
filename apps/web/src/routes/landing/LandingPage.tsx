@@ -3,7 +3,20 @@
 // own scroll container and the header sticks inside it.
 
 import { ArrowRight, ChevronDown, ExternalLink, Menu } from 'lucide-react';
-import { createContext, type ReactNode, useContext, useMemo, useState } from 'react';
+import {
+  type ComponentType,
+  createContext,
+  type LazyExoticComponent,
+  lazy,
+  type ReactNode,
+  type RefObject,
+  Suspense,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Link } from 'wouter';
 import { useCapabilities } from '@/api/queries';
 import { Button } from '@/shared/components/ui/button';
@@ -22,6 +35,7 @@ import {
   SheetTrigger,
 } from '@/shared/components/ui/sheet';
 import { cn } from '@/shared/lib/utils';
+import { WorkspaceMock } from './heroMock';
 import {
   ASK_PLUGIN_HREF,
   type LandingLinks,
@@ -30,18 +44,8 @@ import {
   PRODUCT_LINKS,
   SIGN_IN_HREF,
 } from './links';
-import {
-  AgentsMock,
-  CompileMock,
-  DashboardMock,
-  ExportMock,
-  ImportMock,
-  LoggingMock,
-  TopicsMock,
-  TranscriptMock,
-  WikiMock,
-  WorkspaceMock,
-} from './mocks';
+import type * as Mocks from './mocks';
+import type * as WikiMocks from './wikiMocks';
 
 const WRAP = 'mx-auto w-full max-w-[72rem] px-4 sm:px-6 lg:px-8';
 const EYEBROW =
@@ -54,6 +58,75 @@ const FOCUS =
 // Doc links follow the server's DOCS_URL (capabilities.docsUrl); upstream docs until it loads.
 const LinksContext = createContext<LandingLinks>(landingLinks());
 const useLinks = () => useContext(LinksContext);
+
+// ── lazily loaded mocks ─────────────────────────────────────────────
+// The feature and import/export mocks load when their slot comes within half a screen of the
+// page's scroll viewport, so the first paint fetches only the hero. The wiki and Ask mocks are a
+// module of their own (wikiMocks.tsx) because they pull in react-markdown. Until a mock arrives an
+// empty card of its measured height (phone, sm, lg) holds its place, so the rows around it do not
+// move. Changed a mock's size? Update its height here.
+
+type MockName = keyof typeof Mocks | keyof typeof WikiMocks;
+const loadMock = (name: MockName): Promise<ComponentType> =>
+  name === 'WikiMock' || name === 'CompileMock'
+    ? import('./wikiMocks').then((m) => m[name])
+    : import('./mocks').then((m) => m[name]);
+const lazyMocks = new Map<MockName, LazyExoticComponent<ComponentType>>();
+
+function lazyMock(name: MockName) {
+  let Mock = lazyMocks.get(name);
+  if (!Mock) {
+    Mock = lazy(() => loadMock(name).then((c) => ({ default: c })));
+    lazyMocks.set(name, Mock);
+  }
+  return Mock;
+}
+
+function useNearViewport(ref: RefObject<HTMLElement | null>) {
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (near || !el) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setNear(true);
+      return;
+    }
+    // The page is its own scroll container (#top below), so observe within it: with the
+    // viewport as root, the container's clipping would cancel the margin.
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setNear(true);
+      },
+      { root: el.closest('#top'), rootMargin: '50% 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [near, ref]);
+  return near;
+}
+
+function LazyMock({ name, height }: { name: MockName; height: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const near = useNearViewport(ref);
+  const placeholder = (
+    <div
+      aria-hidden="true"
+      className={cn('w-full rounded-card border border-si-line bg-si-panel', height)}
+    />
+  );
+  const Mock = lazyMock(name);
+  return (
+    <div ref={ref} className="min-w-0">
+      {near ? (
+        <Suspense fallback={placeholder}>
+          <Mock />
+        </Suspense>
+      ) : (
+        placeholder
+      )}
+    </div>
+  );
+}
 
 function useMenuGroups() {
   const { navGroups } = useLinks();
@@ -341,7 +414,7 @@ const features = (links: LandingLinks): Feature[] => [
       'Roll, stop and takes on a shared transport every client follows',
       'Bitfocus Companion turns a Stream Deck into a logging surface',
     ],
-    mock: <LoggingMock />,
+    mock: <LazyMock name="LoggingMock" height="h-[337px] sm:h-[499px] lg:h-[407px]" />,
     link: { label: 'Companion setup', href: links.companionDocsHref, hint: '' },
   },
   {
@@ -354,7 +427,7 @@ const features = (links: LandingLinks): Feature[] => [
       'Key terms steer the spelling of guest names and jargon',
       'Fix, merge and split lines by hand, or have an agent clean up',
     ],
-    mock: <TranscriptMock />,
+    mock: <LazyMock name="TranscriptMock" height="h-[690px] sm:h-[295px] lg:h-[346px]" />,
   },
   {
     id: 'topics',
@@ -365,7 +438,7 @@ const features = (links: LandingLinks): Feature[] => [
       'Chapter start times line up with events and transcript lines',
       'Ready to paste into show notes, or export as CSV',
     ],
-    mock: <TopicsMock />,
+    mock: <LazyMock name="TopicsMock" height="h-[415px] sm:h-[387px] lg:h-[423px]" />,
   },
   {
     id: 'dashboards',
@@ -376,7 +449,7 @@ const features = (links: LandingLinks): Feature[] => [
       'Event counts, talk time per speaker, topic timelines, custom stats',
       'Preview the data behind each widget before you save it',
     ],
-    mock: <DashboardMock />,
+    mock: <LazyMock name="DashboardMock" height="h-[607px] sm:h-[615px] lg:h-[615px]" />,
   },
   {
     id: 'wiki',
@@ -388,7 +461,7 @@ const features = (links: LandingLinks): Feature[] => [
       'Each session lists the wiki pages that cite it',
       'Revision history for every page, and lint for broken links and citations',
     ],
-    mock: <WikiMock />,
+    mock: <LazyMock name="WikiMock" height="h-[438px] sm:h-[375px] lg:h-[422px]" />,
   },
   {
     id: 'compilations',
@@ -400,7 +473,7 @@ const features = (links: LandingLinks): Feature[] => [
       'Built on the server: only the cited sections are downloaded, joined into a 720p MP4',
       'The Compilations page plays, downloads and deletes them',
     ],
-    mock: <CompileMock />,
+    mock: <LazyMock name="CompileMock" height="h-[504px] sm:h-[418px] lg:h-[441px]" />,
     link: { label: 'The autologger-ask plugin', href: ASK_PLUGIN_HREF, hint: '' },
   },
   {
@@ -413,7 +486,7 @@ const features = (links: LandingLinks): Feature[] => [
       'Undo a single change, or every change from one call at once',
       'Ready-made skills for topics, moments, dashboards, wiki, briefs and questions',
     ],
-    mock: <AgentsMock />,
+    mock: <LazyMock name="AgentsMock" height="h-[420px] sm:h-[325px] lg:h-[428px]" />,
     link: { label: 'Connect an agent', href: links.mcpDocsHref, hint: '' },
   },
 ];
@@ -485,7 +558,7 @@ function MediaSection() {
                 show.
               </p>
             </div>
-            <ImportMock />
+            <LazyMock name="ImportMock" height="h-[351px] sm:h-[339px]" />
           </article>
           <article
             id="exports"
@@ -498,7 +571,7 @@ function MediaSection() {
                 subtitles, and the chapters as a topics CSV.
               </p>
             </div>
-            <ExportMock />
+            <LazyMock name="ExportMock" height="h-[379px] sm:h-[371px]" />
           </article>
         </div>
       </div>
