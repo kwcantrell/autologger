@@ -126,6 +126,8 @@ export interface SessionEvent {
   /** Dropdown option / toggle state ("ON"/"OFF") when the category has one. */
   value: string | null;
   timecodeFrames: number | null;
+  /** Seconds from the session start (lines up with transcript times); null without a timecode. */
+  atSec: number | null;
   wallTime: string;
   take: number;
   source: EventSource;

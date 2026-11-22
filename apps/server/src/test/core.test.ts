@@ -1,4 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { newId } from '../core/ids.ts';
+import { db, schema } from '../db/client.ts';
 import { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
 
 beforeAll(setupDb);
@@ -86,6 +88,17 @@ describe('timecode and events', () => {
     expect(b.timecodeFrames).toBe(24 * 3600 + 48);
     expect(b.source).toBe('agent');
     expect(b.categoryId).toBeNull(); // free label
+    expect(a.atSec).toBe(10);
+
+    // atSec round-trips through events.list (milliseconds; 24 fps rounds to the nearest frame).
+    const c = await call(owner, 'events.create', {
+      sessionId: session.id,
+      category: 'Note',
+      atSec: 61.5,
+    });
+    expect(c.atSec).toBe(61.5);
+    const listed = await call(owner, 'events.list', { sessionId: session.id });
+    expect(listed.map((e) => e.atSec)).toEqual([2, 10, 61.5]);
 
     await failsWith(
       call(owner, 'events.create', {
@@ -101,7 +114,7 @@ describe('timecode and events', () => {
     expect(rolling.take).toBe(1);
     const stopped = await call(owner, 'transport.stop', { sessionId: session.id });
     expect(stopped.isRolling).toBe(false);
-    expect(stopped.eventCount).toBe(2);
+    expect(stopped.eventCount).toBe(3);
   });
 
   it('imports CSV and reports bad rows', async () => {
@@ -180,6 +193,69 @@ describe('dashboards and wiki', () => {
         spec: { title: 'x', widgets: [{ id: 'a', type: 'html' }] } as any,
       }),
       'bad_request',
+    );
+  });
+
+  it('filters the topics query by maxLevel', async () => {
+    const { owner, session } = await studio();
+    await call(owner, 'topics.replace', {
+      sessionId: session.id,
+      topics: [
+        { startSec: 0, title: 'Intro' },
+        { startSec: 30, title: 'Detail', level: 2 },
+        { startSec: 60, title: 'Main' },
+      ],
+    });
+    const query = (maxLevel?: number) =>
+      call(owner, 'dashboards.query', {
+        sessionId: session.id,
+        query: { name: 'topics', maxLevel },
+      });
+    expect((await query(1)).map((r) => r.label)).toEqual(['Intro', 'Main']);
+    expect(await query()).toHaveLength(3);
+    const outsider = await makeUser('outsider@example.com');
+    await failsWith(
+      call(outsider, 'dashboards.query', {
+        sessionId: session.id,
+        query: { name: 'topics', maxLevel: 1 },
+      }),
+      'not_found',
+    );
+  });
+
+  it('summary_stats reports speech duration and words per minute', async () => {
+    const { owner, session } = await studio();
+    const stats = () =>
+      call(owner, 'dashboards.query', { sessionId: session.id, query: { name: 'summary_stats' } });
+    expect(await stats()).toMatchObject([{ words: 0, speechSec: 0, wpm: null }]);
+    const word = (w: string) => ({ w, s: 0, e: 0 });
+    await db.insert(schema.transcriptSegments).values([
+      {
+        id: newId('seg'),
+        sessionId: session.id,
+        startSec: 10,
+        endSec: 40,
+        text: 'a b',
+        words: [word('a'), word('b')],
+      },
+      {
+        id: newId('seg'),
+        sessionId: session.id,
+        startSec: 60,
+        endSec: 70,
+        text: 'c',
+        words: [word('c')],
+      },
+    ]);
+    // 3 words over 60s (10 → 70), gaps included.
+    expect(await stats()).toMatchObject([{ words: 3, speechSec: 60, wpm: 3 }]);
+    const outsider = await makeUser('outsider@example.com');
+    await failsWith(
+      call(outsider, 'dashboards.query', {
+        sessionId: session.id,
+        query: { name: 'summary_stats' },
+      }),
+      'not_found',
     );
   });
 
