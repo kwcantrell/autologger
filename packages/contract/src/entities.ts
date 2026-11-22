@@ -206,6 +206,16 @@ export interface TranscriptReplaceResult {
   truncated: boolean;
 }
 
+/**
+ * A transcript.find result line. Matched lines carry the matched substrings and the indexes of the
+ * patterns that hit; neighbouring lines requested with `context` carry `context: true` instead.
+ */
+export interface TranscriptFindLine extends TranscriptLine {
+  matches?: string[];
+  patternIndexes?: number[];
+  context?: true;
+}
+
 export interface Topic {
   id: string;
   sessionId: string;
@@ -312,6 +322,8 @@ export interface Job {
   kind: string;
   status: 'queued' | 'running' | 'done' | 'failed';
   sessionId: string | null;
+  /** Set when listing a whole show (jobs.list with showId). */
+  sessionTitle?: string;
   error: string | null;
   progress: string | null;
   createdAt: string;
