@@ -7,6 +7,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { fmtSec } from '@/lib/timecode';
 import { Button } from '@/shared/components/ui/button';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import {
   type Column,
   FEED_CELL,
@@ -93,14 +94,11 @@ export const SegmentRow = memo(function SegmentRow({
         )}
       >
         {canWrite ? (
-          <button
-            type="button"
-            className="text-left hover:underline"
-            title="Rename this speaker everywhere"
-            onClick={onRenameSpeaker}
-          >
-            {s.speaker || 'Unknown'}
-          </button>
+          <Tooltip shared content="Rename this speaker everywhere">
+            <button type="button" className="text-left hover:underline" onClick={onRenameSpeaker}>
+              {s.speaker || 'Unknown'}
+            </button>
+          </Tooltip>
         ) : (
           s.speaker || 'Unknown'
         )}

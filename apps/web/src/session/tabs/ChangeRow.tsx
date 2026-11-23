@@ -17,6 +17,7 @@ import {
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
+import { Tooltip } from '@/shared/ui/Tooltip';
 
 const VIA_LABEL: Record<Via, string> = {
   web: 'web',
@@ -202,23 +203,22 @@ export function ChangeRow({
             className="inline-flex"
             title={canWrite ? undefined : "Read-only: you can't change this show's content"}
           >
-            <Button
-              variant="ghost"
-              size="xs"
-              className={cn('relative', TOUCH_HIT)}
-              onClick={onUndo}
+            <Tooltip
+              shared
+              content={c.groupSize ? 'Undo every change of this call' : 'Undo this change'}
               disabled={!canWrite || busy}
-              title={
-                !canWrite
-                  ? undefined
-                  : c.groupSize
-                    ? 'Undo every change of this call'
-                    : 'Undo this change'
-              }
             >
-              <Undo2 aria-hidden="true" />
-              {busy ? 'Undoing…' : c.groupSize ? 'Undo all' : 'Undo'}
-            </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                className={cn('relative', TOUCH_HIT)}
+                onClick={onUndo}
+                disabled={!canWrite || busy}
+              >
+                <Undo2 aria-hidden="true" />
+                {busy ? 'Undoing…' : c.groupSize ? 'Undo all' : 'Undo'}
+              </Button>
+            </Tooltip>
           </span>
         )}
       </td>

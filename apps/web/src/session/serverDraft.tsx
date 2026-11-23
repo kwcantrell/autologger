@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/shared/lib/utils';
+import { Tooltip } from '@/shared/ui/Tooltip';
 
 export type DraftState = {
   /** What the input shows. */
@@ -99,18 +100,21 @@ export function ChangedElsewhere({
   className?: string;
 }) {
   return (
-    <button
-      type="button"
-      tabIndex={-1}
-      className={cn(
-        'shrink-0 whitespace-nowrap rounded-[3px] px-1 text-[0.65rem] text-(--si-accent-text) underline decoration-dotted underline-offset-2 hover:bg-[color-mix(in_oklab,var(--si-accent)_12%,transparent)]',
-        className,
-      )}
-      title={`Changed elsewhere to “${remote}”. Saving keeps your text; Esc or click takes theirs.`}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onTakeTheirs}
+    <Tooltip
+      content={`Changed elsewhere to “${remote}”. Saving keeps your text; Esc or click takes theirs.`}
     >
-      changed elsewhere
-    </button>
+      <button
+        type="button"
+        tabIndex={-1}
+        className={cn(
+          'shrink-0 whitespace-nowrap rounded-[3px] px-1 text-[0.65rem] text-(--si-accent-text) underline decoration-dotted underline-offset-2 hover:bg-[color-mix(in_oklab,var(--si-accent)_12%,transparent)]',
+          className,
+        )}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onTakeTheirs}
+      >
+        changed elsewhere
+      </button>
+    </Tooltip>
   );
 }

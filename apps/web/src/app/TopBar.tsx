@@ -15,6 +15,7 @@ import {
 } from '@/shared/components/ui/dropdown-menu';
 import { SidebarTrigger } from '@/shared/components/ui/sidebar';
 import { cn } from '@/shared/lib/utils';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import { ROLE_LABEL, useActive } from './useActive';
 
 const CRUMB = 'min-w-0 shrink px-2 max-md:gap-0.5 max-md:px-1!';
@@ -47,7 +48,9 @@ export function TopBar() {
       data-slot="topbar"
       className="flex h-(--topbar-h) w-full min-w-0 shrink-0 items-center gap-1.5 px-2.5 md:gap-3 md:px-4"
     >
-      <SidebarTrigger className="size-(--h-ctl) shrink-0" title="Toggle sidebar ( [ )" />
+      <Tooltip content="Toggle sidebar ( [ )">
+        <SidebarTrigger className="size-(--h-ctl) shrink-0" />
+      </Tooltip>
 
       <nav
         aria-label="Current team and show"
@@ -142,22 +145,23 @@ export function TopBar() {
         <ChevronRightIcon aria-hidden="true" className={cn(CRUMB_SEP, 'max-md:hidden')} />
 
         {status.sessionId ? (
-          <Button
-            variant="ghost"
-            className="shrink-0 px-1.5 max-md:px-1 md:min-w-0 md:shrink"
-            aria-label={`${label}, ${sessionTitle}. Return to session`}
-            title={`Return to ${sessionTitle}`}
-            onClick={() => {
-              settingsOpen.set(null);
-              const target = `/sessions/${encodeURIComponent(status.sessionId!)}`;
-              if (location !== target) navigate(target);
-            }}
-          >
-            {statusBadge}
-            <span className="min-w-0 truncate font-tc text-xs font-medium text-muted-foreground max-md:hidden">
-              {sessionTitle}
-            </span>
-          </Button>
+          <Tooltip content={`Return to ${sessionTitle}`}>
+            <Button
+              variant="ghost"
+              className="shrink-0 px-1.5 max-md:px-1 md:min-w-0 md:shrink"
+              aria-label={`${label}, ${sessionTitle}. Return to session`}
+              onClick={() => {
+                settingsOpen.set(null);
+                const target = `/sessions/${encodeURIComponent(status.sessionId!)}`;
+                if (location !== target) navigate(target);
+              }}
+            >
+              {statusBadge}
+              <span className="min-w-0 truncate font-tc text-xs font-medium text-muted-foreground max-md:hidden">
+                {sessionTitle}
+              </span>
+            </Button>
+          </Tooltip>
         ) : (
           <div className="flex shrink-0 items-center gap-2 px-1.5 max-md:px-1 md:min-w-0 md:shrink">
             {statusBadge}
@@ -170,27 +174,31 @@ export function TopBar() {
 
       <SearchPalette />
 
-      <Button
-        variant="ghost"
-        size="icon"
-        className="shrink-0 md:w-auto md:px-2.5"
-        nativeButton={false}
-        render={<Link href="/wiki" aria-label="Wiki" title="Wiki" />}
-      >
-        <BookOpenIcon aria-hidden="true" />
-        <span className="max-md:hidden">Wiki</span>
-      </Button>
+      <Tooltip content="Wiki">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="shrink-0 md:w-auto md:px-2.5"
+          nativeButton={false}
+          render={<Link href="/wiki" aria-label="Wiki" />}
+        >
+          <BookOpenIcon aria-hidden="true" />
+          <span className="max-md:hidden">Wiki</span>
+        </Button>
+      </Tooltip>
 
-      <Button
-        variant="ghost"
-        size="icon"
-        className="shrink-0 max-md:hidden md:w-auto md:px-2.5"
-        nativeButton={false}
-        render={<Link href="/compilations" aria-label="Compilations" title="Video compilations" />}
-      >
-        <FilmIcon aria-hidden="true" />
-        <span>Compilations</span>
-      </Button>
+      <Tooltip content="Video compilations">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="shrink-0 max-md:hidden md:w-auto md:px-2.5"
+          nativeButton={false}
+          render={<Link href="/compilations" aria-label="Compilations" />}
+        >
+          <FilmIcon aria-hidden="true" />
+          <span>Compilations</span>
+        </Button>
+      </Tooltip>
 
       <span role="status" className="sr-only">{`Transport ${label}`}</span>
     </header>

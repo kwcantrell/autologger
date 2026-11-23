@@ -23,6 +23,7 @@ import { Field, FieldDescription, FieldLabel } from '@/shared/components/ui/fiel
 import { Input } from '@/shared/components/ui/input';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { Dialog, DialogActions } from '@/shared/ui/Dialog';
+import { Tooltip } from '@/shared/ui/Tooltip';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -264,18 +265,23 @@ export function KeyTermsDialog({
             {canWrite ? 'Cancel' : 'Close'}
           </Button>
           {canRetranscribe && (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={busy || !!listError || !!retranscribeBlocked}
-              title={
+            <Tooltip
+              content={
                 retranscribeBlocked ??
                 "Save, then transcribe this session's audio again with these key terms"
               }
-              onClick={() => void save(true)}
+              disabled={busy || !!listError || !!retranscribeBlocked}
+              titleWhenDisabled
             >
-              {retranscribe.isPending ? 'Starting…' : 'Save & re-transcribe'}
-            </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy || !!listError || !!retranscribeBlocked}
+                onClick={() => void save(true)}
+              >
+                {retranscribe.isPending ? 'Starting…' : 'Save & re-transcribe'}
+              </Button>
+            </Tooltip>
           )}
           {canWrite && (
             <Button

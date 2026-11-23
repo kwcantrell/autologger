@@ -34,6 +34,7 @@ import { Field, FieldDescription, FieldLabel } from '@/shared/components/ui/fiel
 import { Input } from '@/shared/components/ui/input';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { Dialog, DialogActions } from '@/shared/ui/Dialog';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import {
   discardUpload,
   downloadUpload,
@@ -353,37 +354,43 @@ function SegmentsDialog({
               {canWrite &&
                 caps?.transcription &&
                 (s.status === 'failed' || s.status === 'transcribed' || s.status === 'ready') && (
+                  <Tooltip content="Transcribe again">
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label="Transcribe again"
+                      onClick={() =>
+                        retr.mutate(
+                          { sessionId: session.id, segmentId: s.id },
+                          { onError: (e) => showToast(errorMessage(e), true) },
+                        )
+                      }
+                    >
+                      <RefreshCwIcon aria-hidden="true" />
+                    </Button>
+                  </Tooltip>
+                )}
+              {canWrite && caps?.storage && !s.hasWaveform && s.status !== 'uploading' && (
+                <Tooltip
+                  content="Compute waveform again (no waveform on the timeline yet)"
+                  disabled={rewave.isPending && rewave.variables?.segmentId === s.id}
+                  titleWhenDisabled
+                >
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    aria-label="Transcribe again"
-                    title="Transcribe again"
+                    aria-label="Compute waveform again"
+                    disabled={rewave.isPending && rewave.variables?.segmentId === s.id}
                     onClick={() =>
-                      retr.mutate(
+                      rewave.mutate(
                         { sessionId: session.id, segmentId: s.id },
                         { onError: (e) => showToast(errorMessage(e), true) },
                       )
                     }
                   >
-                    <RefreshCwIcon aria-hidden="true" />
+                    <AudioLinesIcon aria-hidden="true" />
                   </Button>
-                )}
-              {canWrite && caps?.storage && !s.hasWaveform && s.status !== 'uploading' && (
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label="Compute waveform again"
-                  title="Compute waveform again (no waveform on the timeline yet)"
-                  disabled={rewave.isPending && rewave.variables?.segmentId === s.id}
-                  onClick={() =>
-                    rewave.mutate(
-                      { sessionId: session.id, segmentId: s.id },
-                      { onError: (e) => showToast(errorMessage(e), true) },
-                    )
-                  }
-                >
-                  <AudioLinesIcon aria-hidden="true" />
-                </Button>
+                </Tooltip>
               )}
               {canWrite && (
                 <Button

@@ -11,6 +11,7 @@ import { Link } from 'wouter';
 import { showToast } from '@/shared/components/Toast';
 import { cn } from '@/shared/lib/utils';
 import { markdownTableComponents } from '@/shared/ui/markdownTable';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import { createSlugger } from './docsIndex';
 
 const urlTransform: UrlTransform = (url) =>
@@ -72,19 +73,20 @@ function CopyCode({ text }: { text: string }) {
     }
   }
   return (
-    <button
-      type="button"
-      onClick={() => void copy()}
-      aria-label={copied ? 'Copied' : 'Copy code'}
-      title={copied ? 'Copied' : 'Copy code'}
-      className="absolute top-1.5 right-1.5 flex size-8 items-center justify-center rounded-ctl border border-si-line bg-si-panel text-si-muted transition-colors hover:text-si-fg focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
-    >
-      {copied ? (
-        <CheckIcon aria-hidden="true" className="size-4" />
-      ) : (
-        <CopyIcon aria-hidden="true" className="size-4" />
-      )}
-    </button>
+    <Tooltip content={copied ? 'Copied' : 'Copy code'}>
+      <button
+        type="button"
+        onClick={() => void copy()}
+        aria-label={copied ? 'Copied' : 'Copy code'}
+        className="absolute top-1.5 right-1.5 flex size-8 items-center justify-center rounded-ctl border border-si-line bg-si-panel text-si-muted transition-colors hover:text-si-fg focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+      >
+        {copied ? (
+          <CheckIcon aria-hidden="true" className="size-4" />
+        ) : (
+          <CopyIcon aria-hidden="true" className="size-4" />
+        )}
+      </button>
+    </Tooltip>
   );
 }
 

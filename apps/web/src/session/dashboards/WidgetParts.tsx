@@ -8,6 +8,7 @@ import type { ReactNode } from 'react';
 import { fmtShort } from '@/lib/timecode';
 import { FEED_CELL, FEED_TH } from '@/session/feed';
 import { cn } from '@/shared/lib/utils';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import { fmtField, fmtFormat, fmtNum, fmtValue, type Row, safeColor, toNum } from './data';
 
 // Resolved --si-* values (dark only): recharts writes these as SVG presentation attributes; the
@@ -209,25 +210,25 @@ export function TimelineWidget({
       <div className="relative h-9 w-full rounded-ctl border border-si-line bg-si-bg">
         {items.map((x) =>
           x.dur ? (
-            <button
-              key={x.i}
-              type="button"
-              onClick={() => onSeek(x.at)}
-              title={`${fmtShort(x.at)} · ${x.label}`}
-              aria-label={`Jump to ${fmtShort(x.at)} ${x.label}`}
-              className="absolute top-1.5 bottom-1.5 min-w-[3px] cursor-pointer rounded-[3px] border border-[color-mix(in_oklab,var(--si-accent)_55%,transparent)] bg-[color-mix(in_oklab,var(--si-accent)_22%,transparent)] p-0 hover:bg-[color-mix(in_oklab,var(--si-accent)_40%,transparent)] focus-visible:outline-2 focus-visible:outline-ring"
-              style={{ left: pct(x.at), width: `calc(${pct(x.dur)} - 1px)` }}
-            />
+            <Tooltip key={x.i} shared content={`${fmtShort(x.at)} · ${x.label}`}>
+              <button
+                type="button"
+                onClick={() => onSeek(x.at)}
+                aria-label={`Jump to ${fmtShort(x.at)} ${x.label}`}
+                className="absolute top-1.5 bottom-1.5 min-w-[3px] cursor-pointer rounded-[3px] border border-[color-mix(in_oklab,var(--si-accent)_55%,transparent)] bg-[color-mix(in_oklab,var(--si-accent)_22%,transparent)] p-0 hover:bg-[color-mix(in_oklab,var(--si-accent)_40%,transparent)] focus-visible:outline-2 focus-visible:outline-ring"
+                style={{ left: pct(x.at), width: `calc(${pct(x.dur)} - 1px)` }}
+              />
+            </Tooltip>
           ) : (
-            <button
-              key={x.i}
-              type="button"
-              onClick={() => onSeek(x.at)}
-              title={`${fmtShort(x.at)} · ${x.label}`}
-              aria-label={`Jump to ${fmtShort(x.at)} ${x.label}`}
-              className="absolute top-1 bottom-1 w-[3px] -translate-x-1/2 cursor-pointer rounded-full border-0 p-0 opacity-85 hover:opacity-100 hover:[box-shadow:0_0_0_2px_rgba(255,255,255,0.25)] focus-visible:outline-2 focus-visible:outline-ring"
-              style={{ left: pct(x.at), background: x.color ?? C.accent }}
-            />
+            <Tooltip key={x.i} shared content={`${fmtShort(x.at)} · ${x.label}`}>
+              <button
+                type="button"
+                onClick={() => onSeek(x.at)}
+                aria-label={`Jump to ${fmtShort(x.at)} ${x.label}`}
+                className="absolute top-1 bottom-1 w-[3px] -translate-x-1/2 cursor-pointer rounded-full border-0 p-0 opacity-85 hover:opacity-100 hover:[box-shadow:0_0_0_2px_rgba(255,255,255,0.25)] focus-visible:outline-2 focus-visible:outline-ring"
+                style={{ left: pct(x.at), background: x.color ?? C.accent }}
+              />
+            </Tooltip>
           ),
         )}
       </div>

@@ -34,6 +34,7 @@ import {
 } from '@/shared/components/ui/dropdown-menu';
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/shared/components/ui/empty';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import { wikiHref } from '../wiki/wikiShared';
 
 const LIMIT = 300;
@@ -139,11 +140,13 @@ function FilterMenu<T extends string>({
 }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button variant="glass" title={`${title}: ${label}`} />}>
-        {/* Three filters side by side: phones keep the labels too, or the icons look alike. */}
-        <IconFilter />
-        <span className="max-w-[11rem] truncate max-md:max-w-[8rem]">{label}</span>
-      </DropdownMenuTrigger>
+      <Tooltip content={`${title}: ${label}`}>
+        <DropdownMenuTrigger render={<Button variant="glass" />}>
+          {/* Three filters side by side: phones keep the labels too, or the icons look alike. */}
+          <IconFilter />
+          <span className="max-w-[11rem] truncate max-md:max-w-[8rem]">{label}</span>
+        </DropdownMenuTrigger>
+      </Tooltip>
       <DropdownMenuContent align="end" className="max-h-[60dvh] w-60 overflow-y-auto">
         <DropdownMenuGroup>
           <DropdownMenuLabel>{title}</DropdownMenuLabel>

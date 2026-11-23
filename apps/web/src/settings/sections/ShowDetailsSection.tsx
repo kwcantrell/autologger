@@ -23,6 +23,7 @@ import { Input } from '@/shared/components/ui/input';
 import { Textarea } from '@/shared/components/ui/textarea';
 import { Toggle } from '@/shared/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/shared/components/ui/toggle-group';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import { useInlineDraft, useSectionGuard, useSettingsNav } from '../guard';
 import {
   EmptyState,
@@ -456,25 +457,27 @@ function TranscriptRulesEditor({
               onChange={(e) => patch(i, { replace: e.target.value })}
             />
             <div className="flex items-center gap-1">
-              {RULE_FLAGS.map(({ flag, short, label }) => (
-                <Toggle
-                  key={flag}
-                  variant="outline"
-                  size="sm"
-                  className="font-tc"
-                  aria-label={`Rule ${n}: ${label}`}
-                  title={label}
-                  disabled={
-                    disabled ||
-                    // Only literal rules that ignore case adapt the replacement's case.
-                    (flag === 'preserveCase' && (rule.regex || rule.caseSensitive))
-                  }
-                  pressed={rule[flag]}
-                  onPressedChange={(pressed) => patch(i, { [flag]: pressed })}
-                >
-                  {short}
-                </Toggle>
-              ))}
+              {RULE_FLAGS.map(({ flag, short, label }) => {
+                const off =
+                  disabled ||
+                  // Only literal rules that ignore case adapt the replacement's case.
+                  (flag === 'preserveCase' && (rule.regex || rule.caseSensitive));
+                return (
+                  <Tooltip key={flag} content={label} disabled={off} titleWhenDisabled>
+                    <Toggle
+                      variant="outline"
+                      size="sm"
+                      className="font-tc"
+                      aria-label={`Rule ${n}: ${label}`}
+                      disabled={off}
+                      pressed={rule[flag]}
+                      onPressedChange={(pressed) => patch(i, { [flag]: pressed })}
+                    >
+                      {short}
+                    </Toggle>
+                  </Tooltip>
+                );
+              })}
               <Button
                 variant="ghost"
                 size="icon"
