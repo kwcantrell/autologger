@@ -4,7 +4,7 @@ import {
   type DashboardSpec,
   Widget,
 } from '@autologger/contract';
-import { and, asc, desc, eq, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { requireSession } from '../core/authz.ts';
 import { changeMessage } from '../core/bus.ts';
 import { AppError, badRequest, notFound } from '../core/errors.ts';
@@ -169,6 +169,14 @@ export async function runDashboardQuery(
         },
       ];
     }
+    case 'category_count': {
+      // Always one row, so a stat shows 0 rather than nothing when the category has no events.
+      const [r] = await ctx.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(events)
+        .where(and(eq(events.sessionId, sessionId), inArray(events.category, q.categories)));
+      return [{ count: r?.count ?? 0 }];
+    }
   }
 }
 
@@ -215,7 +223,9 @@ events_by_category → {category,color,count}; events_over_time {bucketSec} → 
 speaker_talk_time → {speaker,seconds,turns}; topics {maxLevel?} → {atSec,durationSec,label,level,summary} (maxLevel 1 = chapters only, best for a timeline);
 events {categories?,limit} → {atSec,label,category,message,value,color}; summary_stats → {events,topics,speakers,words,audioSec,speechSec,wpm}
 (speechSec = last transcript segment end − first segment start, 0 without a transcript; wpm = words per minute
-over speechSec, rounded, null when speechSec is 0 — use it for speaking pace).
+over speechSec, rounded, null when speechSec is 0 — use it for speaking pace);
+category_count {categories: [button names]} → one row {count} = events in those categories, 0 when none — the live
+count of one category on a stat, e.g. { type: "stat", query: { name: "category_count", categories: ["Key insight"] } }.
 Optional format on stat, bar/line and pie values and on table columns: duration (s → M:SS/H:MM:SS) | minutes (s → min, 1 decimal) | number | percent (0–1 ratio); bar labelMaxChars truncates labels (full text in tooltip).
 Prefer live queries for counts so the dashboard stays current. Markdown is rendered without HTML.
 Returns the saved dashboard including its spec; pass compact: true to get only { id, revision } (revision starts at 1 and

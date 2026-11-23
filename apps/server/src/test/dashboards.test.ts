@@ -82,3 +82,43 @@ describe('dashboard spec validation', () => {
     expect(await call(owner, 'dashboards.get', { dashboardId: id })).toMatchObject({ id });
   });
 });
+
+describe('dashboard queries', () => {
+  it('category_count gives one count row for the named categories, 0 when none', async () => {
+    const { owner, session } = await studio();
+    const count = (categories: string[]) =>
+      call(owner, 'dashboards.query', {
+        sessionId: session.id,
+        query: { name: 'category_count', categories },
+      });
+    expect(await count(['Key insight'])).toEqual([{ count: 0 }]);
+    for (const [category, atSec] of [
+      ['Key insight', 5],
+      ['Key insight', 9],
+      ['Laugh', 12],
+    ] as const)
+      await call(owner, 'events.create', { sessionId: session.id, category, atSec });
+    expect(await count(['Key insight'])).toEqual([{ count: 2 }]);
+    expect(await count(['Key insight', 'Laugh'])).toEqual([{ count: 3 }]);
+
+    // A stat over it saves like any other live query.
+    await call(asAgent(owner), 'dashboards.save', {
+      sessionId: session.id,
+      spec: {
+        title: 'Insights',
+        widgets: [
+          { id: 'k', type: 'stat', query: { name: 'category_count', categories: ['Key insight'] } },
+        ],
+      },
+    });
+
+    const outsider = await makeUser('outsider@example.com');
+    await failsWith(
+      call(outsider, 'dashboards.query', {
+        sessionId: session.id,
+        query: { name: 'category_count', categories: ['Key insight'] },
+      }),
+      'not_found',
+    );
+  });
+});
