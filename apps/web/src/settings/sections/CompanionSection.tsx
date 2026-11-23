@@ -4,6 +4,8 @@ import { type FormEvent, Fragment, useState } from 'react';
 import { qk, useCompanionDevices, useOpMutation, useSessions } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { useActive } from '@/app/useActive';
+import { DocsLink } from '@/components/DocsLink';
+import { DOC_PAGES } from '@/lib/docsLinks';
 import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
@@ -115,7 +117,8 @@ export function CompanionSection() {
         <CardHeader>
           <CardTitle>Add a device</CardTitle>
           <CardDescription>
-            Each device is tied to one show and logs into its sessions as you.
+            Each device is tied to one show and logs into its sessions as you. Setting up the Stream
+            Deck: <DocsLink page={DOC_PAGES.companion}>Bitfocus Companion</DocsLink>.
           </CardDescription>
         </CardHeader>
         <CardContent>

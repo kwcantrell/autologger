@@ -20,7 +20,7 @@ import { exportRoutes } from './exports.ts';
 
 type Env = { Variables: { actor: Actor | null } };
 
-/** Where the import helper is downloaded from (docs/importer.md). */
+/** Where the import helper is downloaded from (docs/developers/import-helper.md). */
 export const IMPORTER_ROUTE = '/api/importer/autologger-import.mjs';
 
 /** Extra route groups registered by feature modules (MCP, OAuth). */

@@ -48,9 +48,10 @@ export const env = {
    */
   landingPage: str('LANDING_PAGE', '1') === '1',
   /**
-   * Base URL of this instance's own docs (DOCS_URL, http(s) only, trailing slash dropped). The
-   * landing page's doc links become `<docsUrl>/<file>.md` instead of the upstream repo's
-   * `blob/main/docs/<file>.md`; null keeps the upstream links.
+   * Base URL of an external copy of the docs (DOCS_URL, http(s) only, trailing slash dropped).
+   * The web app's doc links become `<docsUrl>/<section>/<slug>` (the docs home `<docsUrl>`)
+   * instead of its built-in pages at `/docs/<section>/<slug>`; null keeps the built-in pages,
+   * which stay reachable either way.
    */
   docsUrl: /^https?:\/\//i.test(str('DOCS_URL') ?? '')
     ? str('DOCS_URL')!.replace(/\/+$/, '')

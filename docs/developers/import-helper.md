@@ -1,12 +1,17 @@
-## Local import helper
+---
+title: Import helper
+section: developers
+order: 30
+description: The autologger-import command-line helper that downloads YouTube audio on your own computer, builds local compilations and hands the server a YouTube sign-in.
+---
 
-YouTube often bot-checks downloads from datacenter IPs (see _YouTube bot check_ in
-[media.md](media.md)), and the server can never read **private** videos and playlists. The local
-import helper runs yt-dlp on the user's own computer — their home IP, their browser's YouTube
+YouTube often bot-checks downloads from datacenter IPs (see
+[YouTube bot check](/docs/developers/self-hosting#youtube-bot-check)), and the server can never
+read **private** videos and playlists. The local import helper runs yt-dlp on the user's own computer — their home IP, their browser's YouTube
 cookies (`--cookies-from-browser`) — and sends only the audio (or a finished compilation MP4) to
 AutoLogger. No cookies reach the server, except with `youtube-login` (below).
 
-### Download
+## Download
 
 The server serves the helper as one dependency-free file (Node ≥ 22, no `npm install`):
 
@@ -25,7 +30,7 @@ background jobs list link there (and to the team's YouTube sign-in, the usual fi
 fails with YouTube's bot check or a sign-in error; and the Compilations page shows a `buildLocally`
 compilation that is still queued as "Waiting for a local build" with its copyable `compile` command.
 
-### Use
+## Use
 
 ```sh
 export AUTOLOGGER_URL=https://<your-autologger>
@@ -38,9 +43,9 @@ node autologger-import.mjs compile <compilationId>
 Needs yt-dlp (and ffmpeg + ffprobe for `compile`) on the user's computer; it says how to install
 them when they are missing. `--cookies-from-browser <browser>` / `--cookies <file>` are passed to
 yt-dlp; `--dry-run` changes nothing; re-running a command resumes. All options:
-[apps/importer/README.md](../apps/importer/README.md).
+[apps/importer/README.md](https://github.com/kwcantrell/autologger/blob/main/apps/importer/README.md).
 
-### What it calls
+## What it calls
 
 The helper authenticates with a personal access token (Settings › Agents) as `Authorization:
 Bearer alp_…` and calls `POST /api/rpc/<op>`, so it gets the MCP surface and acts as the user:
@@ -75,4 +80,4 @@ team. Use a
 spare Google account (the cookies give full access to it), preferably in a browser profile used
 only for this: signing out of YouTube there, or YouTube rotating the cookies of its open tabs,
 ends the server's sign-in, and you run the command again. See
-[media.md › YouTube bot check](media.md#youtube-bot-check).
+[Self-hosting › YouTube bot check](/docs/developers/self-hosting#youtube-bot-check).

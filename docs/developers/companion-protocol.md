@@ -1,8 +1,14 @@
-# Bitfocus Companion
+---
+title: Companion protocol
+section: developers
+order: 40
+description: The Bitfocus Companion module — installing it from source, device tokens, the /ws/companion WebSocket protocol and its tests.
+---
 
 The Companion module (`apps/companion`) lets a Stream Deck or any Companion surface drive a live
 AutoLogger session: roll/stop the transport, log events with the show's buttons, and show
-timecode, take and the last event on keys.
+timecode, take and the last event on keys. Operators setting up a Stream Deck can start with
+[Bitfocus Companion](/docs/guide/companion); this page covers the module and its protocol.
 
 ## Setup
 

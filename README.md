@@ -69,16 +69,17 @@ Google OAuth redirect URI: `$PUBLIC_URL/auth/google/callback`.
 YouTube often bot-checks downloads from server IPs ("Sign in to confirm you're not a bot"). If
 imports fail that way, give yt-dlp cookies of a signed-in throwaway account (`YTDLP_COOKIES_FILE`,
 mounted into `app` and `worker`) and/or a proxy (`YTDLP_PROXY`); see
-[docs/media.md](docs/media.md#youtube-bot-check). Cookies expire, so expect to refresh them.
+[Self-hosting › YouTube bot check](docs/developers/self-hosting.md#youtube-bot-check). Cookies
+expire, so expect to refresh them.
 
 Signed-out visitors at `/` see a public landing page about AutoLogger. For a private instance, set
 `LANDING_PAGE=0` to send them straight to sign-in instead (read at startup; restart the app to apply).
-Its doc links (the Docs menu, "Connect an agent", "Read the docs") point at this repo's `docs/` on
-GitHub; set `DOCS_URL` to the base URL of your own copy of that folder to use it instead. It
-replaces `https://github.com/kwcantrell/autologger/blob/main/docs` and the file names stay the
-same, so `DOCS_URL=https://docs.example.com/autologger` links to
-`https://docs.example.com/autologger/mcp.md`. Links to the upstream repos (plugin marketplace,
-Companion module, architecture, GitHub) don't change.
+The documentation is served by the app itself at `/docs` (public, built from [`docs/`](docs/)).
+Its links in the app (the landing page's menus, "Connect an agent", "Read the docs", Settings) go
+there; set `DOCS_URL` to the base URL of your own copy to send them there instead:
+`DOCS_URL=https://docs.example.com/autologger` links to
+`https://docs.example.com/autologger/developers/self-hosting` (pages are `<section>/<slug>`).
+Links to the upstream repos (plugin marketplace, Companion module source, GitHub) don't change.
 
 ## Connecting an agent
 
@@ -87,7 +88,7 @@ claude mcp add --transport http autologger https://autologger.example.com/mcp
 ```
 
 Claude Code and claude.ai sign in through OAuth; scripts can use a personal access token from
-Settings → Agents. Details in [docs/mcp.md](docs/mcp.md).
+Settings → Agents. Details in [MCP server](docs/developers/mcp-server.md).
 
 For ready-made skills (topics, logged moments, dashboards, show wiki, search, session briefs),
 install the `autologger` plugin from the
@@ -119,5 +120,5 @@ Postgres and the web and Companion builds in CI.
 | `apps/server`       | API, WebSockets, MCP + OAuth, worker (`src/worker`)                         |
 | `apps/web`          | React SPA                                                                   |
 | `apps/companion`    | Bitfocus Companion module                                                   |
-| `apps/importer`     | Local import helper CLI (yt-dlp on the user's computer; docs/importer.md)   |
-| `docs/`             | Feature notes (MCP, media, importer, companion, UI inventory)               |
+| `apps/importer`     | Local import helper CLI (yt-dlp on the user's computer)                     |
+| `docs/`             | The documentation served at `/docs` (Markdown with front matter)            |

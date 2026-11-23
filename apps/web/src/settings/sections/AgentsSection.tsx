@@ -4,6 +4,8 @@ import { type FormEvent, Fragment, useState } from 'react';
 import { qk, useCapabilities, useOpMutation, useTokens } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { useActive } from '@/app/useActive';
+import { DocsLink } from '@/components/DocsLink';
+import { DOC_PAGES } from '@/lib/docsLinks';
 import { CopyRow } from '@/session/tabs/CopyRow';
 import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
@@ -128,7 +130,9 @@ export function AgentsSection() {
           <CardTitle>Connect an agent</CardTitle>
           <CardDescription>
             Agents get the same access you have: they can read and log in every show you can open,
-            and nothing more.
+            and nothing more. Step by step:{' '}
+            <DocsLink page={DOC_PAGES.connectingAgents}>Connecting agents</DocsLink>; for client
+            authors: <DocsLink page={DOC_PAGES.mcpServer}>MCP server</DocsLink>.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -261,10 +265,10 @@ export function AgentsSection() {
   );
 }
 
-/** Served by the API without sign-in (docs/importer.md). */
+/** Served by the API without sign-in (docs/developers/import-helper.md). */
 const IMPORTER_PATH = '/api/importer/autologger-import.mjs';
 
-/** The local import helper: download, configuration and example commands (docs/importer.md). */
+/** The local import helper: download, configuration and example commands (docs/developers/import-helper.md). */
 function ImportHelperCard() {
   const { show } = useActive();
   const origin = location.origin;
@@ -287,7 +291,8 @@ function ImportHelperCard() {
           details) doesn’t help, or for a private playlist, the AutoLogger import helper runs yt-dlp
           on your computer with your browser’s YouTube sign-in and uploads only the audio. It also
           builds compilations made to be built locally. Needs Node.js 22 or newer and yt-dlp (and
-          ffmpeg for compilations).
+          ffmpeg for compilations). All commands and options:{' '}
+          <DocsLink page={DOC_PAGES.importHelper}>Import helper</DocsLink>.
         </CardDescription>
       </CardHeader>
       <CardContent>
