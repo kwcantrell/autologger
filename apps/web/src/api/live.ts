@@ -18,7 +18,7 @@ import { type QueryClient, type QueryKey, useQueryClient } from '@tanstack/react
 import { useEffect, useState } from 'react';
 import { setServerTime } from '@/lib/timecode';
 import { qk } from './queries';
-import { RpcError } from './rpc';
+import { RpcError, rpc } from './rpc';
 
 export type LiveStatus =
   | { state: 'connecting' }
@@ -82,7 +82,6 @@ const sessionKeys = (sessionId: string): QueryKey[] => [
   qk.media(sessionId),
   qk.jobs(sessionId),
   qk.dashboards(sessionId),
-  qk.changesAll(sessionId),
 ];
 
 /** Session entity → the list key it lives in. */
@@ -151,18 +150,25 @@ export function applySessionMessage(qc: QueryClient, sessionId: string, m: Sessi
       const { entity, op, id } = m;
       const data = m.data as WithId | undefined;
       const set = <T extends WithId>(key: QueryKey, sort?: (a: T, b: T) => number) => {
-        const state = qc.getQueryState(key);
-        if (state?.data !== undefined) {
-          if (op === 'delete') qc.setQueryData<T[]>(key, (l) => removeFromList(l, id));
-          else if (data) qc.setQueryData<T[]>(key, (l) => upsertList(l, data as T, sort));
-          else {
-            void qc.invalidateQueries({ queryKey: key });
-            return;
-          }
+        if (op !== 'delete' && !data) {
+          void qc.invalidateQueries({ queryKey: key });
+          return;
         }
-        // Not loaded yet, or a fetch in flight that may predate this change: refetch after it.
-        if (state?.data === undefined || state.fetchStatus === 'fetching')
-          refetchAfterInFlight(qc, key);
+        // Upserts and deletes by id are idempotent, so the same patch can be applied twice.
+        const patch = () => {
+          if (qc.getQueryData(key) === undefined) return;
+          if (op === 'delete') qc.setQueryData<T[]>(key, (l) => removeFromList(l, id));
+          else qc.setQueryData<T[]>(key, (l) => upsertList(l, data as T, sort));
+        };
+        patch();
+        // A fetch in flight may have read the list before this change and would overwrite the
+        // patch when it lands: re-apply it on the fetched data instead of refetching again (a
+        // refetch per push would chain under a busy log). Not loaded and not fetching: the
+        // first fetch will be current.
+        if (qc.getQueryState(key)?.fetchStatus === 'fetching')
+          void qc
+            .refetchQueries({ queryKey: key, exact: true }, { cancelRefetch: false })
+            .then(patch, () => {});
       };
       switch (entity) {
         case 'session':
@@ -223,13 +229,22 @@ export function useLiveSession(sessionId: string | undefined): LiveStatus {
     // sessions.get: once it says the session is gone (SessionRoute then shows why) or we are signed
     // out, stop reconnecting.
     const checkSession = async () => {
-      await qc.refetchQueries({ queryKey: qk.session(sessionId), exact: true });
-      const err = qc.getQueryState(qk.session(sessionId))?.error;
-      if (disposed || terminal || !(err instanceof RpcError)) return;
-      if (!['not_found', 'forbidden', 'unauthenticated'].includes(err.code)) return;
+      // Probe directly rather than refetching the observed query: a failed refetch (server still
+      // down) would put it in an error state and unmount the workspace for a transient outage.
+      let code: string | undefined;
+      try {
+        await rpc('sessions.get', { sessionId });
+        return;
+      } catch (err) {
+        code = err instanceof RpcError ? err.code : undefined;
+      }
+      if (disposed || terminal || !code) return;
+      if (!['not_found', 'forbidden', 'unauthenticated'].includes(code)) return;
       terminal = true;
       clearTimeout(retryTimer);
-      if (err.code === 'unauthenticated') setStatus({ state: 'closed', reason: 'unauthenticated' });
+      if (code === 'unauthenticated') setStatus({ state: 'closed', reason: 'unauthenticated' });
+      // Confirmed gone (the server answered): refetch so SessionRoute shows why.
+      else void qc.refetchQueries({ queryKey: qk.session(sessionId), exact: true });
     };
 
     const connect = () => {
@@ -250,6 +265,8 @@ export function useLiveSession(sessionId: string | undefined): LiveStatus {
           // changes. Refetch what is loaded or loading; lists never fetched just go stale.
           for (const key of sessionKeys(sessionId))
             if (qc.getQueryState(key)) refetchAfterInFlight(qc, key);
+          // Change lists are keyed per view under a common prefix.
+          void qc.invalidateQueries({ queryKey: qk.changesAll(sessionId) });
           attempt = 0;
           setStatus({ state: 'open' });
           return;
