@@ -157,7 +157,7 @@ export function FeedTable({
   return (
     // `relative`: the stacked table's sr-only header is absolute; it stays inside this scroller.
     <div className={cn('@container/feed relative min-h-[8rem] overflow-auto', maxHeight)}>
-      <Table className={cn(FEED_TABLE, STACK_TABLE[stack])}>
+      <Table className={cn(FEED_TABLE, STACK_TABLE[stack])} aria-busy={loading || undefined}>
         <TableHeader>
           <TableRow>
             {columns.map((c) => (
@@ -171,7 +171,9 @@ export function FeedTable({
           {loading ? (
             <TableRow className={block}>
               <TableCell colSpan={columns.length} className={cn('pt-2', block)}>
-                <div className={FEED_EMPTY}>Loading…</div>
+                <div className={FEED_EMPTY} role="status">
+                  Loading…
+                </div>
               </TableCell>
             </TableRow>
           ) : empty ? (

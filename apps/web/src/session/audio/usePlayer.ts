@@ -5,6 +5,7 @@
 import type { AudioSegment } from '@autologger/contract';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { errorMessage, rpc } from '@/api/rpc';
+import { createStore } from '@/lib/store';
 
 const PLAYABLE = new Set<AudioSegment['status']>(['ready', 'transcribing', 'transcribed']);
 
@@ -29,11 +30,14 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
   const listRef = useRef(list);
   listRef.current = list;
   const [isPlaying, setPlaying] = useState(false);
-  const [positionSec, setPositionSec] = useState<number | null>(null);
+  /** Playhead in session seconds; a store so only its readers re-render each frame. */
+  const [position] = useState(() => createStore<number | null>(null));
   const [error, setError] = useState<string | null>(null);
   const rafRef = useRef(0);
   /** Session second to pause at (a cited range's end), cleared by the next seek or that pause. */
   const stopAtRef = useRef<number | null>(null);
+  /** Bumped by every seek: only the latest one may load, play or report an error. */
+  const seekSeq = useRef(0);
 
   if (typeof window !== 'undefined' && !audioRef.current) {
     audioRef.current = new Audio();
@@ -53,21 +57,28 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
     const cur = currentRef.current;
     if (a && cur) {
       const pos = cur.start + a.currentTime;
-      setPositionSec(pos);
+      position.set(pos);
       if (stopAtRef.current != null && pos >= stopAtRef.current && !a.paused) {
         stopAtRef.current = null;
         a.pause();
       }
     }
     rafRef.current = requestAnimationFrame(tick);
-  }, []);
+  }, [position]);
 
+  /**
+   * Loads `ps` (unless it is the loaded segment) and moves to `offset` in it. Resolves false when
+   * a newer seek took over meanwhile (`isCurrent`), so a slow load can't replace a later one.
+   * `currentRef` names a segment only once its metadata has loaded.
+   */
   const load = useCallback(
-    async (ps: PlayerSegment, offset: number) => {
+    async (ps: PlayerSegment, offset: number, isCurrent: () => boolean) => {
       const a = audioRef.current!;
       if (currentRef.current?.seg.id !== ps.seg.id) {
-        currentRef.current = ps;
-        a.src = await urlFor(ps.seg.id);
+        const url = await urlFor(ps.seg.id);
+        if (!isCurrent()) return false;
+        currentRef.current = null;
+        a.src = url;
         await new Promise<void>((resolve, reject) => {
           const ok = () => {
             a.removeEventListener('error', bad);
@@ -80,8 +91,11 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
           a.addEventListener('loadedmetadata', ok, { once: true });
           a.addEventListener('error', bad, { once: true });
         });
+        if (!isCurrent()) return false;
+        currentRef.current = ps;
       }
       a.currentTime = Math.max(0, offset);
+      return true;
     },
     [urlFor],
   );
@@ -98,8 +112,10 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
   /** Move the playhead to `sec` (and play); with `stopAt`, playback pauses there once. */
   const seek = useCallback(
     async (sec: number, play = false, stopAt: number | null = null) => {
+      const seq = ++seekSeq.current;
+      const isCurrent = () => seq === seekSeq.current;
       stopAtRef.current = stopAt != null && stopAt > sec ? stopAt : null;
-      setPositionSec(sec);
+      position.set(sec);
       const ps = locate(sec);
       if (!ps) {
         if (play)
@@ -112,13 +128,13 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
       }
       try {
         setError(null);
-        await load(ps, Math.max(0, sec - ps.start));
+        if (!(await load(ps, Math.max(0, sec - ps.start), isCurrent))) return;
         if (play) await audioRef.current!.play();
       } catch (e) {
-        setError(errorMessage(e));
+        if (isCurrent()) setError(errorMessage(e));
       }
     },
-    [load, locate],
+    [load, locate, position],
   );
 
   const toggle = useCallback(async () => {
@@ -128,7 +144,7 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
       return;
     }
     if (!currentRef.current) {
-      await seek(positionSec ?? listRef.current[0]?.start ?? 0, true, stopAtRef.current);
+      await seek(position.get() ?? listRef.current[0]?.start ?? 0, true, stopAtRef.current);
       return;
     }
     try {
@@ -136,7 +152,7 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
     } catch (e) {
       setError(errorMessage(e));
     }
-  }, [seek, positionSec]);
+  }, [seek, position]);
 
   useEffect(() => {
     const a = audioRef.current;
@@ -184,15 +200,11 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
     [],
   );
 
-  return {
-    segments: list,
-    isPlaying,
-    positionSec,
-    error,
-    seek,
-    toggle,
-    clearError: () => setError(null),
-  };
+  const clearError = useCallback(() => setError(null), []);
+  return useMemo(
+    () => ({ segments: list, isPlaying, position, error, seek, toggle, clearError }),
+    [list, isPlaying, position, error, seek, toggle, clearError],
+  );
 }
 
 export type Player = ReturnType<typeof usePlayer>;

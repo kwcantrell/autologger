@@ -1,13 +1,14 @@
-import type { Session } from '@autologger/contract';
+import type { Session, TranscriptSegment } from '@autologger/contract';
 import { FileUpIcon } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import { useCapabilities, useJobs, useMedia, useTranscript } from '@/api/queries';
+import { memo, useCallback, useState, useSyncExternalStore } from 'react';
+import { useJobs, useMedia, useTranscript } from '@/api/queries';
 import { errorMessage, rpc } from '@/api/rpc';
 import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { useTextPrompt } from '@/shared/ui/PromptDialog';
+import type { Player } from '../audio/usePlayer';
 import { useWorkspace } from '../context';
 import { FeedShell, FeedTable, ToolbarCaption } from '../feed';
 import { TranscriptImportDialog } from '../TranscriptImportDialog';
@@ -21,18 +22,60 @@ const STATUS: Record<Session['transcriptStatus'], string> = {
   failed: 'Transcription failed',
 };
 
-export function TranscriptTab({
-  session,
-  playheadSec,
+const noSubscribe = () => () => {};
+
+/**
+ * A SegmentRow that reads the playhead itself, and only while it is the active row: the tab and
+ * the other rows don't re-render each frame of playback. Memoized on stable props.
+ */
+const TranscriptRow = memo(function TranscriptRow({
+  s,
+  position,
+  canWrite,
+  rolling,
+  onSeek,
+  onRenameSpeaker,
+  onSaveText,
 }: {
-  session: Session;
-  playheadSec: number | null;
+  s: TranscriptSegment;
+  /** The player's position store while this row is under the playhead, else null. */
+  position: Player['position'] | null;
+  canWrite: boolean;
+  rolling: boolean;
+  onSeek: (sec: number) => void;
+  onRenameSpeaker: (speaker: string) => void;
+  onSaveText: (segmentId: string, text: string) => Promise<unknown>;
 }) {
-  const { canWrite, seek } = useWorkspace();
-  const caps = useCapabilities().data;
+  const playheadSec = useSyncExternalStore(
+    position?.subscribe ?? noSubscribe,
+    () => position?.get() ?? null,
+  );
+  return (
+    <SegmentRow
+      s={s}
+      active={position != null}
+      playheadSec={playheadSec}
+      canWrite={canWrite}
+      rolling={rolling}
+      onSeek={onSeek}
+      onRenameSpeaker={() => onRenameSpeaker(s.speaker)}
+      onSaveText={(text) => onSaveText(s.id, text)}
+    />
+  );
+});
+
+const saveSegmentText = (segmentId: string, text: string) =>
+  rpc('transcript.updateSegment', { segmentId, text }).catch((e) => {
+    showToast(`Saving the segment failed. ${errorMessage(e)}`, true);
+    throw e;
+  });
+
+export function TranscriptTab({ session }: { session: Session }) {
+  const { canWrite, seek, player, caps } = useWorkspace();
   const q = useTranscript(session.id);
   const jobs = useJobs(session.id);
-  const media = useMedia(session.id);
+  // Same gate as the workspace's: without storage there is no media list to ask for.
+  const media = useMedia(session.id, caps?.storage !== false);
   const [importOpen, setImportOpen] = useState(false);
   const { requestText, promptElement } = useTextPrompt();
   const segs = q.data ?? [];
@@ -43,31 +86,37 @@ export function TranscriptTab({
     (j) => j.kind.includes('transcri') && j.status === 'failed',
   );
 
-  const activeId = useMemo(() => {
-    if (playheadSec == null) return null;
-    return segs.find((s) => playheadSec >= s.startSec && playheadSec < s.endSec)?.id ?? null;
-  }, [segs, playheadSec]);
+  // The segment under the playhead while playing; re-renders the tab only when it changes.
+  const activeId = useSyncExternalStore(player.position.subscribe, () => {
+    const sec = player.isPlaying ? player.position.get() : null;
+    if (sec == null) return null;
+    return segs.find((s) => sec >= s.startSec && sec < s.endSec)?.id ?? null;
+  });
+  const seekAndPlay = useCallback((sec: number) => seek(sec, true), [seek]);
 
-  const renameSpeaker = async (from: string) => {
-    const to = await requestText({
-      title: 'Rename speaker',
-      label: 'Speaker name',
-      description: `Renames “${from}” in every segment of this session.`,
-      initialValue: from,
-      submitLabel: 'Rename',
-    });
-    if (!to || to.trim() === from) return;
-    try {
-      const r = await rpc('transcript.renameSpeaker', {
-        sessionId: session.id,
-        from,
-        to: to.trim(),
+  const renameSpeaker = useCallback(
+    async (from: string) => {
+      const to = await requestText({
+        title: 'Rename speaker',
+        label: 'Speaker name',
+        description: `Renames “${from}” in every segment of this session.`,
+        initialValue: from,
+        submitLabel: 'Rename',
       });
-      showToast(`Renamed in ${r.updated} segment${r.updated === 1 ? '' : 's'}.`);
-    } catch (e) {
-      showToast(errorMessage(e), true);
-    }
-  };
+      if (!to || to.trim() === from) return;
+      try {
+        const r = await rpc('transcript.renameSpeaker', {
+          sessionId: session.id,
+          from,
+          to: to.trim(),
+        });
+        showToast(`Renamed in ${r.updated} segment${r.updated === 1 ? '' : 's'}.`);
+      } catch (e) {
+        showToast(errorMessage(e), true);
+      }
+    },
+    [requestText, session.id],
+  );
 
   const words = segs.reduce(
     (n, s) => n + (s.words.length || s.text.split(/\s+/).filter(Boolean).length),
@@ -130,21 +179,15 @@ export function TranscriptTab({
           emptyMessage={emptyHint}
         >
           {segs.map((s) => (
-            <SegmentRow
+            <TranscriptRow
               key={s.id}
               s={s}
-              active={s.id === activeId}
-              playheadSec={s.id === activeId ? playheadSec : null}
+              position={s.id === activeId ? player.position : null}
               canWrite={canWrite}
               rolling={session.isRolling}
-              onSeek={(sec) => seek(sec, true)}
-              onRenameSpeaker={() => void renameSpeaker(s.speaker)}
-              onSaveText={(text) =>
-                rpc('transcript.updateSegment', { segmentId: s.id, text }).catch((e) => {
-                  showToast(`Saving the segment failed. ${errorMessage(e)}`, true);
-                  throw e;
-                })
-              }
+              onSeek={seekAndPlay}
+              onRenameSpeaker={renameSpeaker}
+              onSaveText={saveSegmentText}
             />
           ))}
         </FeedTable>

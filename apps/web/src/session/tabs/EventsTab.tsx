@@ -1,7 +1,7 @@
-import type { Category, Session, SessionEvent } from '@autologger/contract';
-import type { UseQueryResult } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { errorMessage, type RpcError, rpc } from '@/api/rpc';
+import type { Category, OpInput, Session, SessionEvent } from '@autologger/contract';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCategories, useEvents } from '@/api/queries';
+import { errorMessage, rpc } from '@/api/rpc';
 import { showToast } from '@/shared/components/Toast';
 import { Button } from '@/shared/components/ui/button';
 import {
@@ -28,18 +28,63 @@ import {
 } from '../feed';
 import { EventRow, eventColumns, type TimeMode } from './EventRow';
 
+const NO_CATEGORIES: Category[] = [];
+
+type EventTiming = Pick<Session, 'frameRate' | 'startOffsetFrames' | 'isRolling'>;
+
+const saveEvent = (patch: OpInput<'events.update'>) =>
+  rpc('events.update', patch).catch((err) => {
+    showToast(`Update failed. ${errorMessage(err)}`, true);
+    throw err;
+  });
+
+/** An EventRow memoized on stable, id-based handlers: a session push doesn't re-render every row. */
+const FeedEventRow = memo(function FeedEventRow({
+  e,
+  timing,
+  categories,
+  timeMode,
+  editable,
+  canWrite,
+  setRowRef,
+  onJump,
+  onDelete,
+}: {
+  e: SessionEvent;
+  timing: EventTiming;
+  categories: Category[];
+  timeMode: TimeMode;
+  editable: boolean;
+  canWrite: boolean;
+  setRowRef: (id: string, el: HTMLTableRowElement | null) => void;
+  onJump: (sec: number) => void;
+  onDelete: (e: SessionEvent) => void;
+}) {
+  return (
+    <EventRow
+      e={e}
+      session={timing}
+      categories={categories}
+      timeMode={timeMode}
+      editable={editable}
+      canWrite={canWrite}
+      rowRef={(el) => setRowRef(e.id, el)}
+      onJump={onJump}
+      onSave={saveEvent}
+      onDelete={() => onDelete(e)}
+    />
+  );
+});
+
 export function EventsTab({
   session,
-  events,
-  categories,
   flash,
 }: {
   session: Session;
-  events: UseQueryResult<SessionEvent[], RpcError>;
-  categories: Category[];
   flash: { id: string; n: number } | null;
-  playheadSec: number;
 }) {
+  const events = useEvents(session.id);
+  const categories = useCategories(session.showId).data ?? NO_CATEGORIES;
   const { canWrite, seek } = useWorkspace();
   const [timeMode, setTimeMode] = useState<TimeMode>('session');
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -54,13 +99,25 @@ export function EventsTab({
   );
   const shown = list.filter((e) => !hidden.has(e.category));
 
-  // Reveal + flash a row (timeline marker clicks, search deep links).
+  // Reveal + flash a row (timeline marker clicks, search deep links), once per request: retried
+  // as events load or filters change until the row exists, then never again for that `n`.
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
-  // biome-ignore lint/correctness/useExhaustiveDependencies: list.length retries the flash once the target row has loaded
+  const flashedN = useRef(0);
   useEffect(() => {
-    if (!flash) return;
+    if (!flash || flashedN.current === flash.n) return;
+    // A row filtered out by category: show that category again rather than flash nothing.
+    const category = events.data?.find((e) => e.id === flash.id)?.category;
+    if (category != null && hidden.has(category)) {
+      setHidden((h) => {
+        const n = new Set(h);
+        n.delete(category);
+        return n;
+      });
+      return;
+    }
     const el = rowRefs.current.get(flash.id);
     if (!el) return;
+    flashedN.current = flash.n;
     el.scrollIntoView({
       block: 'center',
       behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
@@ -68,22 +125,36 @@ export function EventsTab({
     el.classList.remove('event-row-flash');
     void el.offsetWidth;
     el.classList.add('event-row-flash');
-  }, [flash, list.length]);
+  }, [flash, events.data, hidden]);
 
-  const remove = async (e: SessionEvent) => {
-    const ok = await confirm({
-      title: 'Delete log row',
-      message: 'Delete this log row? It can be restored from the Agents tab change log.',
-      confirmLabel: 'Delete',
-      danger: true,
-    });
-    if (!ok) return;
-    try {
-      await rpc('events.delete', { eventId: e.id });
-    } catch (err) {
-      showToast(`Delete failed. ${errorMessage(err)}`, true);
-    }
-  };
+  const setRowRef = useCallback((id: string, el: HTMLTableRowElement | null) => {
+    if (el) rowRefs.current.set(id, el);
+    else rowRefs.current.delete(id);
+  }, []);
+  const seekAndPlay = useCallback((sec: number) => seek(sec, true), [seek]);
+  const { frameRate, startOffsetFrames, isRolling } = session;
+  const timing = useMemo(
+    () => ({ frameRate, startOffsetFrames, isRolling }),
+    [frameRate, startOffsetFrames, isRolling],
+  );
+
+  const remove = useCallback(
+    async (e: SessionEvent) => {
+      const ok = await confirm({
+        title: 'Delete log row',
+        message: 'Delete this log row? It can be restored from the Agents tab change log.',
+        confirmLabel: 'Delete',
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        await rpc('events.delete', { eventId: e.id });
+      } catch (err) {
+        showToast(`Delete failed. ${errorMessage(err)}`, true);
+      }
+    },
+    [confirm],
+  );
 
   const toolbar = (
     <>
@@ -175,26 +246,17 @@ export function EventsTab({
           }
         >
           {shown.map((e) => (
-            <EventRow
+            <FeedEventRow
               key={e.id}
               e={e}
-              session={session}
+              timing={timing}
               categories={categories}
               timeMode={timeMode}
               editable={editable}
               canWrite={canWrite}
-              rowRef={(el) => {
-                if (el) rowRefs.current.set(e.id, el);
-                else rowRefs.current.delete(e.id);
-              }}
-              onJump={(sec) => seek(sec, true)}
-              onSave={(patch) =>
-                rpc('events.update', patch).catch((err) => {
-                  showToast(`Update failed. ${errorMessage(err)}`, true);
-                  throw err;
-                })
-              }
-              onDelete={() => void remove(e)}
+              setRowRef={setRowRef}
+              onJump={seekAndPlay}
+              onDelete={remove}
             />
           ))}
         </FeedTable>

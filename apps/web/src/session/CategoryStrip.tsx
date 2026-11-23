@@ -3,7 +3,10 @@
 // Toggle flips between its on/off labels (state derived from the last logged value).
 
 import type { Category, Session, SessionEvent } from '@autologger/contract';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { byEventTime, upsertList } from '@/api/live';
+import { qk } from '@/api/queries';
 import { errorMessage, rpc } from '@/api/rpc';
 import { isTypingTarget } from '@/lib/keys';
 import { settingsOpen } from '@/lib/store';
@@ -48,16 +51,26 @@ export function CategoryStrip({
     return m;
   }, [events]);
 
+  const qc = useQueryClient();
   const log = useCallback(
     async (cat: Category, fields: { value?: string | null; message?: string; atSec?: number }) => {
       try {
-        await rpc('events.create', { sessionId: session.id, categoryId: cat.id, ...fields });
+        const ev = await rpc('events.create', {
+          sessionId: session.id,
+          categoryId: cat.id,
+          ...fields,
+        });
+        // Show our own write without waiting for the socket echo (same keyed upsert, so the echo
+        // is a no-op): toggles read their phase from it, and it shows while reconnecting.
+        qc.setQueryData<SessionEvent[]>(qk.events(session.id), (l) =>
+          upsertList(l, ev, byEventTime),
+        );
         showToast('Logged.');
       } catch (e) {
         showToast(`Couldn't log ${cat.name}. ${errorMessage(e)}`, true);
       }
     },
-    [session.id],
+    [session.id, qc],
   );
 
   const press = useCallback(

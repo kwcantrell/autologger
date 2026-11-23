@@ -209,11 +209,42 @@ export function Timeline({
     e.preventDefault();
   };
 
-  const selectMarker = (m: Marker) => {
-    setSelected(m.event.id);
-    onSeek(m.sec);
-    onSelectEvent(m.event.id);
-  };
+  const selectMarker = useCallback(
+    (m: Marker) => {
+      setSelected(m.event.id);
+      onSeek(m.sec);
+      onSelectEvent(m.event.id);
+    },
+    [onSeek, onSelectEvent],
+  );
+
+  // The marker buttons don't depend on the playhead: build them only when the markers, the
+  // selection or the scale change, not on every frame of playback.
+  const markerButtons = useMemo(
+    () =>
+      markers.map((m) => (
+        <button
+          key={m.event.id}
+          type="button"
+          className={cn(MARKER, selected === m.event.id && MARKER_SELECTED)}
+          data-cat={m.event.category}
+          style={
+            {
+              left: `${Math.max(0, Math.min(100, (m.sec / totalSec) * 100))}%`,
+              '--mcol': m.event.color,
+            } as CSSProperties
+          }
+          aria-label={`${m.event.category}${m.event.message ? `: ${m.event.message}` : ''} at ${fmtSec(m.sec)}`}
+          onPointerEnter={(e) => {
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            setTip({ m, x: r.left + r.width / 2, y: r.top });
+          }}
+          onPointerLeave={() => setTip(null)}
+          onClick={() => selectMarker(m)}
+        />
+      )),
+    [markers, selected, totalSec, selectMarker],
+  );
 
   // Zoom rail drag: the bar scrolls, the handles resize the window.
   const railRef = useRef<HTMLDivElement>(null);
@@ -369,24 +400,7 @@ export function Timeline({
               />
             )}
             {/* Markers */}
-            <div className="pointer-events-none absolute inset-0 z-[5]">
-              {markers.map((m) => (
-                <button
-                  key={m.event.id}
-                  type="button"
-                  className={cn(MARKER, selected === m.event.id && MARKER_SELECTED)}
-                  data-cat={m.event.category}
-                  style={{ left: pct(m.sec), '--mcol': m.event.color } as CSSProperties}
-                  aria-label={`${m.event.category}${m.event.message ? `: ${m.event.message}` : ''} at ${fmtSec(m.sec)}`}
-                  onPointerEnter={(e) => {
-                    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                    setTip({ m, x: r.left + r.width / 2, y: r.top });
-                  }}
-                  onPointerLeave={() => setTip(null)}
-                  onClick={() => selectMarker(m)}
-                />
-              ))}
-            </div>
+            <div className="pointer-events-none absolute inset-0 z-[5]">{markerButtons}</div>
             <span className={PLAYHEAD} style={{ left: pct(playheadSec) }} aria-hidden="true" />
           </div>
           {/* Ticks */}

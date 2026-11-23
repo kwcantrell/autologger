@@ -10,6 +10,7 @@ import {
   transportFrames,
 } from '@autologger/contract';
 import { useEffect, useState } from 'react';
+import { createStore, type Store, useStore } from './store';
 
 export { FRAME_RATES, formatFrames, parseTimecode, secondsToClock } from '@autologger/contract';
 
@@ -59,12 +60,16 @@ function compute(t: TransportState): TransportClock {
   };
 }
 
-/** Live transport clock for a session; ticks on requestAnimationFrame while rolling. */
-export function useTransportClock(session: Session | undefined | null): TransportClock {
+const ZERO_CLOCK: TransportClock = { frames: 0, elapsedSec: 0, timecode: '00:00:00:00' };
+
+/**
+ * Live transport clock for a session as an external store; ticks on requestAnimationFrame while
+ * rolling. Only the components that read it (`useStore(clock)`) re-render each frame, not the
+ * component that owns it.
+ */
+export function useTransportClockStore(session: Session | undefined | null): Store<TransportClock> {
   const t = session ? transportOf(session) : null;
-  const [clock, setClock] = useState<TransportClock>(() =>
-    t ? compute(t) : { frames: 0, elapsedSec: 0, timecode: '00:00:00:00' },
-  );
+  const [clock] = useState(() => createStore<TransportClock>(t ? compute(t) : ZERO_CLOCK));
   const key = t
     ? `${t.isRolling}|${t.rollStartedAt}|${t.elapsedFrames}|${t.frameRate}|${t.startOffsetFrames}`
     : '';
@@ -74,7 +79,7 @@ export function useTransportClock(session: Session | undefined | null): Transpor
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the transport fields above
   useEffect(() => {
     if (!t) return;
-    setClock(compute(t));
+    clock.set(compute(t));
     if (!t.isRolling) return;
     let raf = 0;
     let last = '';
@@ -82,7 +87,7 @@ export function useTransportClock(session: Session | undefined | null): Transpor
       const c = compute(t);
       if (c.timecode !== last) {
         last = c.timecode;
-        setClock(c);
+        clock.set(c);
       }
       raf = requestAnimationFrame(tick);
     };
@@ -91,6 +96,11 @@ export function useTransportClock(session: Session | undefined | null): Transpor
   }, [key]);
 
   return clock;
+}
+
+/** Live transport clock for a session; re-renders the caller each frame while rolling. */
+export function useTransportClock(session: Session | undefined | null): TransportClock {
+  return useStore(useTransportClockStore(session));
 }
 
 /**
