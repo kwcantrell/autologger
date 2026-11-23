@@ -8,11 +8,24 @@ import { cn } from '@/shared/lib/utils';
 // keyboard focus outline. Local edits: the wrapper is full width (forms here stack full-width
 // fields; the registry's is `w-fit`), and disabled keeps pointer events so `cursor-not-allowed`
 // shows. Options take the well's colours, so the open list matches the field in every browser.
+// `variant="unstyled"` (like Input and Textarea): an inline cell editor that takes its cell's face
+// (the Event feed's Category cell). Just the <select>, no wrapper or chevron; the caller's class
+// string is applied verbatim.
 type NativeSelectProps = Omit<React.ComponentProps<'select'>, 'size'> & {
   size?: 'sm' | 'default';
+  variant?: 'default' | 'unstyled';
 };
 
-function NativeSelect({ className, size = 'default', ...props }: NativeSelectProps) {
+function NativeSelect({
+  className,
+  size = 'default',
+  variant = 'default',
+  ...props
+}: NativeSelectProps) {
+  if (variant === 'unstyled')
+    return (
+      <select data-slot="native-select" data-variant="unstyled" className={className} {...props} />
+    );
   return (
     <div
       className={cn(

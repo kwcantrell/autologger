@@ -27,6 +27,7 @@ import {
   SelectValue,
 } from '@/shared/components/ui/select';
 import { Spinner } from '@/shared/components/ui/spinner';
+import { LoadErrorAlert } from '@/shared/ui/LoadErrorAlert';
 import { Tooltip } from '@/shared/ui/Tooltip';
 import { fmtDateOnly } from '@/shared/utils/fmtDateOnly';
 import { SearchSnippet } from './SearchSnippet';
@@ -328,6 +329,7 @@ export function SearchRoute() {
     data: pages,
     isPending,
     isFetching,
+    isRefetching,
     isError,
     error,
     refetch,
@@ -374,12 +376,14 @@ export function SearchRoute() {
     );
   } else if (isError && !isFetchNextPageError && !waiting) {
     body = (
-      <div role="alert" className="flex flex-col items-center gap-3 py-10 text-center text-sm">
-        <p className="m-0 text-si-fg">{errorMessage(error) || 'Search failed.'}</p>
-        <Button variant="outline" onClick={() => void refetch()}>
-          Try again
-        </Button>
-      </div>
+      <LoadErrorAlert
+        title="Search failed"
+        onRetry={() => void refetch()}
+        retrying={isRefetching}
+        className="my-4"
+      >
+        {errorMessage(error) || 'Check your connection and try again.'}
+      </LoadErrorAlert>
     );
   } else if (!groups || waiting) {
     body = (

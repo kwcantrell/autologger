@@ -21,6 +21,7 @@ import {
   SheetTrigger,
 } from '@/shared/components/ui/sheet';
 import { cn } from '@/shared/lib/utils';
+import { LoadErrorAlert } from '@/shared/ui/LoadErrorAlert';
 import { ChromeProvider, FOCUS, Footer, Header, WRAP } from '../landing/chrome';
 import { landingLinks, REPO_URL } from '../landing/links';
 import { DocsMarkdown } from './DocsMarkdown';
@@ -278,14 +279,9 @@ function DocPage({
           </p>
         )}
         {status === 'error' && (
-          <div role="alert" className="flex flex-col items-start gap-3">
-            <p className="m-0 text-si-muted">
-              Couldn't load this page. Check your connection and try again.
-            </p>
-            <Button variant="outline" onClick={retry}>
-              Try again
-            </Button>
-          </div>
+          <LoadErrorAlert title="Couldn’t load this page" onRetry={retry}>
+            Check your connection and try again.
+          </LoadErrorAlert>
         )}
         {body !== undefined && <DocsMarkdown body={body} />}
       </div>

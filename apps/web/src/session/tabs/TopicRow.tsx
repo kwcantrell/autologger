@@ -7,6 +7,7 @@ import { fmtSec } from '@/lib/timecode';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { Input } from '@/shared/components/ui/input';
+import { TableCell, TableRow } from '@/shared/components/ui/table';
 import { Textarea } from '@/shared/components/ui/textarea';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 import { Tooltip } from '@/shared/ui/Tooltip';
@@ -69,23 +70,23 @@ export function TopicRow({
 
   const ro = !canWrite;
   return (
-    <tr
+    <TableRow
       className={cn(
         FEED_ROW,
         FEED_STACK_ROW.narrow,
         'group @max-md/feed:grid-cols-[auto_minmax(0,1fr)_auto]',
       )}
     >
-      <td className={cn(FEED_CELL, 'align-top pt-1 @max-md/feed:pt-[0.1rem]')}>
+      <TableCell className={cn(FEED_CELL, 'align-top pt-1 @max-md/feed:pt-[0.1rem]')}>
         <JumpButton
           sec={t.startSec}
           label={fmtSec(t.startSec)}
           onJump={onJump}
           unavailable={rolling ? 'Playback is off while timecode rolls.' : null}
         />
-      </td>
+      </TableCell>
       {/* Stacked: start, duration and level share the meta line. */}
-      <td
+      <TableCell
         className={cn(
           FEED_CELL,
           FEED_TC,
@@ -113,8 +114,10 @@ export function TopicRow({
         <span className="block whitespace-normal px-[0.3rem] font-ui text-[0.68rem] text-si-dim md:@min-md/feed:hidden">
           Duration {Math.round(t.durationSec)}s · Level {t.level}
         </span>
-      </td>
-      <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top max-md:hidden @max-md/feed:hidden')}>
+      </TableCell>
+      <TableCell
+        className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top max-md:hidden @max-md/feed:hidden')}
+      >
         <Input
           variant="unstyled"
           className={cn(FEED_INLINE_INPUT, 'font-tc tabular-nums')}
@@ -133,8 +136,10 @@ export function TopicRow({
             else dur.reset();
           }}
         />
-      </td>
-      <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top max-md:hidden @max-md/feed:hidden')}>
+      </TableCell>
+      <TableCell
+        className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top max-md:hidden @max-md/feed:hidden')}
+      >
         <Input
           variant="unstyled"
           className={cn(FEED_INLINE_INPUT, 'tabular-nums')}
@@ -154,8 +159,8 @@ export function TopicRow({
             else level.reset();
           }}
         />
-      </td>
-      <td
+      </TableCell>
+      <TableCell
         className={cn(
           FEED_CELL,
           FEED_CELL_TEXT,
@@ -205,7 +210,7 @@ export function TopicRow({
           {t.via === 'mcp' && (
             <Badge
               variant="outline"
-              className="mt-[0.2rem] shrink-0 px-1 py-px text-[0.6rem]"
+              className="mt-[0.2rem] shrink-0 px-1 py-px text-[0.6875rem]"
               title={`Written by an agent${t.createdBy ? ` acting as ${t.createdBy.name}` : ''}`}
             >
               agent
@@ -228,8 +233,8 @@ export function TopicRow({
             void summary.commit(summary.value, (v) => onSave({ summary: v }));
           }}
         />
-      </td>
-      <td
+      </TableCell>
+      <TableCell
         className={cn(
           FEED_CELL,
           'align-top pt-1 @max-md/feed:col-start-3 @max-md/feed:row-start-1 @max-md/feed:pt-[0.1rem]',
@@ -250,7 +255,7 @@ export function TopicRow({
             </Button>
           </Tooltip>
         )}
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }

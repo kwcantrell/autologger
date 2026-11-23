@@ -17,10 +17,10 @@ import { YoutubeAuthHelp } from '@/app/YoutubeAuthHelp';
 import { PageFrame, RouteLoadingState } from '@/components/RouteState';
 import { IMPORT_HELPER_ANCHOR, openSettingsAt } from '@/settings/openSettingsAt';
 import { showToast } from '@/shared/components/Toast';
-import { Button } from '@/shared/components/ui/button';
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/shared/components/ui/empty';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
+import { LoadErrorAlert } from '@/shared/ui/LoadErrorAlert';
 import { CompilationCard } from './CompilationCard';
 
 function copyCommand(value: string) {
@@ -31,7 +31,7 @@ function copyCommand(value: string) {
 }
 
 function CompilationList({ showId, canWrite }: { showId: string; canWrite: boolean }) {
-  const { data, isPending, isError, error, refetch } = useCompilations(showId);
+  const { data, isPending, isError, error, refetch, isRefetching } = useCompilations(showId);
   const del = useDeleteCompilation(showId);
   const retry = useRetryCompilation();
   const { confirm, confirmElement } = useConfirm();
@@ -55,12 +55,14 @@ function CompilationList({ showId, canWrite }: { showId: string; canWrite: boole
 
   if (isError)
     return (
-      <div role="alert" className="flex flex-col items-center gap-3 py-10 text-center text-sm">
-        <p className="m-0 text-si-fg">{errorMessage(error) || 'Could not load compilations.'}</p>
-        <Button variant="outline" onClick={() => void refetch()}>
-          Try again
-        </Button>
-      </div>
+      <LoadErrorAlert
+        title="Couldn’t load the compilations"
+        onRetry={() => void refetch()}
+        retrying={isRefetching}
+        className="my-4"
+      >
+        {errorMessage(error) || 'Check your connection and try again.'}
+      </LoadErrorAlert>
     );
   if (isPending)
     return (
