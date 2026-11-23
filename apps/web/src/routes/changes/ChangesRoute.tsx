@@ -20,7 +20,7 @@ import { useActive } from '@/app/useActive';
 import { PageFrame, RouteLoadingState } from '@/components/RouteState';
 import { settingsOpen } from '@/lib/store';
 import { FeedShell, FeedTable, IconFilter } from '@/session/feed';
-import { CHANGE_COLUMNS, ChangeRow } from '@/session/tabs/ChangeRow';
+import { CHANGE_COLUMNS, CHANGE_STACK, ChangeRow } from '@/session/tabs/ChangeRow';
 import { showToast } from '@/shared/components/Toast';
 import { Button } from '@/shared/components/ui/button';
 import {
@@ -355,6 +355,7 @@ function ChangeLog({
       ) : (
         <FeedTable
           columns={CHANGE_COLUMNS}
+          stack={CHANGE_STACK}
           loading={changes.isPending}
           empty={rows.length === 0}
           emptyMessage={

@@ -13,6 +13,7 @@ import {
   FEED_CELL_LABEL,
   FEED_CELL_TEXT,
   FEED_ROW,
+  FEED_STACK_ROW,
   FEED_TC,
   FEED_TEXTAREA,
   JUMP_COLUMN,
@@ -64,8 +65,16 @@ export const SegmentRow = memo(function SegmentRow({
   const useWords = s.words.length > 0 && !s.edited;
 
   return (
-    <tr ref={rowRef} className={cn(FEED_ROW, 'group', active && 'bg-(--sel-bg)')}>
-      <td className={cn(FEED_CELL, 'align-top pt-1')}>
+    <tr
+      ref={rowRef}
+      className={cn(
+        FEED_ROW,
+        FEED_STACK_ROW.narrow,
+        'group @max-md/feed:grid-cols-[auto_auto_minmax(0,1fr)]',
+        active && 'bg-(--sel-bg)',
+      )}
+    >
+      <td className={cn(FEED_CELL, 'align-top pt-1 @max-md/feed:pt-[0.1rem]')}>
         <JumpButton
           sec={s.startSec}
           label={fmtSec(s.startSec)}
@@ -73,8 +82,16 @@ export const SegmentRow = memo(function SegmentRow({
           unavailable={rolling ? 'Playback is off while timecode rolls.' : null}
         />
       </td>
-      <td className={cn(FEED_CELL, FEED_TC, 'align-top pt-1.5')}>{fmtSec(s.startSec)}</td>
-      <td className={cn(FEED_CELL, FEED_CELL_LABEL, 'align-top pt-1.5')}>
+      <td className={cn(FEED_CELL, FEED_TC, 'align-top pt-1.5 @max-md/feed:pt-[0.1rem]')}>
+        {fmtSec(s.startSec)}
+      </td>
+      <td
+        className={cn(
+          FEED_CELL,
+          FEED_CELL_LABEL,
+          'align-top pt-1.5 @max-md/feed:pt-[0.1rem] @max-md/feed:[overflow-wrap:anywhere]',
+        )}
+      >
         {canWrite ? (
           <button
             type="button"
@@ -88,7 +105,13 @@ export const SegmentRow = memo(function SegmentRow({
           s.speaker || 'Unknown'
         )}
       </td>
-      <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top py-1 leading-[1.5]')}>
+      <td
+        className={cn(
+          FEED_CELL,
+          FEED_CELL_TEXT,
+          'align-top py-1 leading-[1.5] [overflow-wrap:anywhere] @max-md/feed:col-[2/-1] @max-md/feed:pt-0',
+        )}
+      >
         {editing ? (
           <>
             <textarea

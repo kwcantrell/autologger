@@ -95,6 +95,31 @@ export interface Column {
   srOnly?: boolean;
 }
 
+/**
+ * Narrow feeds stack each row instead of drawing a table: a meta line (jump, time, who/what,
+ * actions) above the row's text at full width. It follows the feed's own width (container
+ * `feed`), not the viewport, so phones, tablets with the rail open and the landing page's
+ * half-width mocks all get it. `narrow` stacks below 28rem; `wide` below 48rem, for change-log
+ * rows, whose meta columns alone need ~30rem. Rows place their cells under the matching variant
+ * (`@max-md/feed:` for narrow, `@max-3xl/feed:` for wide), starting from FEED_STACK_ROW.
+ */
+export type FeedStack = 'narrow' | 'wide';
+const STACK_TABLE: Record<FeedStack, string> = {
+  narrow:
+    '@max-md/feed:block @max-md/feed:[&>tbody]:block @max-md/feed:[&>thead]:sr-only @max-md/feed:[&>tbody>tr>td]:[border-bottom:0]',
+  wide: '@max-3xl/feed:block @max-3xl/feed:[&>tbody]:block @max-3xl/feed:[&>thead]:sr-only @max-3xl/feed:[&>tbody>tr>td]:[border-bottom:0]',
+};
+const STACK_BLOCK: Record<FeedStack, string> = {
+  narrow: '@max-md/feed:block',
+  wide: '@max-3xl/feed:block',
+};
+/** A stacked row: a grid with the row's divider (cells drop theirs). Rows add grid-cols. */
+export const FEED_STACK_ROW: Record<FeedStack, string> = {
+  narrow:
+    '@max-md/feed:grid @max-md/feed:items-center @max-md/feed:gap-x-1 @max-md/feed:py-1 @max-md/feed:[border-bottom:1px_solid_rgba(255,255,255,0.04)]',
+  wide: '@max-3xl/feed:grid @max-3xl/feed:items-center @max-3xl/feed:gap-x-1 @max-3xl/feed:py-1 @max-3xl/feed:[border-bottom:1px_solid_rgba(255,255,255,0.04)]',
+};
+
 /** A plain scrolling feed table. Rows are passed as children (<tr>). */
 export function FeedTable({
   columns,
@@ -103,6 +128,7 @@ export function FeedTable({
   emptyMessage,
   children,
   maxHeight = 'md:max-h-[calc(100dvh-var(--topbar-h)-20rem)] max-md:max-h-[70dvh]',
+  stack = 'narrow',
 }: {
   columns: Column[];
   loading?: boolean;
@@ -110,10 +136,14 @@ export function FeedTable({
   emptyMessage?: ReactNode;
   children?: ReactNode;
   maxHeight?: string;
+  /** Width below which the rows stack (FeedStack); must match the rows' own variants. */
+  stack?: FeedStack;
 }) {
+  const block = STACK_BLOCK[stack];
   return (
-    <div className={cn('min-h-[8rem] overflow-auto', maxHeight)}>
-      <table className="w-full border-collapse">
+    // `relative`: the stacked table's sr-only header is absolute; it stays inside this scroller.
+    <div className={cn('@container/feed relative min-h-[8rem] overflow-auto', maxHeight)}>
+      <table className={cn('w-full border-collapse', STACK_TABLE[stack])}>
         <thead>
           <tr>
             {columns.map((c) => (
@@ -125,14 +155,14 @@ export function FeedTable({
         </thead>
         <tbody>
           {loading ? (
-            <tr>
-              <td colSpan={columns.length} className="pt-2">
+            <tr className={block}>
+              <td colSpan={columns.length} className={cn('pt-2', block)}>
                 <div className={FEED_EMPTY}>Loading…</div>
               </td>
             </tr>
           ) : empty ? (
-            <tr>
-              <td colSpan={columns.length} className="pt-2">
+            <tr className={block}>
+              <td colSpan={columns.length} className={cn('pt-2', block)}>
                 <div className={FEED_EMPTY}>{emptyMessage}</div>
               </td>
             </tr>

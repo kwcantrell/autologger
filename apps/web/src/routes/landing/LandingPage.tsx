@@ -427,7 +427,7 @@ const features = (links: LandingLinks): Feature[] => [
       'Key terms steer the spelling of guest names and jargon',
       'Fix, merge and split lines by hand, or have an agent clean up',
     ],
-    mock: <LazyMock name="TranscriptMock" height="h-[690px] sm:h-[295px] lg:h-[346px]" />,
+    mock: <LazyMock name="TranscriptMock" height="h-[394px] sm:h-[295px] lg:h-[346px]" />,
   },
   {
     id: 'topics',
@@ -438,7 +438,7 @@ const features = (links: LandingLinks): Feature[] => [
       'Chapter start times line up with events and transcript lines',
       'Ready to paste into show notes, or export as CSV',
     ],
-    mock: <LazyMock name="TopicsMock" height="h-[415px] sm:h-[387px] lg:h-[423px]" />,
+    mock: <LazyMock name="TopicsMock" height="h-[536px] sm:h-[387px] lg:h-[423px]" />,
   },
   {
     id: 'dashboards',
@@ -486,7 +486,7 @@ const features = (links: LandingLinks): Feature[] => [
       'Undo a single change, or every change from one call at once',
       'Ready-made skills for topics, moments, dashboards, wiki, briefs and questions',
     ],
-    mock: <LazyMock name="AgentsMock" height="h-[415px] sm:h-[337px] lg:h-[423px]" />,
+    mock: <LazyMock name="AgentsMock" height="h-[447px] sm:h-[455px] lg:h-[455px]" />,
     link: { label: 'Connect an agent', href: links.mcpDocsHref, hint: '' },
   },
 ];

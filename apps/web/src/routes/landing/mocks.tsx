@@ -28,7 +28,7 @@ import {
   WidgetFrame,
 } from '@/session/dashboards/WidgetParts';
 import { FeedTable } from '@/session/feed';
-import { CHANGE_COLUMNS, ChangeRow } from '@/session/tabs/ChangeRow';
+import { CHANGE_COLUMNS, CHANGE_STACK, ChangeRow } from '@/session/tabs/ChangeRow';
 import { CopyRow } from '@/session/tabs/CopyRow';
 import { ExportOptions } from '@/session/tabs/ExportOptions';
 import { SEGMENT_COLUMNS, SegmentRow } from '@/session/tabs/SegmentRow';
@@ -326,7 +326,7 @@ export function AgentsMock() {
         onCopy={noop}
       />
       <div className="mt-4">
-        <FeedTable columns={CHANGE_COLUMNS} maxHeight={MOCK_TABLE}>
+        <FeedTable columns={CHANGE_COLUMNS} stack={CHANGE_STACK} maxHeight={MOCK_TABLE}>
           {changes.map((c) => (
             <ChangeRow
               key={c.id}
