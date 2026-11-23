@@ -430,7 +430,9 @@ export type ChangeEntity =
   | 'wiki_page'
   | 'category'
   /** A session clock change (frameRate, startOffsetFrames) from sessions.update. */
-  | 'session';
+  | 'session'
+  /** A recording's transcription status (status, error), e.g. set by transcript.import. */
+  | 'audio_segment';
 
 export interface Change {
   id: string;

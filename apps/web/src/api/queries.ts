@@ -385,7 +385,8 @@ export const useCompilations = (showId: string | undefined) =>
 
 export const useDeleteCompilation = (showId: string) =>
   useOpMutation('compilations.delete', { invalidate: () => [qk.compilations(showId)] });
-/** Build a failed compilation again (a new compile job): its card and the show's jobs refresh. */
+/** Build a failed compilation again (a new compile job), or with buildLocally switch it to a local
+ * build (its waiting job cancelled): its card and the show's jobs refresh. */
 export const useRetryCompilation = () =>
   useOpMutation('compilations.retry', {
     invalidate: (c) => [qk.compilations(c.showId), qk.showJobsAll],
