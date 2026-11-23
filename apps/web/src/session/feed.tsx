@@ -5,6 +5,7 @@ import { Check, Clock, Download, Filter, Pencil, Play, Plus, X } from 'lucide-re
 import type { ReactNode } from 'react';
 import { Button } from '@/shared/components/ui/button';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
+import { Tooltip } from '@/shared/ui/Tooltip';
 
 export function feedCountLabel(count: number, noun: string) {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
@@ -199,17 +200,18 @@ export function JumpButton({
 }) {
   if (sec == null) return null;
   return (
-    <Button
-      variant="unstyled"
-      className={cn(JUMP_BTN, 'relative max-md:ml-1 pointer-coarse:ml-1', TOUCH_HIT)}
-      aria-label={`Jump to ${label}`}
-      title={unavailable ?? `Jump to ${label}`}
-      aria-disabled={unavailable ? true : undefined}
-      onClick={() => {
-        if (!unavailable) onJump(sec);
-      }}
-    >
-      <Play className="size-3" fill="currentColor" aria-hidden="true" />
-    </Button>
+    <Tooltip shared content={unavailable ?? `Jump to ${label}`}>
+      <Button
+        variant="unstyled"
+        className={cn(JUMP_BTN, 'relative max-md:ml-1 pointer-coarse:ml-1', TOUCH_HIT)}
+        aria-label={`Jump to ${label}`}
+        aria-disabled={unavailable ? true : undefined}
+        onClick={() => {
+          if (!unavailable) onJump(sec);
+        }}
+      >
+        <Play className="size-3" fill="currentColor" aria-hidden="true" />
+      </Button>
+    </Tooltip>
   );
 }

@@ -68,15 +68,26 @@ const SessionDetailsDialog = lazy(() =>
 export const APP_VERSION = '3.0.0';
 const ICON_ONLY_LABEL = 'group-data-[collapsible=icon]:sr-only';
 
-function StripTooltip({ label, children }: { label: string; children: ReactElement }) {
+/** Names an icon-strip control while the rail is collapsed; with a `hint`, explains it while the
+ *  rail is open too (desktop only: the phone sheet is touch). */
+function StripTooltip({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactElement;
+}) {
   const { state, isMobile } = useSidebar();
   const [open, setOpen] = useState(false);
-  const enabled = state === 'collapsed' && !isMobile;
+  const collapsed = state === 'collapsed';
+  const enabled = !isMobile && (collapsed || !!hint);
   return (
     <Tooltip open={enabled && open} onOpenChange={setOpen}>
       <TooltipTrigger render={children} />
       <TooltipContent side="right" align="center" hidden={!enabled}>
-        {label}
+        {collapsed ? label : hint}
       </TooltipContent>
     </Tooltip>
   );
@@ -140,11 +151,13 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
                 <span className={ICON_ONLY_LABEL}>New session</span>
               </Button>
             </StripTooltip>
-            <StripTooltip label="Import">
+            <StripTooltip
+              label="Import"
+              hint="New session from an audio file or a YouTube link, or one session per video of a YouTube playlist"
+            >
               <Button
                 variant="outline"
                 className="w-full min-w-0"
-                title="New session from an audio file or a YouTube link, or one session per video of a YouTube playlist"
                 onClick={() => {
                   closeSheet();
                   newSessionOpen.set('import');
@@ -323,18 +336,18 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
           </SidebarMenuItem>
           {active.show && (
             <SidebarMenuItem>
-              <SidebarMenuButton
-                tooltip="Changes"
-                title="Every change to this show, with undo"
-                onClick={() => {
-                  closeSheet();
-                  settingsOpen.set(null);
-                  navigate('/changes');
-                }}
-              >
-                <History aria-hidden="true" />
-                <span>Changes</span>
-              </SidebarMenuButton>
+              <StripTooltip label="Changes" hint="Every change to this show, with undo">
+                <SidebarMenuButton
+                  onClick={() => {
+                    closeSheet();
+                    settingsOpen.set(null);
+                    navigate('/changes');
+                  }}
+                >
+                  <History aria-hidden="true" />
+                  <span>Changes</span>
+                </SidebarMenuButton>
+              </StripTooltip>
             </SidebarMenuItem>
           )}
           <SidebarMenuItem>

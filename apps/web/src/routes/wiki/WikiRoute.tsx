@@ -136,15 +136,16 @@ export function WikiRoute() {
             {show && <p className="m-0 truncate text-sm text-si-muted">{show.name}</p>}
           </div>
           {show && (
-            <Button
-              variant="outline"
-              nativeButton={false}
-              title="Wiki edits and deletes, with undo"
-              render={<Link href="/changes?where=show&kind=wiki_page" />}
-            >
-              <HistoryIcon data-icon="inline-start" />
-              Changes
-            </Button>
+            <Tooltip content="Wiki edits and deletes, with undo">
+              <Button
+                variant="outline"
+                nativeButton={false}
+                render={<Link href="/changes?where=show&kind=wiki_page" />}
+              >
+                <HistoryIcon data-icon="inline-start" />
+                Changes
+              </Button>
+            </Tooltip>
           )}
           {show && (
             <Tooltip content="You can read this show but not edit it." disabled={canWriteShow}>

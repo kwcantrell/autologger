@@ -46,6 +46,7 @@ import {
 import { Spinner } from '@/shared/components/ui/spinner';
 import { ToggleGroup, ToggleGroupItem } from '@/shared/components/ui/toggle-group';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import { useSettingsNav } from '../guard';
 import {
   EmptyState,
@@ -594,14 +595,15 @@ function ButtonPanel({
                   />
                 ))}
               </RadioGroup>
-              <input
-                type="color"
-                className="pal-slot shrink-0"
-                aria-label="Custom colour"
-                title={`Custom colour: ${btn.color}`}
-                value={btn.color}
-                onChange={(e) => patch({ color: e.target.value })}
-              />
+              <Tooltip content={`Custom colour: ${btn.color}`}>
+                <input
+                  type="color"
+                  className="pal-slot shrink-0"
+                  aria-label="Custom colour"
+                  value={btn.color}
+                  onChange={(e) => patch({ color: e.target.value })}
+                />
+              </Tooltip>
             </div>
             <FieldDescription>
               {colourIndex >= 0

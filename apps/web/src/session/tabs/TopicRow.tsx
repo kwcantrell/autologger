@@ -9,6 +9,7 @@ import { Button } from '@/shared/components/ui/button';
 import { Input } from '@/shared/components/ui/input';
 import { Textarea } from '@/shared/components/ui/textarea';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import {
   type Column,
   FEED_CELL,
@@ -235,18 +236,19 @@ export function TopicRow({
         )}
       >
         {canWrite && (
-          <Button
-            variant="unstyled"
-            aria-label="Delete topic"
-            title="Delete topic"
-            className={cn(
-              'relative inline-flex size-6 max-md:mr-1 pointer-coarse:mr-1 items-center justify-center rounded-[0.35rem] text-si-dim opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover-always:text-si-danger max-md:opacity-100 pointer-coarse:opacity-100',
-              TOUCH_HIT,
-            )}
-            onClick={onDelete}
-          >
-            <Trash2 className="size-3" aria-hidden="true" />
-          </Button>
+          <Tooltip shared content="Delete topic">
+            <Button
+              variant="unstyled"
+              aria-label="Delete topic"
+              className={cn(
+                'relative inline-flex size-6 max-md:mr-1 pointer-coarse:mr-1 items-center justify-center rounded-[0.35rem] text-si-dim opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover-always:text-si-danger max-md:opacity-100 pointer-coarse:opacity-100',
+                TOUCH_HIT,
+              )}
+              onClick={onDelete}
+            >
+              <Trash2 className="size-3" aria-hidden="true" />
+            </Button>
+          </Tooltip>
         )}
       </td>
     </tr>

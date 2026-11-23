@@ -8,6 +8,7 @@ import { fmtSec } from '@/lib/timecode';
 import { Button } from '@/shared/components/ui/button';
 import { Textarea } from '@/shared/components/ui/textarea';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import {
   type Column,
   FEED_CELL,
@@ -94,15 +95,16 @@ export const SegmentRow = memo(function SegmentRow({
         )}
       >
         {canWrite ? (
-          <Button
-            variant="link"
-            size="inline"
-            className="no-underline hover:underline"
-            title="Rename this speaker everywhere"
-            onClick={onRenameSpeaker}
-          >
-            {s.speaker || 'Unknown'}
-          </Button>
+          <Tooltip shared content="Rename this speaker everywhere">
+            <Button
+              variant="link"
+              size="inline"
+              className="no-underline hover:underline"
+              onClick={onRenameSpeaker}
+            >
+              {s.speaker || 'Unknown'}
+            </Button>
+          </Tooltip>
         ) : (
           s.speaker || 'Unknown'
         )}

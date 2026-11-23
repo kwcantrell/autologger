@@ -12,6 +12,7 @@ import { showToast } from '@/shared/components/Toast';
 import { Button } from '@/shared/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { markdownTableComponents } from '@/shared/ui/markdownTable';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import { createSlugger } from './docsIndex';
 
 const urlTransform: UrlTransform = (url) =>
@@ -73,20 +74,21 @@ function CopyCode({ text }: { text: string }) {
     }
   }
   return (
-    <Button
-      variant="outline"
-      size="icon-sm"
-      onClick={() => void copy()}
-      aria-label={copied ? 'Copied' : 'Copy code'}
-      title={copied ? 'Copied' : 'Copy code'}
-      className="absolute top-1.5 right-1.5 size-8 border-si-line bg-si-panel text-si-muted"
-    >
-      {copied ? (
-        <CheckIcon aria-hidden="true" className="size-4" />
-      ) : (
-        <CopyIcon aria-hidden="true" className="size-4" />
-      )}
-    </Button>
+    <Tooltip content={copied ? 'Copied' : 'Copy code'}>
+      <Button
+        variant="outline"
+        size="icon-sm"
+        onClick={() => void copy()}
+        aria-label={copied ? 'Copied' : 'Copy code'}
+        className="absolute top-1.5 right-1.5 size-8 border-si-line bg-si-panel text-si-muted"
+      >
+        {copied ? (
+          <CheckIcon aria-hidden="true" className="size-4" />
+        ) : (
+          <CopyIcon aria-hidden="true" className="size-4" />
+        )}
+      </Button>
+    </Tooltip>
   );
 }
 

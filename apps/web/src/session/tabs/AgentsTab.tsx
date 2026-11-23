@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from '@/shared/components/ui/dropdown-menu';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import { CHANGE_COLUMNS, CHANGE_STACK, ChangeRow } from './ChangeRow';
 import { CopyRow } from './CopyRow';
 
@@ -227,9 +228,11 @@ function ChangeFeed({ session }: { session: Session }) {
 
   const toolbar = (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button variant="glass" title="Filter changes" />}>
-        <ToolbarCaption label={FILTER_LABEL[filter]} icon={<IconFilter />} />
-      </DropdownMenuTrigger>
+      <Tooltip content="Filter changes">
+        <DropdownMenuTrigger render={<Button variant="glass" />}>
+          <ToolbarCaption label={FILTER_LABEL[filter]} icon={<IconFilter />} />
+        </DropdownMenuTrigger>
+      </Tooltip>
       <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuGroup>
           <DropdownMenuLabel>Show</DropdownMenuLabel>

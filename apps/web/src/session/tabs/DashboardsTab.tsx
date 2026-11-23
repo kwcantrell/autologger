@@ -25,6 +25,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/shared/components/ui/tabs';
 import { cn } from '@/shared/lib/utils';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { useTextPrompt } from '@/shared/ui/PromptDialog';
+import { Tooltip } from '@/shared/ui/Tooltip';
 
 const DATE = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const fmtDate = (iso: string) => DATE.format(new Date(iso));
@@ -89,32 +90,24 @@ export function DashboardsTab({ session }: { session: Session }) {
   const toolbar =
     current && canWrite ? (
       <>
-        <Button
-          variant="glass"
-          onClick={() => void rename(current)}
-          disabled={save.isPending}
-          title="Rename this dashboard"
-        >
-          <ToolbarCaption label="Rename" icon={<IconPencil />} />
-        </Button>
-        <Button
-          variant="glass"
-          onClick={() => setEditing(true)}
-          title="Edit the dashboard spec as JSON"
-        >
-          <ToolbarCaption
-            label="Edit JSON"
-            icon={<Braces className="block size-[18px]" aria-hidden="true" />}
-          />
-        </Button>
-        <Button
-          variant="glass"
-          onClick={() => void remove(current)}
-          disabled={del.isPending}
-          title="Delete this dashboard"
-        >
-          <ToolbarCaption label="Delete" icon={<IconX />} />
-        </Button>
+        <Tooltip content="Rename this dashboard" disabled={save.isPending} titleWhenDisabled>
+          <Button variant="glass" onClick={() => void rename(current)} disabled={save.isPending}>
+            <ToolbarCaption label="Rename" icon={<IconPencil />} />
+          </Button>
+        </Tooltip>
+        <Tooltip content="Edit the dashboard spec as JSON">
+          <Button variant="glass" onClick={() => setEditing(true)}>
+            <ToolbarCaption
+              label="Edit JSON"
+              icon={<Braces className="block size-[18px]" aria-hidden="true" />}
+            />
+          </Button>
+        </Tooltip>
+        <Tooltip content="Delete this dashboard" disabled={del.isPending} titleWhenDisabled>
+          <Button variant="glass" onClick={() => void remove(current)} disabled={del.isPending}>
+            <ToolbarCaption label="Delete" icon={<IconX />} />
+          </Button>
+        </Tooltip>
       </>
     ) : undefined;
 

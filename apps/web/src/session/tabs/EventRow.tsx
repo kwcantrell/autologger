@@ -9,6 +9,7 @@ import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { Input } from '@/shared/components/ui/input';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import { formatWallUtcYmdHms } from '@/shared/utils/timecode';
 import {
   type Column,
@@ -239,18 +240,19 @@ export function EventRow({
         className={cn(FEED_CELL, 'align-middle @max-md/feed:col-start-3 @max-md/feed:row-start-1')}
       >
         {canWrite && (
-          <Button
-            variant="unstyled"
-            aria-label="Delete row"
-            title="Delete row"
-            className={cn(
-              'relative inline-flex size-6 max-md:mr-1 pointer-coarse:mr-1 items-center justify-center rounded-[0.35rem] text-si-dim opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover-always:bg-[color-mix(in_oklab,var(--si-danger)_12%,transparent)] hover-always:text-si-danger max-md:opacity-100 pointer-coarse:opacity-100',
-              TOUCH_HIT,
-            )}
-            onClick={onDelete}
-          >
-            <Trash2 className="size-3" aria-hidden="true" />
-          </Button>
+          <Tooltip shared content="Delete row">
+            <Button
+              variant="unstyled"
+              aria-label="Delete row"
+              className={cn(
+                'relative inline-flex size-6 max-md:mr-1 pointer-coarse:mr-1 items-center justify-center rounded-[0.35rem] text-si-dim opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover-always:bg-[color-mix(in_oklab,var(--si-danger)_12%,transparent)] hover-always:text-si-danger max-md:opacity-100 pointer-coarse:opacity-100',
+                TOUCH_HIT,
+              )}
+              onClick={onDelete}
+            >
+              <Trash2 className="size-3" aria-hidden="true" />
+            </Button>
+          </Tooltip>
         )}
       </td>
     </tr>
