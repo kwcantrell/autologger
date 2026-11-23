@@ -81,4 +81,59 @@ describe('dashboard spec validation', () => {
     });
     expect(await call(owner, 'dashboards.get', { dashboardId: id })).toMatchObject({ id });
   });
+
+  it('keeps an empty state on data widgets and rejects it elsewhere', async () => {
+    const { owner, session } = await studio();
+    const agent = asAgent(owner);
+    const pie = {
+      id: 'talk',
+      type: 'pie' as const,
+      query: { name: 'speaker_talk_time' as const },
+      label: 'speaker',
+      value: 'seconds',
+      emptyText: 'No speech in this session',
+    };
+    const wpm = {
+      id: 'wpm',
+      type: 'stat' as const,
+      query: { name: 'summary_stats' as const },
+      field: 'wpm',
+      hideWhenEmpty: true,
+    };
+    const saved = await call(agent, 'dashboards.save', {
+      sessionId: session.id,
+      spec: { title: 'Talk', widgets: [pie, wpm] },
+    });
+    expect(saved.spec.widgets).toMatchObject([pie, wpm]);
+
+    const bad = (widget: Record<string, unknown>) =>
+      call(agent, 'dashboards.save', {
+        sessionId: session.id,
+        // biome-ignore lint/suspicious/noExplicitAny: deliberately invalid widget, as an agent might send
+        spec: { title: 'x', widgets: [widget] } as any,
+      }).catch((e: unknown) => toRpcError(e));
+    expect(
+      await bad({ id: 'm', type: 'markdown', markdown: 'hi', emptyText: 'none' }),
+    ).toMatchObject({ code: 'bad_request', issues: [{ path: 'spec.widgets[0].emptyText' }] });
+    expect(await bad({ ...pie, emptyText: '' })).toMatchObject({ code: 'bad_request' });
+    expect(await bad({ ...pie, emptyText: 'x'.repeat(201) })).toMatchObject({
+      code: 'bad_request',
+    });
+
+    // Patchable like any optional field; null removes it.
+    const patched = await call(agent, 'dashboards.updateWidgets', {
+      dashboardId: saved.id,
+      widgets: [{ id: 'talk', emptyText: null }],
+    });
+    expect(patched.spec.widgets[0]).not.toHaveProperty('emptyText');
+
+    const outsider = await makeUser('outsider@example.com');
+    await failsWith(
+      call(outsider, 'dashboards.save', {
+        sessionId: session.id,
+        spec: { title: 'x', widgets: [pie] },
+      }),
+      'not_found',
+    );
+  });
 });

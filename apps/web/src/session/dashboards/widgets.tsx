@@ -3,6 +3,7 @@
 
 import type { DashboardRows, ValueFormat, Widget } from '@autologger/contract';
 import { TriangleAlert } from 'lucide-react';
+import type { ReactNode } from 'react';
 import {
   Bar,
   BarChart,
@@ -25,6 +26,7 @@ import { Skeleton } from '@/shared/components/ui/skeleton';
 import {
   fmtFormat,
   fmtNum,
+  isEmptyWidget,
   isSecondsKey,
   type Row,
   safeColor,
@@ -73,13 +75,10 @@ export function WidgetGrid({ widgets, sessionId }: { widgets: Widget[]; sessionI
 }
 
 function WidgetCard({ widget, sessionId }: { widget: Widget; sessionId: string }) {
+  if (widget.type !== 'markdown') return <DataWidget widget={widget} sessionId={sessionId} />;
   return (
     <WidgetFrame widget={widget}>
-      {widget.type === 'markdown' ? (
-        <SpecMarkdown source={widget.markdown} />
-      ) : (
-        <DataWidget widget={widget} sessionId={sessionId} />
-      )}
+      <SpecMarkdown source={widget.markdown} />
     </WidgetFrame>
   );
 }
@@ -88,15 +87,27 @@ type DataWidgetT = Exclude<Widget, { type: 'markdown' }>;
 
 function DataWidget({ widget, sessionId }: { widget: DataWidgetT; sessionId: string }) {
   const q = useDashboardQuery(sessionId, widget.query);
+  let rows: DashboardRows | undefined;
+  let body: ReactNode;
   if (widget.query) {
-    if (q.isPending) return <WidgetSkeleton type={widget.type} />;
-    if (q.isError) return <WidgetError message={errorMessage(q.error)} />;
-    return <WidgetBody widget={widget} rows={q.data} />;
+    if (q.isPending) body = <WidgetSkeleton type={widget.type} />;
+    else if (q.isError) body = <WidgetError message={errorMessage(q.error)} />;
+    else rows = q.data;
+  } else if (widget.data) rows = widget.data;
+  else if (widget.type === 'stat' && widget.value != null) rows = [];
+  else body = <Note>This widget has no data.</Note>;
+  if (rows) {
+    // The spec's empty state: hide the card, or say why it is empty (e.g. no speech).
+    const empty = isEmptyWidget(widget, rows);
+    if (empty && widget.hideWhenEmpty) return null;
+    body =
+      empty && widget.emptyText ? (
+        <Note>{widget.emptyText}</Note>
+      ) : (
+        <WidgetBody widget={widget} rows={rows} />
+      );
   }
-  if (widget.data) return <WidgetBody widget={widget} rows={widget.data} />;
-  if (widget.type === 'stat' && widget.value != null)
-    return <WidgetBody widget={widget} rows={[]} />;
-  return <Note>This widget has no data.</Note>;
+  return <WidgetFrame widget={widget}>{body}</WidgetFrame>;
 }
 
 function WidgetSkeleton({ type }: { type: Widget['type'] }) {
