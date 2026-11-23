@@ -23,6 +23,8 @@ import {
 } from '../feed';
 import { ChangedElsewhere, useServerDraft } from '../serverDraft';
 
+const WORD = 'cursor-pointer rounded-[2px] hover:bg-[rgba(255,255,255,0.06)]';
+
 export const SEGMENT_COLUMNS: Column[] = [
   JUMP_COLUMN,
   { key: 'time', label: 'Session Time', className: 'w-[6.5rem]' },
@@ -65,6 +67,11 @@ export const SegmentRow = memo(function SegmentRow({
   };
 
   const useWords = s.words.length > 0 && !s.edited;
+  const onWordClick = (e: React.MouseEvent) => {
+    const i = (e.target as HTMLElement).closest('[data-i]')?.getAttribute('data-i');
+    const word = i == null ? undefined : s.words[Number(i)];
+    if (word && !rolling) onSeek(word.s);
+  };
 
   return (
     <tr
@@ -147,26 +154,29 @@ export const SegmentRow = memo(function SegmentRow({
           </>
         ) : (
           <span className="flex items-start gap-1">
-            <span className="min-w-0 flex-1">
+            {/* Words are plain spans (two nodes each, not a button apiece: a long transcript has
+                tens of thousands); one handler on the text seeks to the clicked word. Keyboard
+                users seek with the row's jump button. */}
+            {/* biome-ignore lint/a11y/useKeyWithClickEvents: word seeking is a pointer shortcut; the row's JumpButton is the keyboard path */}
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: see above */}
+            <span className="min-w-0 flex-1" onClick={useWords ? onWordClick : undefined}>
               {useWords
-                ? s.words.map((w) => {
-                    const cur = playheadSec != null && playheadSec >= w.s && playheadSec < w.e;
-                    return (
-                      <span key={`${w.s}:${w.w}`}>
-                        <button
-                          type="button"
-                          className={cn(
-                            'cursor-pointer rounded-[2px] px-[1px] hover:bg-[rgba(255,255,255,0.06)]',
-                            cur && 'bg-si-accent/35 text-si-fg',
-                          )}
-                          onClick={() => !rolling && onSeek(w.s)}
-                          title={fmtSec(w.s)}
-                        >
-                          {w.w}
-                        </button>{' '}
-                      </span>
-                    );
-                  })
+                ? s.words.map((w, i) => (
+                    <span
+                      key={`${w.s}:${w.w}`}
+                      data-i={i}
+                      title={fmtSec(w.s)}
+                      className={cn(
+                        WORD,
+                        playheadSec != null &&
+                          playheadSec >= w.s &&
+                          playheadSec < w.e &&
+                          'bg-si-accent/35 text-si-fg',
+                      )}
+                    >
+                      {`${w.w} `}
+                    </span>
+                  ))
                 : s.text}
               {s.edited && <span className="ml-1 text-[0.65rem] text-si-dim">(edited)</span>}
             </span>
