@@ -128,6 +128,33 @@ export function wikiCitations(bodyMd: string, pageSessionId?: string | null): Wi
 }
 
 /**
+ * The citations of a body with where each is written: `start`/`end` are offsets in `bodyMd` (links
+ * inside code skipped, as in wikiCitations).
+ */
+export function wikiCitationSpans(
+  bodyMd: string,
+  pageSessionId?: string | null,
+): (WikiCitation & { start: number; end: number })[] {
+  const blank = (code: string) => code.replace(/[^\n]/g, ' ');
+  // Escaped pipes stay as written: the label pattern reads `\|` as an escape (unescaped below).
+  const masked = bodyMd.replace(FENCED_CODE, blank).replace(CODE_SPAN, blank);
+  const out: (WikiCitation & { start: number; end: number })[] = [];
+  for (const m of masked.matchAll(CITATION_LINK)) {
+    const c = citationOf(m, pageSessionId);
+    if (!c?.sessionId) continue;
+    out.push({
+      sessionId: c.sessionId,
+      startSec: c.startSec,
+      ...(c.endSec !== undefined ? { endSec: c.endSec } : {}),
+      label: c.label,
+      start: m.index!,
+      end: m.index! + m[0].length,
+    });
+  }
+  return out;
+}
+
+/**
  * Short citations written without a session (`[label](@1664-1760)`, `[@1664-1760]`) on a page that
  * has none to resolve them to, as written. Saves reject them.
  */

@@ -1,6 +1,6 @@
 // File exports of a session. Authorization goes through the same ops as everything else.
 
-import { formatFrames } from '@autologger/contract';
+import { formatFrames, type GraphExportJsonLd, type GraphExportRows } from '@autologger/contract';
 import { Hono } from 'hono';
 import { HTTP_STATUS, toRpcError } from '../core/errors.ts';
 import { type Actor, executeOp } from '../core/op.ts';
@@ -29,6 +29,57 @@ function srtTime(sec: number): string {
 }
 
 export const exportRoutes = new Hono<Env>();
+
+// Knowledge-graph files of a whole show (graph.export, every page of rows): for graph databases,
+// vector indexes and agents that load the graph instead of querying it over MCP.
+const SHOW_GRAPH_FILES = {
+  'graph.jsonld': { section: 'all', type: 'application/ld+json' },
+  'graph.jsonl': { section: 'all', type: 'application/x-ndjson' },
+  'moments.jsonl': { section: 'moments', type: 'application/x-ndjson' },
+  'chunks.jsonl': { section: 'chunks', type: 'application/x-ndjson' },
+} as const;
+
+exportRoutes.get('/api/shows/:showId/export/:format', async (c) => {
+  const actor = c.get('actor');
+  if (!actor)
+    return c.json(
+      { ok: false, error: { code: 'unauthenticated', message: 'Sign in first.' } },
+      401,
+    );
+  const showId = c.req.param('showId');
+  const format = c.req.param('format');
+  const file = Object.hasOwn(SHOW_GRAPH_FILES, format)
+    ? SHOW_GRAPH_FILES[format as keyof typeof SHOW_GRAPH_FILES]
+    : undefined;
+  if (!file)
+    return c.json(
+      { ok: false, error: { code: 'not_found', message: 'Unknown export format.' } },
+      404,
+    );
+  const surface = actor.via === 'mcp' ? 'mcp' : 'web';
+  try {
+    const show = await executeOp('shows.get', { showId }, actor, surface);
+    const headers = {
+      'Content-Type': `${file.type}; charset=utf-8`,
+      'Content-Disposition': `attachment; filename="${safeName(show.name)}.${format}"`,
+    };
+    // One call builds the graph once, in one transaction, so the file is a consistent snapshot.
+    const out: GraphExportRows | GraphExportJsonLd = await executeOp(
+      'graph.export',
+      format === 'graph.jsonld'
+        ? { showId, format: 'jsonld' }
+        : { showId, format: 'jsonl', section: file.section, limit: 1000000 },
+      actor,
+      surface,
+    );
+    if (out.format === 'jsonld') return c.body(JSON.stringify(out.document), 200, headers);
+    const body = out.rows.map((row) => `${JSON.stringify(row)}\n`).join('');
+    return c.body(body, 200, headers);
+  } catch (e) {
+    const error = toRpcError(e);
+    return c.json({ ok: false, error }, HTTP_STATUS[error.code]);
+  }
+});
 
 exportRoutes.get('/api/sessions/:sessionId/export/:format', async (c) => {
   const actor = c.get('actor');

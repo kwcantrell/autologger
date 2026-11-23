@@ -644,3 +644,158 @@ export interface Capabilities {
    */
   docsUrl: string | null;
 }
+
+// ── knowledge graph ─────────────────────────────────────────
+
+/** A page a moment is about: its source page or a page linked in the same wiki block. */
+export interface MomentEntity {
+  pageId: string;
+  title: string;
+  kind: WikiKind;
+}
+
+/**
+ * A clip-ready range of a session: a wiki citation (described by the sentence or list item that
+ * cites it), a topic (chapter), an event, or a transcript line.
+ */
+export interface Moment {
+  kind: 'citation' | 'topic' | 'event' | 'transcript';
+  /** Citation: `<pageId>#<ord>` (ord = position among the page's citations); else the topic, event or segment id. */
+  id: string;
+  sessionId: string;
+  sessionTitle: string;
+  /** Episode date (`YYYY-MM-DD`), or the session's creation instant when it has none. */
+  sessionDate: string;
+  /** Seconds from the session start. */
+  startSec: number;
+  /** Null for events and for citations or topics without an end. */
+  endSec: number | null;
+  /** Citation label, topic title, event category or speaker. */
+  title: string;
+  /** What happens: the citing sentence, the topic summary, the event message, the line. */
+  text: string;
+  /** Citations only, when the block cites more than once: the whole paragraph or list item. */
+  context?: string;
+  /** Citations only: the page and headings the citation sits under. */
+  source?: { pageId: string; pageTitle: string; pageKind: WikiKind; headings: string[] };
+  /** Citations only: other pages citing the same range (merged into this moment). */
+  alsoCitedBy?: { pageId: string; pageTitle: string }[];
+  /** Pages this moment is about (source page first, then pages linked in the same block). */
+  entities: MomentEntity[];
+  /** Relevance to `query` (higher is better); 0 without a query. */
+  rank: number;
+}
+
+/** Moments of one session merged into one range (`moments.search` with `mergeGapSec`). */
+export interface MomentClip {
+  sessionId: string;
+  sessionTitle: string;
+  startSec: number;
+  endSec: number;
+  /** The first moment's title plus how many more were merged. */
+  label: string;
+  momentIds: string[];
+  entities: MomentEntity[];
+}
+
+export interface MomentSearch {
+  /** Matching moments before limit/offset. */
+  total: number;
+  moments: Moment[];
+  /** Offset of the next page, or null when this was the last. */
+  nextOffset: number | null;
+  /** Only with `mergeGapSec`: this page's moments merged per session into clip ranges. */
+  clips?: MomentClip[];
+  /** `entities` values that matched no page title, alias or id (the search ignored them). */
+  unknownEntities?: string[];
+  /**
+   * True when nothing matched every word of `query`, so these match at least half of its words
+   * (ranked by how many).
+   */
+  relaxedQuery?: boolean;
+  /** True when more transcript lines matched than one search considers (5000, best first): narrow by session or query. */
+  transcriptCapped?: boolean;
+}
+
+/** A moment in `moments.search` with `compact: true`: text trimmed, entities as titles. */
+export interface CompactMoment {
+  kind: Moment['kind'];
+  id: string;
+  sessionId: string;
+  sessionTitle: string;
+  startSec: number;
+  endSec: number | null;
+  title: string;
+  /** At most ~160 characters. */
+  text: string;
+  /** Citations only: the citing page's title. */
+  page?: string;
+  entities: string[];
+}
+
+/** A clip in `moments.search` with `compact: true`. */
+export interface CompactMomentClip {
+  sessionId: string;
+  sessionTitle: string;
+  startSec: number;
+  endSec: number;
+  label: string;
+  /** How many moments were merged into it. */
+  moments: number;
+}
+
+export interface CompactMomentSearch {
+  total: number;
+  moments: CompactMoment[];
+  nextOffset: number | null;
+  clips?: CompactMomentClip[];
+  unknownEntities?: string[];
+  relaxedQuery?: boolean;
+  transcriptCapped?: boolean;
+}
+
+/** One page of the show wiki seen as a graph node, with its neighbourhood and where it is cited. */
+export interface GraphEntity {
+  pageId: string;
+  showId: string;
+  title: string;
+  kind: WikiKind;
+  aliases: string[];
+  /** First paragraph of the page. */
+  summary: string;
+  /** The recap's session, for session pages. */
+  sessionId: string | null;
+  /** Moments about this entity (its own citations plus citations in blocks that link it). */
+  momentCount: number;
+  /** Sessions where it appears, in episode order, with how many moments and the first one. */
+  sessions: {
+    sessionId: string;
+    sessionTitle: string;
+    sessionDate: string;
+    moments: number;
+    first: { startSec: number; endSec: number | null; text: string };
+  }[];
+  /** Pages it links to and pages linking to it, plus pages co-cited in the same blocks, strongest first. */
+  related: {
+    pageId: string;
+    title: string;
+    kind: WikiKind;
+    weight: number;
+    via: ('links' | 'linkedFrom' | 'coCited')[];
+  }[];
+}
+
+/** One page of rows of a show knowledge export (`graph.export`, format "jsonl"). */
+export interface GraphExportRows {
+  format: 'jsonl';
+  section: 'all' | 'nodes' | 'edges' | 'moments' | 'chunks';
+  total: number;
+  nextOffset: number | null;
+  rows: Record<string, unknown>[];
+}
+
+/** A whole-show JSON-LD document (`graph.export`, format "jsonld"). */
+export interface GraphExportJsonLd {
+  format: 'jsonld';
+  document: Record<string, unknown>;
+}

@@ -171,7 +171,7 @@ export async function unresolvedTargets(
 }
 
 /** First paragraph of a body, skipping headings, capped at 400 characters. */
-function firstParagraph(bodyMd: string): string {
+export function firstParagraph(bodyMd: string): string {
   for (const block of bodyMd.split(/\n\s*\n/)) {
     const text = block
       .split('\n')

@@ -10,11 +10,16 @@ import type {
   AudioSegment,
   Category,
   Change,
+  CompactMomentSearch,
   CompanionDevice,
   Compilation,
   Dashboard,
+  GraphEntity,
+  GraphExportJsonLd,
+  GraphExportRows,
   Job,
   Me,
+  MomentSearch,
   SearchHit,
   SegmentWaveform,
   Session,
@@ -637,6 +642,54 @@ export const opInputs = {
     offset: z.number().int().min(0).max(10000).default(0),
   }),
 
+  // ── knowledge graph ───────────────────────────────────────
+  'moments.search': z
+    .object({
+      showId: id,
+      /** Full-text query (websearch syntax). Optional when `entities` is given. */
+      query: z.string().trim().min(1).max(200).optional(),
+      /** Page titles, aliases or page ids; a moment must be about all of them. */
+      entities: z.array(z.string().trim().min(1).max(200)).min(1).max(10).optional(),
+      sessionId: id.optional(),
+      kinds: z
+        .array(z.enum(['citation', 'topic', 'event', 'transcript']))
+        .min(1)
+        .optional(),
+      limit: z.number().int().min(1).max(500).default(30),
+      offset: z.number().int().min(0).max(100000).default(0),
+      /** > 0: also merge this page's moments per session into clip ranges when gaps are at most this many seconds. */
+      mergeGapSec: z.number().min(0).max(600).default(0),
+      /** Length given to moments without an end (events, open citations) when merging into clips. */
+      pointSec: z.number().min(1).max(600).default(30),
+      /**
+       * Longest clip merging may build. Moments longer than this (e.g. a whole-segment topic) are
+       * left out of clips when tighter moments cover them, and merging starts a new clip rather
+       * than grow one past it.
+       */
+      maxClipSec: z.number().min(10).max(1200).default(180),
+      /** With mergeGapSec: return only the clips (moments: []). */
+      clipsOnly: z.boolean().default(false),
+      compact,
+    })
+    .refine((v) => v.query || v.entities, { message: 'Pass query, entities or both.' }),
+  'graph.entity': z.object({
+    showId: id,
+    /** Page title, alias or page id. */
+    entity: z.string().trim().min(1).max(200),
+    /** Max related pages returned. */
+    relatedLimit: z.number().int().min(0).max(200).default(25),
+  }),
+  'graph.export': z.object({
+    showId: id,
+    /** "jsonl": property-graph rows (nodes, edges, moments, chunks), paged. "jsonld": one schema.org JSON-LD document. */
+    format: z.enum(['jsonl', 'jsonld']).default('jsonl'),
+    /** jsonl only: which rows. "chunks" are wiki sections ready for a vector index. */
+    section: z.enum(['all', 'nodes', 'edges', 'moments', 'chunks']).default('all'),
+    /** Rows per page; the file downloads take everything in one call. */
+    limit: z.number().int().min(1).max(1000000).default(500),
+    offset: z.number().int().min(0).max(1000000).default(0),
+  }),
+
   // ── change log ────────────────────────────────────────────
   'changes.list': z
     .object({
@@ -960,6 +1013,9 @@ export interface OpOutputs {
   'compilations.createUpload': CompilationUpload;
   'compilations.completeUpload': Compilation;
   search: SearchHit[];
+  'moments.search': MomentSearch;
+  'graph.entity': GraphEntity;
+  'graph.export': GraphExportRows | GraphExportJsonLd;
   'changes.list': Change[];
   'changes.revert': Change;
   'changes.revertGroup': { groupId: string; reverted: number };
@@ -989,6 +1045,7 @@ export interface CompactOpOutputs {
   'dashboards.updateWidgets': CompactDashboard;
   'wiki.upsert': CompactWikiPage;
   'wiki.patch': CompactWikiPage;
+  'moments.search': CompactMomentSearch;
 }
 
 /**
