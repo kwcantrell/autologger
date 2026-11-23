@@ -925,7 +925,7 @@ defineOp({
               entity: 'audio_segment' as const,
               entityId: audioSegmentId!,
               kind: 'update' as const,
-              summary: `Transcript import marked recording ${prev.ordinal + 1} transcribed`,
+              summary: `Transcript import marked recording ${prev.ordinal} transcribed`,
               before: { status: prev.status, error: prev.error },
               after: { status: 'transcribed', error: null },
             },
