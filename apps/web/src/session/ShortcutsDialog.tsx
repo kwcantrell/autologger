@@ -1,9 +1,7 @@
 import { MOD_KEY_LABEL } from '@/lib/keys';
 import { shortcutsOpen, useStore } from '@/lib/store';
+import { Kbd } from '@/shared/components/ui/kbd';
 import { Dialog } from '@/shared/ui/Dialog';
-
-const KEY =
-  'inline-flex min-w-[1.7rem] items-center justify-center rounded-[0.4rem] border border-si-line bg-si-panel-2 px-[0.4rem] py-[0.15rem] font-tc text-[0.72rem] font-semibold text-si-fg';
 
 const ROWS: { keys: string[]; text: string }[] = [
   { keys: ['1–9'], text: 'Log the 1st–9th event button (while timecode is rolling)' },
@@ -34,9 +32,7 @@ export function ShortcutsDialog() {
             <span className="text-[0.85rem] text-si-muted">{r.text}</span>
             <span className="flex shrink-0 gap-1">
               {r.keys.map((k) => (
-                <kbd key={k} className={KEY}>
-                  {k}
-                </kbd>
+                <Kbd key={k}>{k}</Kbd>
               ))}
             </span>
           </li>

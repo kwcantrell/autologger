@@ -28,7 +28,8 @@ yet, the Dashboards tab links to **Connect an agent**.
 ## View dashboards
 
 The **Dashboards** tab shows a session's dashboards; with more than one, pick it from the row of
-dashboard names. Dashboards an agent made carry an **agent** badge.
+dashboard names (or focus the row and use the left and right arrow keys). Dashboards an agent made
+carry an **agent** badge.
 
 Live widgets are re-computed each time you open the dashboard, so counts stay current as you log
 more events or the transcript changes.

@@ -18,7 +18,7 @@ import { PageFrame } from '@/components/RouteState';
 import { planClips } from '@/routes/compilations/clipPlan';
 import { MakeVideoDialog, useMakeVideoBlocked } from '@/routes/compilations/MakeVideoDialog';
 import { Button } from '@/shared/components/ui/button';
-import { Input } from '@/shared/components/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/shared/components/ui/input-group';
 import {
   Select,
   SelectContent,
@@ -474,21 +474,19 @@ export function SearchRoute() {
       <div data-slot="search-route" className="contents">
         <h1 className="m-0 text-[1.35rem] font-semibold text-si-fg">Search</h1>
         <div className="flex flex-col gap-2 md:flex-row md:items-center">
-          <div className="relative min-w-0 flex-1">
-            <SearchIcon
-              aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-si-dim"
-            />
-            <Input
+          <InputGroup className="flex-1">
+            <InputGroupInput
               type="search"
               aria-label="Search"
               placeholder="Search sessions, transcripts, topics, events…"
               value={q}
               onChange={(e) => replace({ q: e.target.value })}
-              className="pl-9"
               autoFocus={!q}
             />
-          </div>
+            <InputGroupAddon className="text-si-dim">
+              <SearchIcon aria-hidden="true" />
+            </InputGroupAddon>
+          </InputGroup>
           <Select
             items={showItems}
             value={show || ALL}

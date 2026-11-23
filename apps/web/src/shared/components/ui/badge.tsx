@@ -5,7 +5,7 @@ import type * as React from 'react';
 import { cn } from '@/shared/lib/utils';
 
 const badgeVariants = cva(
-  'inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-[5px] border border-transparent px-[0.45rem] py-[0.2rem] font-label text-[0.7rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive [&>svg]:pointer-events-none [&>svg]:size-3 aria-invalid:ring-destructive/40',
+  'inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-[5px] border border-transparent font-label font-semibold uppercase tracking-[0.1em] whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive [&>svg]:pointer-events-none [&>svg]:size-3 aria-invalid:ring-destructive/40',
   {
     variants: {
       variant: {
@@ -23,9 +23,16 @@ const badgeVariants = cva(
         transport:
           'border-(--tx-pill-line) bg-(--tx-pill-bg) text-(--tx-pill-fg) shadow-[0_0_18px_-4px_var(--tx-glow)] tracking-[0.14em]',
       },
+      // `sm`: the compact tag inside dense rows (change-log actor and client tags, the dashboard
+      // tab's "agent" mark).
+      size: {
+        default: 'px-[0.45rem] py-[0.2rem] text-[0.7rem]',
+        sm: 'px-1 py-0 text-[0.6rem]',
+      },
     },
     defaultVariants: {
       variant: 'default',
+      size: 'default',
     },
   },
 );
@@ -34,6 +41,7 @@ const badgeVariants = cva(
 function Badge({
   className,
   variant = 'default',
+  size = 'default',
   render,
   ...props
 }: useRender.ComponentProps<'span'> & VariantProps<typeof badgeVariants>) {
@@ -44,7 +52,8 @@ function Badge({
       {
         'data-slot': 'badge',
         'data-variant': variant,
-        className: cn(badgeVariants({ variant }), className),
+        'data-size': size,
+        className: cn(badgeVariants({ variant, size }), className),
       } as React.ComponentProps<'span'>,
       props,
     ),
