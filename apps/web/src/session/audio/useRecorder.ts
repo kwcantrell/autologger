@@ -2,6 +2,7 @@
 // segment is a standalone playable file, each handed to the upload queue with its session time.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createStore } from '@/lib/store';
 import { enqueueUpload } from './uploads';
 
 const SEGMENT_SEC = 60;
@@ -27,7 +28,9 @@ export function recorderSupport(): string | null {
 export function useRecorder(sessionId: string, elapsedSec: () => number) {
   const [state, setState] = useState<RecorderState>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [level, setLevel] = useState(0);
+  // Mic level 0..1, updated ~12 times a second while recording. A store, not state, so only
+  // the meter re-renders — not the workspace and every tab under it.
+  const [level] = useState(() => createStore(0));
   const [startedAt, setStartedAt] = useState<number | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
@@ -77,10 +80,10 @@ export function useRecorder(sessionId: string, elapsedSec: () => number) {
     void ctxRef.current?.close().catch(() => undefined);
     ctxRef.current = null;
     recRef.current = null;
-    setLevel(0);
+    level.set(0);
     setStartedAt(null);
     document.body.classList.remove('v4-is-recording');
-  }, []);
+  }, [level]);
 
   const start = useCallback(async () => {
     const unsupported = recorderSupport();
@@ -133,7 +136,7 @@ export function useRecorder(sessionId: string, elapsedSec: () => number) {
           analyser.getByteTimeDomainData(buf);
           let peak = 0;
           for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
-          setLevel(Math.min(1, peak / 100));
+          level.set(Math.min(1, peak / 100));
         }
         levelRafRef.current = requestAnimationFrame(tick);
       };
@@ -155,7 +158,7 @@ export function useRecorder(sessionId: string, elapsedSec: () => number) {
     setStartedAt(Date.now());
     setState('recording');
     return true;
-  }, [cleanup, startSegment]);
+  }, [cleanup, startSegment, level]);
 
   const stop = useCallback(async () => {
     const rec = recRef.current;
