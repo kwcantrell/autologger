@@ -3,8 +3,14 @@
 
 import type { Category, SessionEvent } from '@autologger/contract';
 import { KeyboardIcon, RotateCcw } from 'lucide-react';
-import { useCallback, useMemo } from 'react';
-import { shortcutsOpen, TRANSPORT_LABEL, type TransportTint, useStore } from '@/lib/store';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type Store,
+  shortcutsOpen,
+  TRANSPORT_LABEL,
+  type TransportTint,
+  useStore,
+} from '@/lib/store';
 import { eventSec, fmtSec, isMediaOnly } from '@/lib/timecode';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
@@ -17,6 +23,28 @@ import { usePlayheadSec, useWorkspace } from './context';
 import { Timeline } from './Timeline';
 
 type Recorder = ReturnType<typeof useRecorder>;
+
+/** The mic meter subscribes to the level itself so the strip doesn't re-render per reading. */
+function MicLevel({ level }: { level: Store<number> }) {
+  const value = useStore(level);
+  return (
+    <span
+      className="block h-full origin-left bg-si-accent transition-[width] duration-75 ease-linear"
+      style={{ width: `${Math.round(value * 100)}%` }}
+    />
+  );
+}
+
+/** Time since recording started; ticks on its own (recording doesn't need a rolling clock). */
+function RecordingDuration({ startedAt }: { startedAt: number | null }) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (startedAt === null) return;
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [startedAt]);
+  return <>{startedAt ? fmtSec(Math.max(0, now - startedAt) / 1000) : '00:00:00'}</>;
+}
 
 function Glyph({
   icon,
@@ -311,7 +339,6 @@ export function TransportStrip({
   const display = mediaOnly
     ? fmtSec(player.isPlaying ? playheadSec : session.audioSeconds)
     : clock.timecode;
-  const recDur = recorder.startedAt ? fmtSec((Date.now() - recorder.startedAt) / 1000) : '00:00:00';
 
   return (
     <section
@@ -371,10 +398,7 @@ export function TransportStrip({
                     title="Microphone level"
                   >
                     <span className="block h-2 w-12 overflow-hidden rounded-[3px] border border-si-line bg-si-bg">
-                      <span
-                        className="block h-full origin-left bg-si-accent transition-[width] duration-75 ease-linear"
-                        style={{ width: `${Math.round(recorder.level * 100)}%` }}
-                      />
+                      <MicLevel level={recorder.level} />
                     </span>
                   </span>
                   <span
@@ -382,7 +406,7 @@ export function TransportStrip({
                     className="font-tc text-[0.75rem] font-medium tabular-nums text-si-fg"
                     aria-hidden="true"
                   >
-                    {recDur}
+                    <RecordingDuration startedAt={recorder.startedAt} />
                   </span>
                 </>
               )}
