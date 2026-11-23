@@ -490,6 +490,11 @@ export const opInputs = {
       dryRun: z.boolean().default(false),
       /** false: download only (audio + waveform), no transcription. */
       transcribe: z.boolean().default(true),
+      /** Per-video session key terms, by YouTube video id; set before any job is queued. */
+      keyTerms: z
+        .record(z.string().regex(/^[A-Za-z0-9_-]{11}$/, 'a YouTube video id'), keyTermList)
+        .refine((m) => Object.keys(m).length <= 200, { message: 'At most 200 videos.' })
+        .optional(),
     })
     .refine((v) => (v.url === undefined) !== (v.videos === undefined), {
       message: 'Pass exactly one of url or videos.',
