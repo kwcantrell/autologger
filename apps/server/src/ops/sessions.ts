@@ -254,7 +254,7 @@ export const rescaleElapsed = (frames: number, from: number, to: number) =>
 defineOp({
   name: 'sessions.update',
   description:
-    "Edit session metadata; only the fields you pass change. Returns the updated session. Frame rate and start timecode can only change while the transport is stopped (else conflict). `frameRate` is frames per second and may be fractional (e.g. 23.976, 29.97). Changing `frameRate` without `startTimecode` keeps the start timecode as written (01:00:00:00 stays 01:00:00:00); if its frames field does not exist at the new rate (e.g. :29 going to 24 fps) the call fails with bad_request, so pass `startTimecode` too. `retime` says what happens to logged events when the clock changes: 'keep_seconds' (default) keeps every event at the same atSec (seconds from the session start, lined up with audio and transcript) by converting its stored frames, so event timecodes are re-read on the new clock; 'keep_frames' keeps the stored frame counts and timecodes, so atSec shifts (use it only when event timecodes were typed from an external timecode source and the session clock was set wrong). Either way the recorded clock (elapsed time) keeps its seconds; topics and transcript are in seconds and never move. A clock change is recorded in the change log together with each retimed event as one group: undo it with changes_revertGroup (groupId from changes_list), not event by event. `keyTerms` replaces this session's transcription key terms (same limits as in sessions_create; [] clears them); they apply to transcriptions that run from now on, so re-transcribe (media_retranscribe) to use them on audio already transcribed. Other metadata and key-term changes are not in the change log and cannot be undone from it.",
+    "Edit session metadata; only the fields you pass change. Returns the updated session. Frame rate and start timecode can only change while the transport is stopped (else conflict). `frameRate` is frames per second and may be fractional (e.g. 23.976, 29.97). Changing `frameRate` without `startTimecode` keeps the start timecode as written (01:00:00:00 stays 01:00:00:00); if its frames field does not exist at the new rate (e.g. :29 going to 24 fps) the call fails with bad_request, so pass `startTimecode` too. `retime` says what happens to logged events when the clock changes: 'keep_seconds' (default) keeps every event at the same atSec (seconds from the session start, lined up with audio and transcript) by converting its stored frames, so event timecodes are re-read on the new clock; 'keep_frames' keeps the stored frame counts and timecodes, so atSec shifts (use it only when event timecodes were typed from an external timecode source and the session clock was set wrong). A clock change that would leave any logged event before the new start timecode (negative atSec) fails with bad_request naming how many and the earliest; nothing is clamped, so move or delete those events or choose an earlier startTimecode. Either way the recorded clock (elapsed time) keeps its seconds; topics and transcript are in seconds and never move. A clock change is recorded in the change log together with each retimed event as one group: undo it with changes_revertGroup (groupId from changes_list), not event by event. `keyTerms` replaces this session's transcription key terms (same limits as in sessions_create; [] clears them); they apply to transcriptions that run from now on, so re-transcribe (media_retranscribe) to use them on audio already transcribed. Other metadata and key-term changes are not in the change log and cannot be undone from it.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, startTimecode, retime = 'keep_seconds', ...patch }) {
@@ -294,6 +294,7 @@ defineOp({
     const clockMoved =
       frameRate !== before.frameRate || startOffsetFrames !== before.startOffsetFrames;
     if (clockMoved) {
+      await refuseEventsBeforeStart(ctx, sessionId, before, after, retime);
       set.elapsedFrames = after.elapsedFrames;
       if (retime === 'keep_seconds') await retimeEvents(ctx, session, before, after);
     }
@@ -325,6 +326,36 @@ export type Clock = ReturnType<typeof clockOf>;
 const clockLabel = (c: Clock) =>
   `${c.frameRate} fps from ${formatFrames(c.startOffsetFrames, c.frameRate)}`;
 
+/** An event's frames on clock `to` after a clock change from `from` that keeps its seconds. */
+const keepSecondsFrames = (from: Clock, to: Clock) =>
+  sql`${to.startOffsetFrames}::bigint + round((${events.timecodeFrames} - ${from.startOffsetFrames}::bigint)::numeric / ${from.frameRate}::numeric * ${to.frameRate}::numeric)::bigint`;
+
+/**
+ * Refuse a clock change that would leave a logged event before the new start timecode (a
+ * negative atSec). With keep_frames that is any event earlier than the new start; with
+ * keep_seconds only events already before the start (logged before #229 was fixed). Events are
+ * not clamped or moved silently: the caller moves or deletes them, or picks another start.
+ */
+async function refuseEventsBeforeStart(
+  ctx: Ctx,
+  sessionId: string,
+  from: Clock,
+  to: Clock,
+  retime: 'keep_seconds' | 'keep_frames',
+): Promise<void> {
+  const frames =
+    retime === 'keep_seconds' ? keepSecondsFrames(from, to) : sql`${events.timecodeFrames}`;
+  const [found] = await ctx.db
+    .select({ n: sql<number>`count(*)::int`, first: sql<number>`min(${frames})::float8` })
+    .from(events)
+    .where(and(eq(events.sessionId, sessionId), sql`${frames} < ${to.startOffsetFrames}`));
+  if (!found?.n) return;
+  const firstSec = Math.round(((found.first - to.startOffsetFrames) / to.frameRate) * 1000) / 1000;
+  throw badRequest(
+    `${found.n} logged event${found.n > 1 ? 's' : ''} would fall before the start timecode ${formatFrames(to.startOffsetFrames, to.frameRate)} (earliest at atSec ${firstSec}). Move or delete ${found.n > 1 ? 'them' : 'it'} first, or choose an earlier startTimecode${retime === 'keep_frames' ? " or retime 'keep_seconds'" : ''}.`,
+  );
+}
+
 /**
  * Convert every timed event of the session from clock `from` to clock `to` in one statement so
  * it keeps its seconds from the session start; each moved event is recorded for undo.
@@ -342,7 +373,7 @@ async function retimeEvents(
   const updated = await ctx.db
     .update(events)
     .set({
-      timecodeFrames: sql`${to.startOffsetFrames}::bigint + round((${events.timecodeFrames} - ${from.startOffsetFrames}::bigint)::numeric / ${from.frameRate}::numeric * ${to.frameRate}::numeric)::bigint`,
+      timecodeFrames: keepSecondsFrames(from, to),
       updatedAt: new Date(),
     })
     .where(timed)

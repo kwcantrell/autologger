@@ -3,6 +3,7 @@
 
 import {
   type ChangeEntity,
+  issuePath,
   type OpName,
   type OpParsed,
   type OpResult,
@@ -135,6 +136,13 @@ export async function executeOp<N extends OpName, I = unknown>(
   if (actor.user.status === 'pending' && !op.allowPending) {
     throw forbidden('This account is waiting for approval by an administrator.');
   }
+  const nul = nulPaths(rawInput);
+  if (nul.length)
+    throw new AppError(
+      'bad_request',
+      'Text may not contain NUL characters (\\u0000).',
+      nul.map((path) => ({ path, message: 'Remove the NUL character (\\u0000).' })),
+    );
   const input = opInputs[name].parse(rawInput ?? {}) as OpParsed<N>;
   const prepared = op.prepare ? await op.prepare(actor, input) : undefined;
 
@@ -150,6 +158,24 @@ export async function executeOp<N extends OpName, I = unknown>(
   } finally {
     watch?.cancel();
   }
+}
+
+/**
+ * Paths of every string (value or key) in an op's raw input that contains U+0000. Postgres
+ * cannot store NUL in text or jsonb, so it is refused for every op before parsing.
+ */
+function nulPaths(value: unknown, path: PropertyKey[] = [], out: string[] = []): string[] {
+  if (typeof value === 'string') {
+    if (value.includes('\0')) out.push(issuePath(path) || '(input)');
+  } else if (Array.isArray(value)) {
+    for (const [i, v] of value.entries()) nulPaths(v, [...path, i], out);
+  } else if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) {
+      if (k.includes('\0')) out.push(issuePath([...path, k]));
+      nulPaths(v, [...path, k], out);
+    }
+  }
+  return out;
 }
 
 async function runInTransaction<N extends OpName>(
