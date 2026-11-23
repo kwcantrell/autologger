@@ -264,6 +264,77 @@ describe('compilations ops', () => {
     });
     expect(await db.select().from(jobs)).toHaveLength(2);
   });
+  it('switches a failed or queued server build to a local build with retry buildLocally', async () => {
+    const { owner, team, show, session } = await studio();
+    await youtubeSession(session.id);
+    const agent = asAgent(owner);
+    const c = await call(agent, 'compilations.create', {
+      showId: show.id,
+      title: 'Blocked',
+      clips: [{ sessionId: session.id, startSec: 0, endSec: 10 }],
+    });
+    const bot = "YouTube is blocking this server's downloads (bot check).";
+    await db
+      .update(compilations)
+      .set({ status: 'failed', error: bot, progress: null })
+      .where(eq(compilations.id, c.id));
+
+    const reader = await makeUser('reader@example.com');
+    await call(owner, 'teams.invite', { teamId: team.id, email: reader.user.email });
+    await call(owner, 'teams.setGrant', {
+      teamId: team.id,
+      userId: reader.user.id,
+      showId: show.id,
+      access: 'read',
+    });
+    await failsWith(
+      call(reader, 'compilations.retry', { compilationId: c.id, buildLocally: true }),
+      'forbidden',
+    );
+
+    const local = await call(agent, 'compilations.retry', {
+      compilationId: c.id,
+      buildLocally: true,
+    });
+    expect(local).toMatchObject({
+      id: c.id,
+      title: 'Blocked',
+      status: 'queued',
+      buildLocally: true,
+      progress: `Waiting for a local build: run autologger-import compile ${c.id}`,
+    });
+    expect(local.error).toBeUndefined();
+    expect(local.clips[0]!.eventId).toBe(c.clips[0]!.eventId);
+    // The create's waiting job is cancelled; no new one is queued.
+    const queued = await db.select().from(jobs).where(eq(jobs.status, 'queued'));
+    expect(queued).toHaveLength(0);
+    // Again: unchanged.
+    expect(
+      await call(agent, 'compilations.retry', { compilationId: c.id, buildLocally: true }),
+    ).toMatchObject({ status: 'queued', buildLocally: true });
+
+    // A queued server build switches too; its compile job is cancelled and dismissed.
+    const q = await call(agent, 'compilations.create', {
+      showId: show.id,
+      title: 'Queued',
+      clips: [{ sessionId: session.id, startSec: 0, endSec: 10 }],
+      logEvents: false,
+    });
+    await call(agent, 'compilations.retry', { compilationId: q.id, buildLocally: true });
+    const [job] = await db
+      .select()
+      .from(jobs)
+      .where(sql`${jobs.payload}->>'compilationId' = ${q.id}`);
+    expect(job).toMatchObject({ status: 'failed', error: 'Switched to a local build.' });
+    expect(job!.dismissedAt).not.toBeNull();
+
+    // Not for a ready compilation.
+    await db.update(compilations).set({ status: 'ready' }).where(eq(compilations.id, c.id));
+    await failsWith(
+      call(agent, 'compilations.retry', { compilationId: c.id, buildLocally: true }),
+      'conflict',
+    );
+  });
   it('logs a Compilation event per clip in each session; undo, delete and retry handle them', async () => {
     const { owner, show, session } = await studio();
     await youtubeSession(session.id);
