@@ -95,7 +95,8 @@ export function ChangeRow({
   /** Where the change happened (the show change log names the session or wiki page). */
   context?: ReactNode;
 }) {
-  const isAgent = c.via === 'mcp';
+  // The MCP client of an agent's change, or the device name of a Companion one.
+  const client = c.via === 'mcp' || c.via === 'companion' ? c.clientName : null;
   return (
     // Stacked: time, change kind and undo on the meta line, then who, then the summary.
     <tr
@@ -133,12 +134,12 @@ export function ChangeRow({
       >
         <div className="flex min-w-0 flex-wrap items-center gap-1">
           <span className="truncate font-semibold">{c.actor?.name ?? 'System'}</span>
-          {isAgent && c.clientName && (
+          {client && (
             <SmallBadge
               className="border-[color-mix(in_oklab,var(--si-accent)_45%,var(--si-line))] text-(--si-accent-text) @max-3xl/feed:max-w-full @max-3xl/feed:whitespace-normal @max-3xl/feed:[overflow-wrap:anywhere]"
-              title={`MCP client: ${c.clientName}`}
+              title={`${c.via === 'mcp' ? 'MCP client' : 'Companion device'}: ${client}`}
             >
-              {c.clientName}
+              {client}
             </SmallBadge>
           )}
           <SmallBadge>{VIA_LABEL[c.via]}</SmallBadge>
