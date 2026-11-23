@@ -1,6 +1,8 @@
 // Events may not lie before the session start timecode (#229): no negative atSec from a
 // timecode, a CSV row or a clock change.
 
+import { readFileSync } from 'node:fs';
+import { sql } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { toRpcError } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
@@ -106,5 +108,32 @@ describe('events before the session start', () => {
       createdBy: owner.user.id,
     });
     await failsWith(call(owner, 'sessions.update', { sessionId, frameRate: 25 }), 'bad_request');
+  });
+
+  it('stored by older versions are clamped to the start by migration 0021 (#264)', async () => {
+    const { owner, session } = await studio(); // 24 fps from 01:00:00:00
+    const sessionId = session.id;
+    const ok = await call(owner, 'events.create', { sessionId, category: 'Note', atSec: 5 });
+    const early = newId('evt');
+    await db.insert(schema.events).values({
+      id: early,
+      sessionId,
+      category: 'Note',
+      color: '#a3a3a3',
+      message: 'kept',
+      timecodeFrames: 24 * 3600 - 48, // atSec -2
+      source: 'operator',
+      createdBy: owner.user.id,
+    });
+    const migration = new URL('../../drizzle/0021_clamp_events_before_start.sql', import.meta.url);
+    for (let i = 0; i < 2; i++) await db.execute(sql.raw(readFileSync(migration, 'utf8')));
+
+    const list = await call(owner, 'events.list', { sessionId });
+    expect(list.map((e) => [e.id, e.atSec])).toEqual([
+      [early, 0],
+      [ok.id, 5],
+    ]);
+    expect(list[0]).toMatchObject({ message: 'kept', timecodeFrames: 24 * 3600 });
+    await call(owner, 'sessions.update', { sessionId, frameRate: 25 });
   });
 });

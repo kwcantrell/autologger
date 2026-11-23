@@ -116,6 +116,9 @@ registerWs(
       if (topic === `show:${showId}`) {
         if (m.type === 'show_changed' && m.entity === 'show')
           push(() => send({ type: 'invalidate', entity: 'session' }));
+        // A Companion device was added, revoked, retargeted, connected or disconnected.
+        else if (m.type === 'show_changed' && m.entity === 'device')
+          push(() => send({ type: 'invalidate', entity: 'device' }));
         // A show-level (compile) job changed, or a session was deleted and its jobs went with it.
         else if ((m.type === 'change' || m.type === 'invalidate') && m.entity === 'job') {
           const out = showMessageFor(m);

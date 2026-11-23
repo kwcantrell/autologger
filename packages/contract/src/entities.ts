@@ -437,6 +437,7 @@ export interface Change {
   at: string;
   actor: UserRef | null;
   via: Via;
+  /** The MCP client (via mcp) or the Companion device name (via companion) that made the change. */
   clientName: string | null;
   op: string;
   entity: ChangeEntity;

@@ -65,4 +65,32 @@ describe('show change log', () => {
     await failsWith(call(outsider, 'changes.list', { showId: show.id }), 'not_found');
     await failsWith(call(outsider, 'shows.get', { showId: show.id }), 'not_found');
   });
+
+  it('names the Companion device on its changes and lists devices for the filter', async () => {
+    const { owner, show, session } = await studio();
+    const { device } = await call(owner, 'companion.create', { showId: show.id, name: 'Booth A' });
+    const deck = {
+      ...owner,
+      via: 'companion' as const,
+      clientName: device.name,
+      tokenId: device.id,
+      device: { id: device.id, showId: show.id, targetSessionId: null },
+    };
+    await call(deck, 'events.create', { sessionId: session.id, category: 'Scene' });
+    await call(asAgent(owner, 'claude-code'), 'topics.create', {
+      sessionId: session.id,
+      startSec: 1,
+      title: 'Intro',
+    });
+
+    const got = await call(owner, 'shows.get', { showId: show.id });
+    expect(got.mcpClients).toEqual(['claude-code']);
+    expect(got.companionDevices).toEqual(['Booth A']);
+    const mine = await call(owner, 'changes.list', {
+      showId: show.id,
+      via: 'companion',
+      clientName: 'Booth A',
+    });
+    expect(mine.map((c) => [c.entity, c.clientName])).toEqual([['event', 'Booth A']]);
+  });
 });

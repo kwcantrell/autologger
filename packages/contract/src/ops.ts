@@ -590,7 +590,7 @@ export const opInputs = {
             .max(5),
         ])
         .optional(),
-      /** Only changes by this MCP client (Change.clientName, e.g. "claude-code"). */
+      /** Only changes by this MCP client or Companion device (Change.clientName, e.g. "claude-code"). */
       clientName: z.string().min(1).max(200).optional(),
       /** Only changes to this kind of item. */
       entity: z
@@ -725,6 +725,8 @@ export interface OpOutputs {
     categories: Category[];
     /** Distinct clientName of the MCP clients that changed this show (changes.list filter). */
     mcpClients: string[];
+    /** Distinct clientName (device name) of the Companion devices that changed this show. */
+    companionDevices: string[];
   };
   'shows.create': Show;
   'shows.update': Show;
