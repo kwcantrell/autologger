@@ -92,5 +92,22 @@ describe('show change log', () => {
       clientName: 'Booth A',
     });
     expect(mine.map((c) => [c.entity, c.clientName])).toEqual([['event', 'Booth A']]);
+    // Each name once per surface, sorted, however many changes it made (skip scan over the index).
+    await call(deck, 'events.create', { sessionId: session.id, category: 'Note' });
+    await call(asAgent(owner, 'Booth A'), 'events.create', {
+      sessionId: session.id,
+      category: 'Scene',
+    });
+    await call(asAgent(owner, 'aider'), 'events.create', {
+      sessionId: session.id,
+      category: 'Scene',
+    });
+    const again = await call(owner, 'shows.get', { showId: show.id });
+    expect(again.mcpClients).toEqual(['Booth A', 'aider', 'claude-code']);
+    expect(again.companionDevices).toEqual(['Booth A']);
+    await failsWith(
+      call(await makeUser('nosy@example.com'), 'shows.get', { showId: show.id }),
+      'not_found',
+    );
   });
 });

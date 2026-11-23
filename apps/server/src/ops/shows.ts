@@ -1,5 +1,5 @@
 import type { Category, Show, ShowAccess } from '@autologger/contract';
-import { and, asc, eq, inArray, isNotNull, notInArray, type SQL, sql } from 'drizzle-orm';
+import { and, asc, eq, notInArray, type SQL, sql } from 'drizzle-orm';
 import {
   readableShowCondition,
   requireShow,
@@ -116,19 +116,22 @@ defineOp({
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId }) {
     const show = await getShow(ctx, showId);
-    const clients = await ctx.db
-      .selectDistinct({ via: schema.changes.via, name: schema.changes.clientName })
-      .from(schema.changes)
-      .where(
-        and(
-          eq(schema.changes.showId, showId),
-          inArray(schema.changes.via, ['mcp', 'companion']),
-          isNotNull(schema.changes.clientName),
-        ),
+    // Loose index scan over changes_show_client: one index probe per distinct (via, client_name),
+    // so the cost follows the number of clients, not the number of changes.
+    const clients = await ctx.db.execute<{ via: string; name: string }>(sql`
+      with recursive c as (
+        (select via, client_name from changes
+          where show_id = ${showId} and client_name is not null
+          order by via, client_name limit 1)
+        union all
+        select n.via, n.client_name from c, lateral (
+          select via, client_name from changes
+          where show_id = ${showId} and client_name is not null
+            and (via, client_name) > (c.via, c.client_name)
+          order by via, client_name limit 1) n
       )
-      .orderBy(schema.changes.clientName);
-    const names = (via: string) =>
-      clients.flatMap((c) => (c.via === via && c.name ? [c.name] : []));
+      select via, client_name as name from c order by client_name`);
+    const names = (via: string) => clients.flatMap((c) => (c.via === via ? [c.name] : []));
     return {
       ...show,
       categories: await listCategories(ctx, showId),
