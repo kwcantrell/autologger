@@ -15,7 +15,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const VERSION = '1.0.1';
+export const VERSION = '1.1.0';
 
 const USAGE = `autologger-import ${VERSION} — import YouTube videos into AutoLogger from your computer
 
@@ -34,6 +34,7 @@ Options:
                                     (chrome, firefox, edge, safari, brave, …[:profile])
   --cookies <file>                  yt-dlp cookies.txt (Netscape format) instead
   --dry-run                         show what would happen; create and upload nothing
+  --no-transcribe                   playlist/video: upload the audio without transcribing it
   --keep                            keep downloaded files after uploading
   --work-dir <dir>                  where downloads go (default ~/.cache/autologger-import)
   --yt-dlp <path>                   yt-dlp binary (default: YTDLP_PATH or yt-dlp on PATH)
@@ -78,8 +79,8 @@ export class CliError extends Error {}
  *   command: string | undefined; target: string | undefined; show?: string; team?: string;
  *   session?: string;
  *   order: 'playlist' | 'reverse'; titleTemplate?: string; cookiesFromBrowser?: string;
- *   cookies?: string; dryRun: boolean; keep: boolean; workDir?: string; ytDlp?: string;
- *   ffmpeg?: string; help: boolean;
+ *   cookies?: string; dryRun: boolean; keep: boolean; transcribe: boolean; workDir?: string;
+ *   ytDlp?: string; ffmpeg?: string; help: boolean;
  * }} Args
  */
 
@@ -92,6 +93,7 @@ export function parseArgs(argv) {
     order: 'playlist',
     dryRun: false,
     keep: false,
+    transcribe: true,
     help: false,
   };
   /** @type {Record<string, (v: string) => void>} */
@@ -122,6 +124,7 @@ export function parseArgs(argv) {
       setter(v);
     } else if (arg === '--dry-run') a.dryRun = true;
     else if (arg === '--keep') a.keep = true;
+    else if (arg === '--no-transcribe') a.transcribe = false;
     else if (arg === '-h' || arg === '--help') a.help = true;
     else if (arg.startsWith('-')) throw new CliError(`Unknown option ${arg}. See --help.`);
     else positional.push(arg);
@@ -240,7 +243,7 @@ export async function putFile(url, headers, file, onProgress) {
 
 /**
  * @typedef {{ ytDlp: string; ffmpeg: string; cookieArgs: string[]; workDir: string;
- *   keep: boolean; dryRun: boolean; rpc: Rpc }} Ctx
+ *   keep: boolean; dryRun: boolean; transcribe: boolean; rpc: Rpc }} Ctx
  */
 
 /**
@@ -512,10 +515,11 @@ async function importInto(ctx, sessionId, url, label) {
   await ctx.rpc('media.completeUpload', {
     segmentId: segment.id,
     ...(dl.video.durationSec ? { durationSec: dl.video.durationSec } : {}),
+    ...(ctx.transcribe ? {} : { transcribe: false }),
   });
   if (!ctx.keep) await rm(dl.dir, { recursive: true, force: true });
   say(
-    `${label} uploaded ${mb(size)}${dl.video.private ? ' (private video)' : ''}; transcription queued.`,
+    `${label} uploaded ${mb(size)}${dl.video.private ? ' (private video)' : ''}; ${ctx.transcribe ? 'transcription queued' : 'not transcribed (--no-transcribe)'}.`,
   );
 }
 
@@ -1069,6 +1073,7 @@ export async function main(argv, env = process.env) {
     ),
     keep: args.keep,
     dryRun: args.dryRun,
+    transcribe: args.transcribe,
     rpc: makeRpc(baseUrl, token),
   };
   try {

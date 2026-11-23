@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../core/ids.ts';
 import type { Actor } from '../core/op.ts';
@@ -90,5 +91,65 @@ describe('MCP tool-list version', () => {
       new RegExp(`^\\d+\\.\\d+\\.\\d+\\+tools\\.${version}$`),
     );
     expect(client.getInstructions()).toContain(`Tool list version: ${version}.`);
+  });
+});
+
+describe('transcript_text with no segments', () => {
+  it('says whether the transcript is empty, pending or failed', async () => {
+    const { owner, session } = await studio();
+    const callTool = await connect(asAgent(owner));
+    const read = async (args: Record<string, unknown> = {}) => {
+      const res = await callTool('transcript_text', { sessionId: session.id, ...args });
+      const [text, numbers] = res.text.split('\n');
+      return { text, numbers: JSON.parse(numbers!) };
+    };
+
+    expect(await read()).toEqual({
+      text: '(no transcript yet: the session has no audio to transcribe)',
+      numbers: expect.objectContaining({ totalSegments: 0, transcriptStatus: 'none' }),
+    });
+
+    const audioId = newId('aud');
+    await db.insert(schema.audioSegments).values({
+      id: audioId,
+      sessionId: session.id,
+      ordinal: 1,
+      mimeType: 'audio/mp4',
+      origin: 'file',
+      objectKey: `sessions/${session.id}/${audioId}.m4a`,
+      status: 'transcribing',
+    });
+    const setStatus = (status: 'transcribed' | 'failed') =>
+      db.update(schema.audioSegments).set({ status }).where(eq(schema.audioSegments.id, audioId));
+
+    expect((await read()).text).toMatch(/^\(no transcript yet: transcription is queued/);
+    await setStatus('failed');
+    expect((await read()).text).toMatch(/^\(no transcript: transcription failed/);
+
+    // Transcribed, but no speech (a music-only video): final, not "yet".
+    await setStatus('transcribed');
+    expect(await read()).toEqual({
+      text: '(transcript is empty: no speech detected)',
+      numbers: {
+        segments: 0,
+        chars: 0,
+        totalSegments: 0,
+        durationSec: 0,
+        transcriptStatus: 'done',
+      },
+    });
+
+    // An empty page of a non-empty transcript is just an empty range.
+    await db.insert(schema.transcriptSegments).values({
+      id: newId('seg'),
+      sessionId: session.id,
+      startSec: 5,
+      endSec: 8,
+      speaker: 'Dana',
+      text: 'Hi.',
+      words: [],
+    });
+    expect((await read({ fromSec: 100 })).text).toMatch(/^\(no segments start in this range/);
+    expect((await read()).text).toBe('[00:00:05 @5.0s] Dana: Hi.');
   });
 });

@@ -36,9 +36,9 @@ Finding ids: shows_list → sessions_list (filter by showId) → sessions_get. R
 
 Setup: if the user asks for a new team, create it with teams_create (you become its owner). If a team has no show yet, a team owner/admin can create one with shows_create (teamId from teams_list) and set its event buttons with categories_save. Shows are deleted only in the web app.
 
-Importing: media_importPlaylist creates one session per video of a YouTube playlist (try dryRun: true first; agents cannot delete sessions), media_importYoutube imports one video into a session (transcribe: false downloads the audio only). The server downloads as the team's YouTube sign-in: check media_youtubeAccess first, and when it is missing or failing, ask the user to sign in to YouTube and to agree before you send their browser's cookies with media_setYoutubeCookies. Session keyTerms (guest names, jargon; sessions_create / sessions_update) steer transcription that runs after they are set; media_retranscribe applies them to audio already transcribed. Wait for transcription with jobs_list waitSec and kinds ["youtube_import","transcribe"] (long-polls; no sleep needed; waveform jobs only draw the web timeline and can be ignored).
+Importing: media_importPlaylist creates one session per video of a YouTube playlist (try dryRun: true first; agents cannot delete sessions), media_importYoutube imports one video into a session (transcribe: false downloads the audio only). The server downloads as the team's YouTube sign-in: check media_youtubeAccess first, and when it is missing or failing, ask the user to sign in to YouTube and to agree before you send their browser's cookies with media_setYoutubeCookies. Session keyTerms (guest names, jargon; sessions_create / sessions_update) steer transcription that runs after they are set — for a playlist pass them per video in media_importPlaylist keyTerms, since its first videos are transcribed seconds after the call; media_retranscribe applies them to audio already transcribed. Wait for transcription with jobs_list waitSec and kinds ["youtube_import","transcribe"] (long-polls; no sleep needed; waveform jobs only draw the web timeline and can be ignored).
 
-Time conventions: atSec / startSec / durationSec are seconds from the session start and line up with transcript_text, where each line looks like \`[HH:MM:SS @123.4s] Speaker: text\` (format "compact": paragraphs \`@123.4 Speaker: text\` with inline \`[@183.4]\` stamps) — use the @seconds value. timecode strings (HH:MM:SS:FF) are on the session clock (frame rate and start offset in sessions_get). Prefer atSec when working from the transcript.
+Time conventions: atSec / startSec / durationSec are seconds from the session start and line up with transcript_text, where each line looks like \`[HH:MM:SS @123.4s] Speaker: text\` (format "compact": paragraphs \`@123.4 Speaker: text\` with inline \`[@183.4]\` stamps about once a minute, or at every segment with stampEverySec: 0 — use that when you need exact times for topics, events or citations) — use the @seconds value. timecode strings (HH:MM:SS:FF) are on the session clock (frame rate and start offset in sessions_get). Prefer atSec when working from the transcript.
 
 Writes apply immediately, are attributed to you (this client) in the session's change log, and the operator can undo any of them from the Agents tab — so act, but stay within what was asked. topics_replace swaps the whole topic list (the usual way to (re)generate chapters); events_createMany logs many events at once. For partial edits, send only what changes: events_updateMany, dashboards_updateWidgets, wiki_patch. Tools with a compact option (events_list, the bulk writes, wiki_upsert) return much less with compact: true; prefer it.
 
@@ -101,13 +101,35 @@ export function mcpTools(): ToolCache {
   return toolCache;
 }
 
+/** What transcript_text says instead of an empty page, so agents know whether to wait. */
+function emptyTranscriptText(counts: { totalSegments?: number; transcriptStatus?: string }) {
+  if (counts.totalSegments)
+    return '(no segments start in this range; see totalSegments and durationSec)';
+  switch (counts.transcriptStatus) {
+    case 'done':
+      return '(transcript is empty: no speech detected)';
+    case 'failed':
+      return '(no transcript: transcription failed; jobs_list shows the error, media_retranscribe retries)';
+    case 'partial':
+      return '(no speech in the audio transcribed so far; some audio is still being transcribed or failed)';
+    case 'pending':
+      return '(no transcript yet: transcription is queued or running; wait with jobs_list)';
+    default:
+      return '(no transcript yet: the session has no audio to transcribe)';
+  }
+}
+
 function resultContent(op: OpName, data: unknown): CallToolResult {
   // The transcript is meant to be read as text; everything else is JSON.
   if (op === 'transcript.text' && data && typeof (data as { text?: unknown }).text === 'string') {
-    const { text, ...counts } = data as { text: string };
+    const { text, ...counts } = data as {
+      text: string;
+      totalSegments?: number;
+      transcriptStatus?: string;
+    };
     return {
       content: [
-        { type: 'text', text: text || '(no transcript yet)' },
+        { type: 'text', text: text || emptyTranscriptText(counts) },
         { type: 'text', text: JSON.stringify(counts) },
       ],
     };
