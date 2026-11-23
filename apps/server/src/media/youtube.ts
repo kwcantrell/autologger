@@ -1,7 +1,7 @@
 // YouTube import via yt-dlp. Downloads the best audio-only stream as-is (no ffmpeg re-encode).
 
 import { spawn } from 'node:child_process';
-import { chmod, copyFile, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { chmod, copyFile, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { env } from '../env.ts';
@@ -97,11 +97,31 @@ const BOT_CHECK =
 export const HELPER_HINT =
   'Or use the AutoLogger import helper on your own computer (yt-dlp with your browser cookies; it imports videos and builds compilations; see docs/importer.md).';
 
+/**
+ * Cookies for one yt-dlp run: a show's stored YouTube sign-in (media/youtubeCookies.ts). Without
+ * them, runs fall back to the instance-wide YTDLP_COOKIES_FILE.
+ */
+export interface YtCookies {
+  text: string;
+  /**
+   * After the run: `refreshed` is the cookie file yt-dlp left behind when it rotated cookies
+   * (differs from `text`), `authError` the sign-in error YouTube answered with, if any.
+   */
+  report?(r: {
+    ok: boolean;
+    refreshed: string | null;
+    authError: YoutubeAuthError | null;
+  }): Promise<void>;
+}
+
+/** Where the cookies of a failed run came from, for the error message. */
+type CookieSource = 'show' | 'server' | null;
+
+const TEAM_SETTING =
+  'the team’s YouTube sign-in (Settings › Team details › YouTube access, `autologger-import youtube-login`, or media_setYoutubeCookies)';
+
 /** The sign-in error in yt-dlp's stderr, as a YoutubeAuthError, or null for any other failure. */
-export function youtubeAuthError(
-  stderr: string,
-  cookiesConfigured: boolean,
-): YoutubeAuthError | null {
+export function youtubeAuthError(stderr: string, cookies: CookieSource): YoutubeAuthError | null {
   const line =
     stderr
       .split('\n')
@@ -114,50 +134,77 @@ export function youtubeAuthError(
   if (RESTRICTED.test(stderr))
     return new YoutubeAuthError(
       'restricted',
-      cookiesConfigured
-        ? `YouTube requires a signed-in account for this video (private, members-only or age-restricted), and the account in YTDLP_COOKIES_FILE cannot watch it (or its cookies have expired).${detail}`
-        : `YouTube requires a signed-in account for this video (private, members-only or age-restricted). Configure YTDLP_COOKIES_FILE with an account that can watch it on the server and worker; see docs/media.md.${detail}`,
+      cookies === 'show'
+        ? `YouTube requires a signed-in account for this video (private, members-only or age-restricted), and the account in ${TEAM_SETTING} cannot watch it (or its cookies have expired).${detail}`
+        : cookies === 'server'
+          ? `YouTube requires a signed-in account for this video (private, members-only or age-restricted), and the account in YTDLP_COOKIES_FILE cannot watch it (or its cookies have expired). Set ${TEAM_SETTING} with an account that can.${detail}`
+          : `YouTube requires a signed-in account for this video (private, members-only or age-restricted). Set ${TEAM_SETTING} with an account that can watch it; see docs/media.md.${detail}`,
     );
   return new YoutubeAuthError(
     'bot_check',
-    cookiesConfigured
-      ? `YouTube is blocking this server's downloads (bot check) even with the cookies in YTDLP_COOKIES_FILE: they have probably expired or been signed out. Export fresh cookies (and/or set YTDLP_PROXY) on the server and worker; see docs/media.md.${detail}`
-      : `YouTube is blocking this server's downloads (bot check). Configure YTDLP_COOKIES_FILE (and/or YTDLP_PROXY) on the server and worker; see docs/media.md.${detail}`,
+    cookies === 'show'
+      ? `YouTube is blocking this server's downloads (bot check) even with ${TEAM_SETTING}: the cookies have probably expired or been signed out. Set fresh ones; see docs/media.md.${detail}`
+      : cookies === 'server'
+        ? `YouTube is blocking this server's downloads (bot check) even with the cookies in YTDLP_COOKIES_FILE: they have probably expired or been signed out. Set ${TEAM_SETTING}, or export fresh server cookies; see docs/media.md.${detail}`
+        : `YouTube is blocking this server's downloads (bot check). Set ${TEAM_SETTING} (or YTDLP_COOKIES_FILE / YTDLP_PROXY on the server and worker); see docs/media.md.${detail}`,
   );
 }
 
 /**
- * Run yt-dlp with the operator's YouTube access settings (YTDLP_COOKIES_FILE, YTDLP_PROXY,
- * YTDLP_EXTRA_ARGS) in front of `args`. Every yt-dlp call goes through here.
+ * Run yt-dlp with the YouTube access settings in front of `args`: the show's cookies (else
+ * YTDLP_COOKIES_FILE), YTDLP_PROXY, the JS runtime and YTDLP_EXTRA_ARGS. Every yt-dlp call goes
+ * through here.
  */
 async function run(
   cmd: string,
   args: string[],
   timeoutMs?: number,
+  cookies?: YtCookies | null,
 ): Promise<{ stdout: string; stderr: string }> {
   const pre: string[] = [];
   let cookieDir: string | null = null;
-  if (env.ytDlpCookiesFile) {
+  let copy = '';
+  const source: CookieSource = cookies ? 'show' : env.ytDlpCookiesFile ? 'server' : null;
+  if (source) {
     // yt-dlp saves cookies back on exit: give each run a private copy, so a read-only mount
     // works and concurrent runs never write the same file.
     cookieDir = await mkdtemp(join(tmpdir(), 'autologger-ytc-'));
-    const copy = join(cookieDir, 'cookies.txt');
+    copy = join(cookieDir, 'cookies.txt');
     try {
-      await copyFile(env.ytDlpCookiesFile, copy);
-      await chmod(copy, 0o600);
+      if (cookies) await writeFile(copy, cookies.text, { mode: 0o600 });
+      else {
+        await copyFile(env.ytDlpCookiesFile!, copy);
+        await chmod(copy, 0o600);
+      }
     } catch (e) {
       await rm(cookieDir, { recursive: true, force: true });
       throw new PermanentError(
-        `Cannot read YTDLP_COOKIES_FILE (${env.ytDlpCookiesFile}): ${(e as NodeJS.ErrnoException).code ?? (e as Error).message}.`,
+        cookies
+          ? `Cannot write the show's YouTube cookies to a temp file: ${(e as Error).message}.`
+          : `Cannot read YTDLP_COOKIES_FILE (${env.ytDlpCookiesFile}): ${(e as NodeJS.ErrnoException).code ?? (e as Error).message}.`,
       );
     }
     pre.push('--cookies', copy);
   }
   if (env.ytDlpProxy) pre.push('--proxy', env.ytDlpProxy);
+  if (env.ytDlpJsRuntime) pre.push('--js-runtimes', env.ytDlpJsRuntime);
   pre.push(...env.ytDlpExtraArgs);
+  let ok = false;
+  let authError: YoutubeAuthError | null = null;
   try {
-    return await spawnYtDlp(cmd, [...pre, ...args], timeoutMs);
+    const out = await spawnYtDlp(cmd, [...pre, ...args], source, timeoutMs);
+    ok = true;
+    return out;
+  } catch (e) {
+    if (e instanceof YoutubeAuthError) authError = e;
+    throw e;
   } finally {
+    if (cookies?.report && (ok || authError)) {
+      const after = await readFile(copy, 'utf8').catch(() => null);
+      await cookies
+        .report({ ok, authError, refreshed: after && after !== cookies.text ? after : null })
+        .catch((e) => console.warn(`saving the show's YouTube cookies: ${(e as Error).message}`));
+    }
     if (cookieDir) await rm(cookieDir, { recursive: true, force: true }).catch(() => {});
   }
 }
@@ -165,6 +212,7 @@ async function run(
 function spawnYtDlp(
   cmd: string,
   args: string[],
+  cookies: CookieSource,
   timeoutMs?: number,
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -187,7 +235,7 @@ function spawnYtDlp(
       else if (signal && timeoutMs)
         reject(new Error(`yt-dlp did not finish within ${Math.round(timeoutMs / 1000)} seconds.`));
       else {
-        const auth = youtubeAuthError(stderr, Boolean(env.ytDlpCookiesFile));
+        const auth = youtubeAuthError(stderr, cookies);
         if (auth) return reject(auth);
         const last =
           stderr
@@ -208,21 +256,30 @@ function spawnYtDlp(
 /** yt-dlp format for audio imports: the best audio-only stream, as-is. */
 const AUDIO_FORMAT = 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio';
 
-export async function downloadAudio(ytDlpPath: string, url: string): Promise<Download> {
+export async function downloadAudio(
+  ytDlpPath: string,
+  url: string,
+  cookies?: YtCookies | null,
+): Promise<Download> {
   const dir = await mkdtemp(join(tmpdir(), 'autologger-yt-'));
   const cleanup = () => rm(dir, { recursive: true, force: true });
   try {
-    const { stdout } = await run(ytDlpPath, [
-      '-f',
-      AUDIO_FORMAT,
-      '--no-playlist',
-      '--no-progress',
-      '--no-simulate',
-      '--dump-json',
-      '-o',
-      join(dir, 'audio.%(ext)s'),
-      url,
-    ]);
+    const { stdout } = await run(
+      ytDlpPath,
+      [
+        '-f',
+        AUDIO_FORMAT,
+        '--no-playlist',
+        '--no-progress',
+        '--no-simulate',
+        '--dump-json',
+        '-o',
+        join(dir, 'audio.%(ext)s'),
+        url,
+      ],
+      undefined,
+      cookies,
+    );
     const file = (await readdir(dir)).find((f) => f.startsWith('audio.') && !f.endsWith('.part'));
     if (!file) throw new Error('yt-dlp finished but produced no audio file.');
     let info: { title?: string; duration?: number; upload_date?: string } = {};
@@ -265,6 +322,7 @@ export async function videoDuration(
   ytDlpPath: string,
   url: string,
   timeoutMs: number,
+  cookies?: YtCookies | null,
 ): Promise<number | null> {
   const { stdout } = await run(
     ytDlpPath,
@@ -280,6 +338,7 @@ export async function videoDuration(
       url,
     ],
     timeoutMs,
+    cookies,
   );
   try {
     const d: unknown = JSON.parse(stdout.trim().split('\n').at(-1) ?? '').duration;
@@ -309,7 +368,7 @@ export interface Playlist {
 export async function listPlaylist(
   ytDlpPath: string,
   url: string,
-  opts: { maxEntries: number; timeoutMs: number },
+  opts: { maxEntries: number; timeoutMs: number; cookies?: YtCookies | null },
 ): Promise<Playlist> {
   const { stdout } = await run(
     ytDlpPath,
@@ -324,6 +383,7 @@ export async function listPlaylist(
       url,
     ],
     opts.timeoutMs,
+    opts.cookies,
   );
   let info: { title?: unknown; entries?: unknown };
   try {
@@ -367,6 +427,7 @@ export async function downloadSection(
   toSec: number,
   dir: string,
   name: string,
+  cookies?: YtCookies | null,
   timeoutMs = 30 * 60_000,
 ): Promise<string> {
   await run(
@@ -389,6 +450,7 @@ export async function downloadSection(
       url,
     ],
     timeoutMs,
+    cookies,
   );
   // `<name>.<ext>`, not yt-dlp's leftovers (`<name>.f137.mp4`, `<name>.mp4.part`).
   const file = (await readdir(dir)).find(

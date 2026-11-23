@@ -1,0 +1,1 @@
+DROP TABLE "show_youtube_cookies" CASCADE;

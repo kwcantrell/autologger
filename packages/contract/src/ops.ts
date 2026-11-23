@@ -35,6 +35,7 @@ import type {
   WikiPage,
   WikiRevision,
   WikiSavedCitations,
+  YoutubeAccess,
 } from './entities.ts';
 import { MAX_TRANSCRIPT_RULES, TranscriptRuleInput } from './transcriptRules.ts';
 
@@ -42,6 +43,8 @@ const id = z.string().min(1).max(64);
 const name = z.string().trim().min(1).max(200);
 
 /** Show transcription key terms (Deepgram keyterm prompting caps a request at ~500 tokens). */
+/** Largest cookies.txt accepted by media.setYoutubeCookies (before filtering to YouTube/Google). */
+export const MAX_YOUTUBE_COOKIES_CHARS = 1_000_000;
 export const MAX_KEY_TERMS = 50;
 export const MAX_KEY_TERM_LENGTH = 50;
 /** Budget for all key terms together (trimmed characters), keeping a request under ~500 tokens. */
@@ -158,6 +161,21 @@ export const opInputs = {
       .optional(),
     transcriptRules: z.array(TranscriptRuleInput).max(MAX_TRANSCRIPT_RULES).optional(),
   }),
+  'media.youtubeAccess': z
+    .object({ teamId: id.optional(), showId: id.optional() })
+    .refine((v) => (v.teamId === undefined) !== (v.showId === undefined), {
+      message: 'Pass exactly one of teamId or showId.',
+    }),
+  'media.setYoutubeCookies': z
+    .object({
+      teamId: id.optional(),
+      showId: id.optional(),
+      /** Netscape cookies.txt or JSON cookie export; null removes the team's cookies. */
+      cookies: z.string().max(MAX_YOUTUBE_COOKIES_CHARS).nullable(),
+    })
+    .refine((v) => (v.teamId === undefined) !== (v.showId === undefined), {
+      message: 'Pass exactly one of teamId or showId.',
+    }),
   'shows.delete': z.object({ showId: id }),
   'categories.list': z.object({ showId: id }),
   'categories.save': z.object({ showId: id, categories: z.array(CategoryInput).max(40) }),
@@ -440,7 +458,12 @@ export const opInputs = {
   'media.completeUpload': z.object({ segmentId: id, durationSec: sec.optional() }),
   'media.playbackUrl': z.object({ segmentId: id }),
   'media.waveform': z.object({ sessionId: id }),
-  'media.importYoutube': z.object({ sessionId: id, url: z.url() }),
+  'media.importYoutube': z.object({
+    sessionId: id,
+    url: z.url(),
+    /** false: download only (audio + waveform), no transcription. */
+    transcribe: z.boolean().default(true),
+  }),
   'media.importPlaylist': z
     .object({
       showId: id,
@@ -461,6 +484,8 @@ export const opInputs = {
       order: z.enum(['playlist', 'reverse']).default('playlist'),
       titleTemplate: z.string().trim().min(1).max(200).optional(),
       dryRun: z.boolean().default(false),
+      /** false: download only (audio + waveform), no transcription. */
+      transcribe: z.boolean().default(true),
     })
     .refine((v) => (v.url === undefined) !== (v.videos === undefined), {
       message: 'Pass exactly one of url or videos.',
@@ -699,6 +724,11 @@ export interface OpOutputs {
   };
   'shows.create': Show;
   'shows.update': Show;
+  'media.youtubeAccess': YoutubeAccess;
+  'media.setYoutubeCookies': YoutubeAccess & {
+    /** Result of a test read of a public video with the new cookies; null when not run. */
+    check: { ok: boolean; message: string } | null;
+  };
   'shows.delete': { deleted: true };
   'categories.list': Category[];
   'categories.save': Category[];

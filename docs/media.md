@@ -18,6 +18,7 @@ the **worker** (`apps/server/src/worker/main.ts`), a second entrypoint of the se
 | `YTDLP_PATH`                                            | app, worker | yt-dlp binary (default `yt-dlp` on `PATH`). Best audio is downloaded as-is, ffmpeg is not required. The app runs it too, to read playlists and probe a video before importing. |
 | `YTDLP_COOKIES_FILE`                                    | app, worker | Netscape `cookies.txt` of a signed-in YouTube session, for servers YouTube bot-checks. Copied per run (may be read-only and shared). See _YouTube bot check_.                  |
 | `YTDLP_PROXY`                                           | app, worker | Proxy for every yt-dlp run (`--proxy`, e.g. `socks5://user:pass@host:1080`), for an IP YouTube blocks.                                                                         |
+| `YTDLP_JS_RUNTIME`                                      | app, worker | JS runtime yt-dlp solves YouTube's challenges with (`--js-runtimes`). Default: the Node running the server (`node:<path>`); `none` leaves yt-dlp's default (Deno only).                |
 | `YTDLP_EXTRA_ARGS`                                      | app, worker | Extra yt-dlp arguments for every run, split on whitespace (no shell, no quoting), e.g. `--extractor-args youtubepot-bgutilhttp:base_url=http://pot:4416`.                      |
 | `WORKER_CONCURRENCY`                                    | worker, api | Jobs run in parallel per worker process (default 2). The API uses it for etaSec only while no worker heartbeat row is live.                                                    |
 | `WORKER_CONCURRENCY_TRANSCRIBE`                         | worker      | Of those slots, how many `transcribe` jobs may hold at once (1 to `WORKER_CONCURRENCY`, which is the default).                                                                 |
@@ -37,11 +38,40 @@ The bucket is created on first use (worker start, or the first upload) if the cr
 
 YouTube often answers downloads from datacenter IPs with "Sign in to confirm you're not a bot"
 (listing a playlist usually still works). yt-dlp then needs cookies from a signed-in session
-and/or a proxy:
+and/or a proxy. yt-dlp has **no YouTube login**: YouTube blocks its username/password and OAuth
+sign-ins, so cookies exported from a browser signed in to YouTube are the only way to sign in.
 
-1. Sign in to YouTube in a browser with a **dedicated throwaway Google account** (the cookies
-   grant full access to it, and YouTube may flag it), ideally in a private window you then close
-   without signing out.
+**Per team (recommended).** A team owner or admin gives the team one YouTube sign-in; every
+yt-dlp run for any of its shows (import probe, playlist listing, import and compile jobs) uses
+it. It is one per team, not per show, on purpose: every copy of a Google session forks it, and
+YouTube invalidates copies that fall behind its cookie rotation.
+
+- **From the command line, one step:** `autologger-import youtube-login --team <teamId>
+  --cookies-from-browser firefox` (see [importer.md](importer.md)) reads the browser's YouTube
+  cookies with yt-dlp and stores them on the server (`media.setYoutubeCookies`).
+- **In the web app:** Settings › Team details › YouTube access: paste or upload a cookies.txt
+  (e.g. from the "Get cookies.txt LOCALLY" extension on youtube.com) or a JSON cookie export.
+- **Through an agent:** the autologger plugin's import skill checks `media.youtubeAccess`
+  before importing, asks the user to sign in and for consent, then sends the cookies with
+  `media.setYoutubeCookies`.
+
+Only the youtube.com and google.com cookies are kept, and they must include a signed-in session
+(`SID` or `LOGIN_INFO`). Saving tests them at once on a public video and reports whether YouTube
+accepted them. Use a **dedicated throwaway Google account**: the cookies grant full access to it,
+and YouTube may flag it. YouTube rotates the cookies as they are used, so a browser that keeps
+using YouTube in the same profile soon leaves the server's copy behind: export them from a
+browser profile used only for this. yt-dlp also rotates them on each server run; the server
+stores the refreshed cookies after every run (`team_youtube_cookies`), so a team in regular use
+stays signed in longer. The settings card and `media.youtubeAccess` show when they last worked,
+and the last error.
+
+The cookies are stored in Postgres in plain text (anyone with database access can read them), are
+never returned by any op and are not in the change log.
+
+**Server-wide.** For teams without their own sign-in:
+
+1. Sign in to YouTube in a browser with a dedicated throwaway Google account, ideally in a
+   private window you then close without signing out.
 2. Export the cookies in Netscape format, e.g. with the "Get cookies.txt LOCALLY" browser
    extension on youtube.com, or `yt-dlp --cookies-from-browser chrome --cookies cookies.txt
    --skip-download https://www.youtube.com/watch?v=jNQXAC9IVRw`.
@@ -54,7 +84,8 @@ and/or a proxy:
 yt-dlp rewrites its cookie file on exit, so every run gets its own private copy of the file in a
 temp dir (deleted afterwards); the mounted file is never changed and concurrent jobs don't race.
 Cookies expire or get signed out (often within weeks): when jobs start failing with "…even with
-the cookies in YTDLP_COOKIES_FILE: they have probably expired", export fresh ones. `YTDLP_PROXY`
+the team's YouTube sign-in" (or "…the cookies in YTDLP_COOKIES_FILE"): "they have probably
+expired", set fresh ones. `YTDLP_PROXY`
 (a residential proxy) and `YTDLP_EXTRA_ARGS` (e.g. a PO-token provider plugin's
 `--extractor-args`) are alternatives or additions.
 

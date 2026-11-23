@@ -78,6 +78,14 @@ export const env = {
   ytDlpCookiesFile: str('YTDLP_COOKIES_FILE'),
   /** Proxy URL for every yt-dlp run (`--proxy`), e.g. for a datacenter IP YouTube blocks. */
   ytDlpProxy: str('YTDLP_PROXY'),
+  /**
+   * JS runtime yt-dlp solves YouTube's challenges with (`--js-runtimes`). yt-dlp only enables
+   * Deno by default; without a runtime YouTube serves few or no formats. Default: the Node running
+   * this server. YTDLP_JS_RUNTIME=none passes nothing (yt-dlp's own default).
+   */
+  ytDlpJsRuntime: ((v) => (v === 'none' ? null : v))(
+    str('YTDLP_JS_RUNTIME', `node:${process.execPath}`)!,
+  ),
   /** Extra yt-dlp arguments for every run, split on whitespace (no shell, no quoting). */
   ytDlpExtraArgs: (str('YTDLP_EXTRA_ARGS') ?? '').split(/\s+/).filter(Boolean),
   youtubeEnabled: str('YOUTUBE_IMPORT', '1') === '1',

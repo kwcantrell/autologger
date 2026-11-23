@@ -4,9 +4,9 @@
 // bytes straight to S3 → media.completeUpload (verifies the object, status 'ready', enqueues
 // `transcribe`). The worker (src/worker) does the Deepgram and yt-dlp work.
 
-import type { AudioSegment, Job, PlaylistImport } from '@autologger/contract';
+import type { AudioSegment, Job, PlaylistImport, YoutubeAccess } from '@autologger/contract';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
-import { requireSession, requireShow } from '../core/authz.ts';
+import { requireSession, requireShow, requireTeamRole } from '../core/authz.ts';
 import { type BusMessage, changeMessage, subscribeAll, type Topic } from '../core/bus.ts';
 import { badRequest, conflict, notFound, unavailable } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
@@ -37,10 +37,15 @@ import {
   youtubePlaylistId,
   youtubeVideoId,
 } from '../media/youtube.ts';
+import {
+  type ParsedCookies,
+  parseYoutubeCookies,
+  youtubeCookiesForShow,
+} from '../media/youtubeCookies.ts';
 import { toAudioSegment } from './map.ts';
 import { publishSession, reserveEpisodes } from './sessions.ts';
 
-const { audioSegments, compilations, jobs, sessions } = schema;
+const { audioSegments, compilations, jobs, sessions, teamYoutubeCookies } = schema;
 
 const MAX_PLAYLIST_VIDEOS = 200;
 const PLAYLIST_TIMEOUT_MS = 60_000;
@@ -319,7 +324,7 @@ defineOp({
 defineOp({
   name: 'media.importYoutube',
   description:
-    'Import the audio of one YouTube video into an existing session. Runs in the background: the worker downloads the audio, stores it and transcribes it. If the session\'s episodeDate is still its default (the day it was created), it is set to the video\'s upload date. Playlist URLs are rejected: use media.importPlaylist to import a whole playlist into a show. Returns the job; wait for it with jobs.list (waitSec; kinds ["youtube_import","transcribe"] leaves out the cosmetic waveform job queued after the download). Before queuing it reads the video length from YouTube (a few seconds, no download) so sessions.get transcriptJob.etaSec can include the transcription time; if that read is slow or fails the import is still queued, with a download-only estimate. That read also checks access: if YouTube demands a sign-in (its bot check on this server, or a private, members-only or age-restricted video) the call fails with bad_request explaining it and queues nothing. That is a server configuration problem (yt-dlp cookies or proxy), not something to retry; tell the user, who can instead import the video from their own computer with the AutoLogger import helper (`autologger-import video <url> --session <sessionId>`, docs/importer.md), which also reads private videos.',
+    'Import the audio of one YouTube video into an existing session. Runs in the background: the worker downloads the audio, stores it and transcribes it. If the session\'s episodeDate is still its default (the day it was created), it is set to the video\'s upload date. Playlist URLs are rejected: use media.importPlaylist to import a whole playlist into a show. Returns the job; wait for it with jobs.list (waitSec; kinds ["youtube_import","transcribe"] leaves out the cosmetic waveform job queued after the download). transcribe: false (default true) only downloads the audio and draws its waveform, without transcribing it (transcribe later with media_retranscribe). Before queuing it reads the video length from YouTube (a few seconds, no download) so sessions.get transcriptJob.etaSec can include the transcription time; if that read is slow or fails the import is still queued, with a download-only estimate. That read also checks access: if YouTube demands a sign-in (its bot check on this server, or a private, members-only or age-restricted video) the call fails with bad_request explaining it and queues nothing. Retrying will not help: the team needs a (fresh) YouTube sign-in. Check media_youtubeAccess, then ask the user to sign in to YouTube in a browser and, once they agree to send its cookies, set them with media_setYoutubeCookies (team owner/admin) and retry. Only if they decline, tell the user, who can instead import the video from their own computer with the AutoLogger import helper (`autologger-import video <url> --session <sessionId>`, docs/importer.md), which also reads private videos.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   // Validate and authorize, then read the video length, before the op's transaction opens.
@@ -331,19 +336,23 @@ defineOp({
       throw badRequest(
         'That is a playlist URL. Use media.importPlaylist with the showId to create one session per video.',
       );
-    await db.transaction((tx) =>
+    const { show } = await db.transaction((tx) =>
       requireSession(prepareCtx(actor, tx, 'media.importYoutube'), sessionId, 'write'),
     );
-    return probeVideo(url, 'Nothing was queued.');
+    return probeVideo(url, show.id, 'Nothing was queued.');
   },
-  async run(ctx, { sessionId, url }, durationSec) {
+  async run(ctx, { sessionId, url, transcribe }, durationSec) {
     await requireSession(ctx, sessionId, 'write');
     const job = await enqueueJob(ctx.db, {
       kind: 'youtube_import',
       sessionId,
       actorId: ctx.actor.user.id,
       // durationSec lets sessions.get estimate the transcription that follows the download.
-      payload: { url, ...(durationSec ? { durationSec } : {}) },
+      payload: {
+        url,
+        ...(durationSec ? { durationSec } : {}),
+        ...(transcribe ? {} : { transcribe: false }),
+      },
     });
     publishJob(ctx, job);
     return toJob(job);
@@ -362,11 +371,20 @@ let videoProbes = 0;
  * bad_request instead of queuing a job that cannot succeed. Anything else (yt-dlp missing on
  * this host, timeout, too many probes at once) never blocks the import: the length is just null.
  */
-async function probeVideo(url: string, nothingDone: string): Promise<number | null> {
+async function probeVideo(
+  url: string,
+  showId: string,
+  nothingDone: string,
+): Promise<number | null> {
   if (videoProbes >= MAX_VIDEO_PROBES) return null;
   videoProbes++;
   try {
-    return await videoDuration(env.ytDlpPath, url, VIDEO_PROBE_TIMEOUT_MS);
+    return await videoDuration(
+      env.ytDlpPath,
+      url,
+      VIDEO_PROBE_TIMEOUT_MS,
+      await youtubeCookiesForShow(showId),
+    );
   } catch (e) {
     if (e instanceof YoutubeAuthError) throw badRequest(`${e.message} ${nothingDone}`);
     console.warn(`video length of ${url}: ${(e as Error).message}`);
@@ -430,7 +448,7 @@ export function fillTitle(template: string, vars: { title: string; episode: stri
 defineOp({
   name: 'media.importPlaylist',
   description:
-    'Import a whole YouTube playlist into a show in one call: one new session per video, each with a queued youtube_import job (download + transcription run in the background; poll jobs.list with showId, status ["queued","running"] and kinds ["youtube_import","transcribe"] until empty; waveform jobs that follow are cosmetic). showId comes from shows.list (needs write access). url is a YouTube URL with a list= parameter. Videos already in the show (a session whose sourceUrl is the same video, or one with a queued/running import of it) and private/deleted videos are skipped, so calling it again later imports only new videos. Session titles come from titleTemplate (placeholders {title} = video title, {episode} = episode number; default "{title}"); episode numbers are taken from the show counter in import order. order "playlist" (default) keeps the playlist order; "reverse" imports the last video first (use it when the playlist lists newest first, so episode 1 is the oldest). episodeDate is set to each video\'s YouTube upload date when its import job runs. Up to 200 videos per playlist. Agents cannot delete sessions (deleting is web-only), so for an unfamiliar playlist call it first with dryRun: true: it returns the same created/skipped lists (dryRun true, sessionId and jobId null) without writing anything. A session whose import job fails stays in the show (and is skipped on re-runs): retry it with media.importYoutube on that sessionId. Returns {playlistTitle, dryRun, created [{sessionId, title, episode, videoId, durationSec, jobId}], skipped [{videoId, title, reason, sessionId}]}; durationSec is in seconds (null if YouTube did not say). Fails with unavailable when the server is busy reading other playlists: retry shortly. Before creating sessions (not on dryRun) it checks that the first video can be downloaded (a few seconds, no download): if YouTube demands a sign-in (its bot check on this server, or a private/members-only/age-restricted video) the call fails with bad_request explaining it and creates no sessions. That is a server configuration problem (yt-dlp cookies or proxy), not something to retry; tell the user, who can import the playlist from their own computer instead with the AutoLogger import helper (`autologger-import playlist <url> --show <showId>`, docs/importer.md) — also the only way to import a private playlist. The helper calls this op with videos instead of url: a list it read itself, each {url (YouTube video URL), title, durationSec?, uploadDate? (YYYY-MM-DD)}, in playlist order. Then sessions are created the same way (same skipping, titles, episodes, order, dryRun; episodeDate = uploadDate, else today) but nothing is downloaded or queued (jobId null; playlistTitle null): the client uploads each video\'s audio with media_createUpload origin "youtube" and media_completeUpload.',
+    'Import a whole YouTube playlist into a show in one call: one new session per video, each with a queued youtube_import job (download + transcription run in the background; poll jobs.list with showId, status ["queued","running"] and kinds ["youtube_import","transcribe"] until empty; waveform jobs that follow are cosmetic). showId comes from shows.list (needs write access). url is a YouTube URL with a list= parameter. Videos already in the show (a session whose sourceUrl is the same video, or one with a queued/running import of it) and private/deleted videos are skipped, so calling it again later imports only new videos. Session titles come from titleTemplate (placeholders {title} = video title, {episode} = episode number; default "{title}"); episode numbers are taken from the show counter in import order. order "playlist" (default) keeps the playlist order; "reverse" imports the last video first (use it when the playlist lists newest first, so episode 1 is the oldest). episodeDate is set to each video\'s YouTube upload date when its import job runs. Up to 200 videos per playlist. transcribe: false (default true) only downloads each video\'s audio and draws its waveform, without transcribing (transcribe later with media_retranscribe per session); it applies to server downloads (url), not to videos uploaded by the helper. Agents cannot delete sessions (deleting is web-only), so for an unfamiliar playlist call it first with dryRun: true: it returns the same created/skipped lists (dryRun true, sessionId and jobId null) without writing anything. A session whose import job fails stays in the show (and is skipped on re-runs): retry it with media.importYoutube on that sessionId. Returns {playlistTitle, dryRun, created [{sessionId, title, episode, videoId, durationSec, jobId}], skipped [{videoId, title, reason, sessionId}]}; durationSec is in seconds (null if YouTube did not say). Fails with unavailable when the server is busy reading other playlists: retry shortly. Before creating sessions (not on dryRun) it checks that the first video can be downloaded (a few seconds, no download): if YouTube demands a sign-in (its bot check on this server, or a private/members-only/age-restricted video) the call fails with bad_request explaining it and creates no sessions. Retrying will not help: the team needs a (fresh) YouTube sign-in. Check media_youtubeAccess, then ask the user to sign in to YouTube in a browser and, once they agree to send its cookies, set them with media_setYoutubeCookies (team owner/admin) and retry. Only if they decline, tell the user, who can import the playlist from their own computer instead with the AutoLogger import helper (`autologger-import playlist <url> --show <showId>`, docs/importer.md) — also the only way to import a private playlist. The helper calls this op with videos instead of url: a list it read itself, each {url (YouTube video URL), title, durationSec?, uploadDate? (YYYY-MM-DD)}, in playlist order. Then sessions are created the same way (same skipping, titles, episodes, order, dryRun; episodeDate = uploadDate, else today) but nothing is downloaded or queued (jobId null; playlistTitle null): the client uploads each video\'s audio with media_createUpload origin "youtube" and media_completeUpload.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   // Authorize, then run yt-dlp, before the op's transaction opens.
@@ -453,7 +471,11 @@ defineOp({
       playlist = await listPlaylist(
         env.ytDlpPath,
         `https://www.youtube.com/playlist?list=${encodeURIComponent(listId)}`,
-        { maxEntries: MAX_PLAYLIST_VIDEOS + 1, timeoutMs: PLAYLIST_TIMEOUT_MS },
+        {
+          maxEntries: MAX_PLAYLIST_VIDEOS + 1,
+          timeoutMs: PLAYLIST_TIMEOUT_MS,
+          cookies: await youtubeCookiesForShow(showId),
+        },
       );
     } catch (e) {
       console.warn(`playlist ${listId}: ${(e as Error).message}`);
@@ -474,11 +496,15 @@ defineOp({
       const first = (order === 'reverse' ? playlist.entries.toReversed() : playlist.entries).find(
         (e) => e.available,
       );
-      if (first) await probeVideo(watchUrl(first.videoId), 'No sessions were created.');
+      if (first) await probeVideo(watchUrl(first.videoId), showId, 'No sessions were created.');
     }
     return playlist;
   },
-  async run(ctx, { showId, order, titleTemplate, dryRun }, playlist): Promise<PlaylistImport> {
+  async run(
+    ctx,
+    { showId, order, titleTemplate, dryRun, transcribe },
+    playlist,
+  ): Promise<PlaylistImport> {
     const local = Boolean(playlist.local);
     const { show } = await requireShow(ctx, showId, 'write');
     // Serialize imports into one show, so concurrent calls cannot both import a video.
@@ -576,6 +602,7 @@ defineOp({
               url: videoUrl,
               // Lets sessions.get estimate the transcription that follows the download.
               ...(e.durationSec ? { durationSec: e.durationSec } : {}),
+              ...(transcribe ? {} : { transcribe: false }),
             },
           },
           { at: new Date(base + i) },
@@ -757,7 +784,7 @@ function watchJobs(ms: number, showId: string | undefined, signal?: AbortSignal)
 defineOp({
   name: 'jobs.list',
   description:
-    'Background jobs (transcription, YouTube import, waveform, video compilation), newest first, with status, progress and errors. waveform jobs only draw the timeline waveform in the web app (cosmetic, run after everything else): when waiting for imports or transcripts, pass kinds ["youtube_import","transcribe"] or ignore them. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"; it also lists the show\'s compile jobs, which have sessionId null and instead compilationId and compilationTitle (absent once the compilation was deleted) — the compilation itself is compilations_get; retry a failed compile job with compilations_retry {compilationId}). Transcribe and waveform jobs include segmentId, the audio segment they are for (media_list); retry a failed transcription of just that segment with media_retranscribe and that segmentId (without segmentId it redoes every segment and loses manual edits). youtube_import jobs include sourceUrl, the video URL being imported: retry a failed import with media_importYoutube with that url and the job sessionId. An import or compile job whose error starts "YouTube is blocking this server\'s downloads (bot check)" or "YouTube requires a signed-in account" failed at once without retries: the server needs yt-dlp cookies or a proxy (or the video is private/age-restricted), so retrying will not help until the operator fixes that; tell the user. Optional kinds filters to the given job kinds; optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Queued jobs include queuePosition: how many jobs the worker will start before this one, 0 = next. It counts every runnable queued job on the server (all teams and shows; only the number is exposed); a job waiting to retry after a failure has no queuePosition until its retry time. startedAt is when the current attempt started (null while queued). Queued (with a queuePosition) and running jobs include etaSec: a rough estimate of seconds until the job finishes, from the median duration of the last 20 finished jobs of the same kind (transcriptions scaled by their audio length), the jobs ahead in the queue, the time left on running jobs and the total job slots of the workers currently running (compile jobs scaled by their total clip seconds); 0 on a running job means it is taking longer than usual. It is absent when there is no finished history to estimate from. Use it to choose waitSec, not as a deadline. To wait for jobs, pass waitSec (1–55): if any listed job is queued or running, the call holds until one of them changes status (starts, finishes, fails) or a new job is queued in one of their sessions, then returns the fresh list — or returns after waitSec seconds when nothing changed. Call it again in a loop until the result is empty / all done; no separate sleep is needed. Without waitSec the call returns at once; do not poll it in a tight loop. A failed job that someone acknowledged (jobs.dismiss) has dismissedAt set; hideDismissed: true leaves those failures out (e.g. status ["failed"] with hideDismissed lists the failures nobody has dealt with yet). Deleting an audio segment dismisses its transcribe and waveform jobs automatically.',
+    'Background jobs (transcription, YouTube import, waveform, video compilation), newest first, with status, progress and errors. waveform jobs only draw the timeline waveform in the web app (cosmetic, run after everything else): when waiting for imports or transcripts, pass kinds ["youtube_import","transcribe"] or ignore them. Pass exactly one of sessionId (one session) or showId (every session of the show — each job then includes sessionId and sessionTitle, so one call answers "is the playlist import finished?"; it also lists the show\'s compile jobs, which have sessionId null and instead compilationId and compilationTitle (absent once the compilation was deleted) — the compilation itself is compilations_get; retry a failed compile job with compilations_retry {compilationId}). Transcribe and waveform jobs include segmentId, the audio segment they are for (media_list); retry a failed transcription of just that segment with media_retranscribe and that segmentId (without segmentId it redoes every segment and loses manual edits). youtube_import jobs include sourceUrl, the video URL being imported: retry a failed import with media_importYoutube with that url and the job sessionId. An import or compile job whose error starts "YouTube is blocking this server\'s downloads (bot check)" or "YouTube requires a signed-in account" failed at once without retries: the team needs a (fresh) YouTube sign-in (media_youtubeAccess shows its state; a team owner/admin sets it with media_setYoutubeCookies) or the video is private/age-restricted for that account, so retrying will not help until that is fixed; tell the user. Optional kinds filters to the given job kinds; optional status filters to the given states (e.g. ["queued","running"] for unfinished work; an empty result means nothing is pending); limit defaults to 100 (max 500). Queued jobs include queuePosition: how many jobs the worker will start before this one, 0 = next. It counts every runnable queued job on the server (all teams and shows; only the number is exposed); a job waiting to retry after a failure has no queuePosition until its retry time. startedAt is when the current attempt started (null while queued). Queued (with a queuePosition) and running jobs include etaSec: a rough estimate of seconds until the job finishes, from the median duration of the last 20 finished jobs of the same kind (transcriptions scaled by their audio length), the jobs ahead in the queue, the time left on running jobs and the total job slots of the workers currently running (compile jobs scaled by their total clip seconds); 0 on a running job means it is taking longer than usual. It is absent when there is no finished history to estimate from. Use it to choose waitSec, not as a deadline. To wait for jobs, pass waitSec (1–55): if any listed job is queued or running, the call holds until one of them changes status (starts, finishes, fails) or a new job is queued in one of their sessions, then returns the fresh list — or returns after waitSec seconds when nothing changed. Call it again in a loop until the result is empty / all done; no separate sleep is needed. Without waitSec the call returns at once; do not poll it in a tight loop. A failed job that someone acknowledged (jobs.dismiss) has dismissedAt set; hideDismissed: true leaves those failures out (e.g. status ["failed"] with hideDismissed lists the failures nobody has dealt with yet). Deleting an audio segment dismisses its transcribe and waveform jobs automatically.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   watch: ({ waitSec, showId }, signal) =>
@@ -846,5 +873,133 @@ defineOp({
       .returning();
     publishJob(ctx, next!);
     return toJob(next!);
+  },
+});
+
+// ── a team's YouTube sign-in for the server's yt-dlp ──────────────
+
+/** A public video the cookie check reads (metadata only): YouTube's first upload. */
+const COOKIE_CHECK_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
+const COOKIE_CHECK_TIMEOUT_MS = 20_000;
+
+/** The team a youtubeAccess call is about, authorized: any member reads, owner/admin writes. */
+async function youtubeTeam(
+  ctx: Ctx,
+  { teamId, showId }: { teamId?: string; showId?: string },
+  need: 'read' | 'manage',
+): Promise<string> {
+  if (showId) return (await requireShow(ctx, showId, need)).show.teamId;
+  await requireTeamRole(ctx, teamId!, need === 'manage' ? 'admin' : 'member');
+  return teamId!;
+}
+
+async function youtubeAccessOf(ctx: Ctx, teamId: string): Promise<YoutubeAccess> {
+  const [team] = await ctx.db
+    .select({ name: schema.teams.name })
+    .from(schema.teams)
+    .where(eq(schema.teams.id, teamId));
+  const [row] = await ctx.db
+    .select({ c: teamYoutubeCookies, by: schema.users.name })
+    .from(teamYoutubeCookies)
+    .leftJoin(schema.users, eq(schema.users.id, teamYoutubeCookies.updatedBy))
+    .where(eq(teamYoutubeCookies.teamId, teamId));
+  const iso = (d: Date | null | undefined) => d?.toISOString() ?? null;
+  return {
+    teamId,
+    teamName: team?.name ?? '',
+    configured: Boolean(row),
+    serverCookies: Boolean(env.ytDlpCookiesFile),
+    updatedAt: iso(row?.c.updatedAt),
+    updatedBy: row?.c.updatedBy ? { id: row.c.updatedBy, name: row.by ?? '' } : null,
+    expiresAt: iso(row?.c.expiresAt),
+    lastOkAt: iso(row?.c.lastOkAt),
+    lastFailedAt: iso(row?.c.lastFailedAt),
+    lastError: row?.c.lastError ?? null,
+  };
+}
+
+defineOp({
+  name: 'media.youtubeAccess',
+  description:
+    "Whether a team has a YouTube sign-in for the server's YouTube downloads (media_importYoutube, media_importPlaylist, video compilations of all its shows), and how it last went. Pass teamId (teams_list) or showId (its team). Returns teamId, teamName, configured, who set it and when (updatedAt, updatedBy), expiresAt (earliest expiry of the sign-in cookies; YouTube often signs them out sooner), lastOkAt / lastFailedAt and lastError (the last time YouTube accepted or refused them), and serverCookies (the server also has instance-wide cookies, used for teams without their own). Check it before importing: when configured is false, or lastFailedAt is newer than lastOkAt, imports will likely fail with YouTube's bot check; ask the user to sign in and set it (media_setYoutubeCookies). Never returns the cookies. Any team member can read it.",
+  kind: 'read',
+  surfaces: ['web', 'mcp'],
+  async run(ctx, input) {
+    return youtubeAccessOf(ctx, await youtubeTeam(ctx, input, 'read'));
+  },
+});
+
+defineOp({
+  name: 'media.setYoutubeCookies',
+  description:
+    'Set (or with cookies: null, remove) the YouTube sign-in the server\'s yt-dlp uses for one team: every show of the team downloads as this account (media_importYoutube, media_importPlaylist, video compilations), which gets past YouTube\'s "Sign in to confirm you\'re not a bot" check on the server and reads private, members-only or age-restricted videos the account can watch. Pass teamId (teams_list) or showId (sets it for that show\'s team). yt-dlp has no YouTube login with a password, so this takes the cookies of a browser signed in to YouTube: a Netscape cookies.txt (`yt-dlp --cookies-from-browser firefox --cookies cookies.txt --skip-download <any video URL>`, or the "Get cookies.txt LOCALLY" extension) or a JSON cookie export; `autologger-import youtube-login --team <teamId> --cookies-from-browser <browser>` does it in one step without the cookies passing through an agent. The cookies give full access to that Google account: only send them when the user has agreed to it, and suggest a spare account. Only the youtube.com and google.com cookies are kept, and they must include a signed-in session (SID or LOGIN_INFO), else bad_request. Needs owner/admin of the team. The cookies are tested at once by reading a public video\'s metadata (about 5 s): `check` {ok, message} reports it (null when YouTube import is off); they are saved either way, so on check.ok false ask for fresh ones. YouTube rotates the cookies as the browser and the server use them; the server stores its refreshed copy after every run, but a copy goes stale when the browser keeps using YouTube in the same profile, so they last longest from a profile used only for this. When they stop working, imports fail with "…the cookies have probably expired": set fresh ones. Returns the team\'s youtubeAccess plus check. The cookies are never returned or recorded in the change log.',
+  kind: 'write',
+  surfaces: ['web', 'mcp'],
+  // Authorize, parse and test the cookies with yt-dlp before the op's transaction opens.
+  async prepare(actor, { teamId, showId, cookies }) {
+    await db.transaction((tx) =>
+      youtubeTeam(prepareCtx(actor, tx, 'media.setYoutubeCookies'), { teamId, showId }, 'manage'),
+    );
+    if (cookies === null) return null;
+    let parsed: ParsedCookies;
+    try {
+      parsed = parseYoutubeCookies(cookies);
+    } catch (e) {
+      throw badRequest((e as Error).message);
+    }
+    if (!env.youtubeEnabled) return { parsed, check: null };
+    let rotated: string | null = null;
+    let check: { ok: boolean; message: string };
+    try {
+      await videoDuration(env.ytDlpPath, COOKIE_CHECK_URL, COOKIE_CHECK_TIMEOUT_MS, {
+        text: parsed.text,
+        report: async ({ refreshed }) => {
+          rotated = refreshed;
+        },
+      });
+      check = {
+        ok: true,
+        message: 'YouTube accepted the cookies: downloads for this team’s shows will use them.',
+      };
+    } catch (e) {
+      check = {
+        ok: false,
+        message:
+          e instanceof YoutubeAuthError
+            ? `YouTube refused the cookies (${e.reason === 'bot_check' ? 'bot check' : 'sign-in required'}): they may be signed out or already rotated. Export them again from a browser signed in to YouTube.`
+            : `Could not test the cookies: ${(e as Error).message.slice(0, 300)}`,
+      };
+    }
+    if (rotated) {
+      try {
+        parsed = parseYoutubeCookies(rotated);
+      } catch {
+        /* keep what the user gave */
+      }
+    }
+    return { parsed, check };
+  },
+  async run(ctx, input, prepared) {
+    const teamId = await youtubeTeam(ctx, input, 'manage');
+    if (!prepared) {
+      await ctx.db.delete(teamYoutubeCookies).where(eq(teamYoutubeCookies.teamId, teamId));
+    } else {
+      const { parsed, check } = prepared;
+      const now = new Date();
+      const values = {
+        cookies: parsed.text,
+        expiresAt: parsed.expiresAt,
+        updatedBy: ctx.actor.user.id,
+        updatedAt: now,
+        lastOkAt: check?.ok ? now : null,
+        lastFailedAt: check && !check.ok ? now : null,
+        lastError: check && !check.ok ? check.message : null,
+      };
+      await ctx.db
+        .insert(teamYoutubeCookies)
+        .values({ teamId, ...values })
+        .onConflictDoUpdate({ target: teamYoutubeCookies.teamId, set: values });
+    }
+    return { ...(await youtubeAccessOf(ctx, teamId)), check: prepared?.check ?? null };
   },
 });
