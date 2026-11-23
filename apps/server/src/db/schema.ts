@@ -471,6 +471,7 @@ export const changes = pgTable(
         'wiki_page',
         'category',
         'session',
+        'audio_segment',
       ],
     }).notNull(),
     entityId: text('entity_id').notNull(),

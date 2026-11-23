@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../core/ids.ts';
 import { db, schema } from '../db/client.ts';
@@ -177,6 +178,53 @@ describe('transcript.import', () => {
     ]);
     const [audio] = await call(owner, 'media.list', { sessionId: session.id });
     expect(audio!.status).toBe('transcribed');
+  });
+
+  it('undo and redo of an import onto a recording restore its status (#294)', async () => {
+    const { owner, session } = await studio();
+    const audioId = newId('aud');
+    await db.insert(schema.audioSegments).values({
+      id: audioId,
+      sessionId: session.id,
+      ordinal: 0,
+      mimeType: 'audio/mpeg',
+      origin: 'youtube',
+      objectKey: `test/${audioId}`,
+      status: 'ready',
+    });
+    const state = async () => ({
+      status: (await call(owner, 'media.list', { sessionId: session.id }))[0]!.status,
+      transcriptStatus: (await call(owner, 'sessions.get', { sessionId: session.id }))
+        .transcriptStatus,
+      segments: (await call(owner, 'transcript.get', { sessionId: session.id })).length,
+    });
+    const original = await state();
+    expect(original.status).toBe('ready');
+    const out = await call(owner, 'transcript.import', {
+      sessionId: session.id,
+      audioSegmentId: audioId,
+      format: 'srt',
+      content: SRT,
+      mode: 'replace',
+    });
+    const imported = await state();
+    expect(imported).toEqual({ status: 'transcribed', transcriptStatus: 'done', segments: 3 });
+
+    const undo = await call(owner, 'changes.revertGroup', { groupId: out.groupId });
+    expect(undo.reverted).toBe(4);
+    expect(await state()).toEqual(original);
+
+    // Undoing the undo redoes the import.
+    await call(owner, 'changes.revertGroup', { groupId: undo.groupId });
+    expect(await state()).toEqual(imported);
+
+    // A transcription that changed the status outside the change log blocks the undo.
+    await db
+      .update(schema.audioSegments)
+      .set({ status: 'transcribing' })
+      .where(eq(schema.audioSegments.id, audioId));
+    const [redo] = await call(owner, 'changes.list', { sessionId: session.id, limit: 1 });
+    await failsWith(call(owner, 'changes.revertGroup', { groupId: redo!.groupId! }), 'conflict');
   });
 
   it('refuses bad input, other sessions, readers and running transcriptions', async () => {

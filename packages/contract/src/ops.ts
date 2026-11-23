@@ -625,6 +625,7 @@ export const opInputs = {
           'wiki_page',
           'category',
           'session',
+          'audio_segment',
         ])
         .optional(),
       groupId: id.optional(),
