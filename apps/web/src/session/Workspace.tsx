@@ -1,7 +1,7 @@
 import type { Session, WikiListItem } from '@autologger/contract';
 import { BookOpenIcon, FileTextIcon, WifiOffIcon } from 'lucide-react';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'wouter';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation, useSearch } from 'wouter';
 import type { LiveStatus } from '@/api/live';
 import {
   listAllWikiPages,
@@ -14,7 +14,7 @@ import {
 import { errorMessage, rpc } from '@/api/rpc';
 import { useSessionWrite } from '@/api/session/writes';
 import { isTypingTarget } from '@/lib/keys';
-import { type TransportTint, transportStatus } from '@/lib/store';
+import { createStore, type TransportTint, transportStatus } from '@/lib/store';
 import { fmtShort, useTransportClockStore } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
@@ -68,9 +68,16 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
   // A store: the clock ticks each frame while rolling, and only what draws it re-renders.
   const clock = useTransportClockStore(session);
 
-  const [tab, setTab] = useState<WorkspaceTab>('events');
-  const [visited, setVisited] = useState<Set<WorkspaceTab>>(() => new Set(['events']));
-  const [flashEventId, setFlashEventId] = useState<{ id: string; n: number } | null>(null);
+  // The open tab lives in the URL (?tab=, replaced, not pushed), so a reload or a shared link
+  // keeps it. Deep-link intents (?t, ?to, ?event, ?topic) are handled below and then stripped.
+  const [, navigate] = useLocation();
+  const search = useSearch();
+  const tab = tabFrom(new URLSearchParams(search).get('tab'));
+  // Tabs mount on first visit and stay mounted (keeping their scroll and state) after that.
+  const [visited, setVisited] = useState<Set<WorkspaceTab>>(() => new Set([tab]));
+  if (!visited.has(tab)) setVisited(new Set(visited).add(tab));
+  /** Event row to reveal and flash in the Event Feed; `n` makes a repeat request distinct. */
+  const [reveal] = useState(() => createStore<{ id: string; n: number } | null>(null));
   const [busy, setBusy] = useState(false);
 
   const player = usePlayer(media.data, true);
@@ -95,10 +102,11 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
     [],
   );
 
-  const switchTab = useCallback((t: WorkspaceTab) => {
-    setTab(t);
-    setVisited((v) => (v.has(t) ? v : new Set(v).add(t)));
-  }, []);
+  const switchTab = useCallback(
+    (t: WorkspaceTab) =>
+      navigate(withParams({ tab: t === 'events' ? null : t }), { replace: true }),
+    [navigate],
+  );
 
   const seek = useCallback(
     (sec: number, play = true) => {
@@ -114,9 +122,9 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
   const revealEvent = useCallback(
     (eventId: string) => {
       switchTab('events');
-      setFlashEventId((f) => ({ id: eventId, n: (f?.n ?? 0) + 1 }));
+      reveal.set((f) => ({ id: eventId, n: (f?.n ?? 0) + 1 }));
     },
-    [switchTab],
+    [switchTab, reveal],
   );
 
   // ── transport ─────────────────────────────────────────────
@@ -158,39 +166,40 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
     return () => window.removeEventListener('keydown', onKey);
   }, [playerToggle, session.isRolling]);
 
-  // Deep links from search and wiki citations: ?t=<sec>[&to=<sec>]&event=<id>&topic=<id>.
+  // Deep links from search and wiki citations: ?t=<sec>[&to=<sec>]&event=<id>&topic=<id>, handled
+  // whenever they appear (also when a link targets the session already open), then stripped.
   // With `to`, pressing play plays the cited range and pauses at its end.
-  const [, navigate] = useLocation();
-  const deepLinkDone = useRef(false);
   useEffect(() => {
-    if (deepLinkDone.current) return;
-    const p = new URLSearchParams(location.search);
+    const p = new URLSearchParams(search);
     const t = p.get('t');
     const ev = p.get('event');
     const topic = p.get('topic');
-    const tr = p.get('tab');
-    if (!t && !ev && !topic && !tr) {
-      deepLinkDone.current = true;
-      return;
-    }
+    if (!t && !ev && !topic) return;
     // Wait for what the link needs, but not on a failed query: an error still opens the tab and
     // strips the query string (the feed shows the error).
     if (ev && events.isPending) return;
     if (t && media.isPending && caps?.storage) return;
-    deepLinkDone.current = true;
-    if (tr && TABS.some((x) => x.id === tr)) switchTab(tr as WorkspaceTab);
-    if (ev) revealEvent(ev);
-    else if (topic) switchTab('topics');
     const to = Number(p.get('to') ?? Number.NaN);
     if (t && Number.isFinite(Number(t)) && !session.isRolling)
       void player.seek(Number(t), false, Number.isFinite(to) ? to : null);
-    navigate(location.pathname, { replace: true });
+    if (ev) reveal.set((f) => ({ id: ev, n: (f?.n ?? 0) + 1 }));
+    const nextTab = ev ? 'events' : topic ? 'topics' : tabFrom(p.get('tab'));
+    navigate(
+      withParams({
+        t: null,
+        to: null,
+        event: null,
+        topic: null,
+        tab: nextTab === 'events' ? null : nextTab,
+      }),
+      { replace: true },
+    );
   }, [
+    search,
     events.isPending,
     media.isPending,
     caps?.storage,
-    revealEvent,
-    switchTab,
+    reveal,
     player,
     session.isRolling,
     navigate,
@@ -207,8 +216,20 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
       seek,
       setTab: switchTab,
       revealEvent,
+      reveal,
     }),
-    [sessionId, session.showId, caps, canWrite, clock, player, seek, switchTab, revealEvent],
+    [
+      sessionId,
+      session.showId,
+      caps,
+      canWrite,
+      clock,
+      player,
+      seek,
+      switchTab,
+      revealEvent,
+      reveal,
+    ],
   );
 
   const eventsList = events.data ?? [];
@@ -286,7 +307,7 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
                     }
                   >
                     {/* Memoized; each reads the session fields it needs (useSessionSlice). */}
-                    {t.id === 'events' && <EventsTab flash={flashEventId} />}
+                    {t.id === 'events' && <EventsTab />}
                     {t.id === 'transcript' && <TranscriptTab />}
                     {t.id === 'topics' && <TopicsTab />}
                     {t.id === 'dashboards' && <DashboardsTab />}
@@ -301,6 +322,20 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
       </div>
     </WorkspaceContext.Provider>
   );
+}
+
+const tabFrom = (v: string | null): WorkspaceTab =>
+  TABS.some((x) => x.id === v) ? (v as WorkspaceTab) : 'events';
+
+/** The current path with these query params set (or removed, for null). */
+function withParams(changes: Record<string, string | null>): string {
+  const p = new URLSearchParams(window.location.search);
+  for (const [k, v] of Object.entries(changes)) {
+    if (v === null) p.delete(k);
+    else p.set(k, v);
+  }
+  const q = p.toString();
+  return `${window.location.pathname}${q ? `?${q}` : ''}`;
 }
 
 /** Cited ranges of one page as short clock times, e.g. "12:04–12:31, 1:02:10". */

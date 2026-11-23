@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCategories, useEvents } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { useSessionWrite } from '@/api/session/writes';
+import { useStore } from '@/lib/store';
 import { showToast } from '@/shared/components/Toast';
 import { Button } from '@/shared/components/ui/button';
 import {
@@ -73,11 +74,7 @@ const FeedEventRow = memo(function FeedEventRow({
   );
 });
 
-export const EventsTab = memo(function EventsTab({
-  flash,
-}: {
-  flash: { id: string; n: number } | null;
-}) {
+export const EventsTab = memo(function EventsTab() {
   const session = useSessionSlice((s) => ({
     id: s.id,
     showId: s.showId,
@@ -88,7 +85,8 @@ export const EventsTab = memo(function EventsTab({
 
   const events = useEvents(session.id);
   const categories = useCategories(session.showId).data ?? NO_CATEGORIES;
-  const { canWrite, seek } = useWorkspace();
+  const { canWrite, seek, reveal } = useWorkspace();
+  const flash = useStore(reveal);
   const write = useSessionWrite(session.id);
   const saveEvent = useCallback(
     (patch: OpInput<'events.update'>) =>
