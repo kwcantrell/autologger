@@ -15,6 +15,18 @@ import { qk } from '../queries';
 type WithId = { id: string };
 
 /** Keyed upsert into a cached list (a no-op while the list isn't loaded). */
+/**
+ * True when `next` is an older copy of the row than `cached`, by `updatedAt`. An op's HTTP result
+ * and the socket's pushes are not ordered relative to each other, so a result can land after a
+ * newer push (Start in the web as Companion stops) and must not overwrite it. Equal or missing
+ * times count as not older, so a write that doesn't bump `updatedAt` still applies.
+ */
+export function isOlder(next: unknown, cached: unknown): boolean {
+  const n = (next as { updatedAt?: unknown } | undefined)?.updatedAt;
+  const c = (cached as { updatedAt?: unknown } | undefined)?.updatedAt;
+  return typeof n === 'string' && typeof c === 'string' && Date.parse(n) < Date.parse(c);
+}
+
 export function upsertList<T extends WithId>(
   list: T[] | undefined,
   item: T,
@@ -22,6 +34,7 @@ export function upsertList<T extends WithId>(
 ): T[] | undefined {
   if (!list) return list;
   const i = list.findIndex((x) => x.id === item.id);
+  if (i !== -1 && isOlder(item, list[i])) return list;
   const next = i === -1 ? [...list, item] : list.map((x) => (x.id === item.id ? item : x));
   return sort ? next.sort(sort) : next;
 }

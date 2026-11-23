@@ -110,6 +110,7 @@ export async function loadSessions(
       keyTerms: s.keyTerms,
       archivedAt: iso(s.archivedAt),
       createdAt: s.createdAt.toISOString(),
+      updatedAt: s.updatedAt.toISOString(),
       createdBy: s.createdBy ? (users.get(s.createdBy) ?? null) : null,
       access: access.get(show.id)!,
     }));
@@ -452,7 +453,7 @@ defineOp({
     if (archived && session.isRolling) throw conflict('Stop the transport before archiving.');
     await ctx.db
       .update(sessions)
-      .set({ archivedAt: archived ? new Date() : null })
+      .set({ archivedAt: archived ? new Date() : null, updatedAt: new Date() })
       .where(eq(sessions.id, sessionId));
     return publishSession(ctx, sessionId);
   },

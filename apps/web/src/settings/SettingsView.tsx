@@ -22,6 +22,7 @@ import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui/tabs';
 import { cn } from '@/shared/lib/utils';
+import { useIsMobile } from '@/shared/ui/breakpoints';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { isOverlayOpen } from '@/shared/ui/overlayOpen';
 import { type SectionGuardState, type SettingsNav, SettingsNavContext } from './guard';
@@ -79,6 +80,7 @@ const panelId = (id: SettingsSection) => `settings-panel-${id}`;
 
 export function SettingsView({ section }: { section: SettingsSection }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const phone = useIsMobile();
   const headingId = useId();
   const me = useMe().data;
   const { team, show } = useActive();
@@ -161,12 +163,14 @@ export function SettingsView({ section }: { section: SettingsSection }) {
     return () => document.removeEventListener('keydown', onKey);
   }, [requestClose]);
 
-  // Keep the current section's chip in view on the phone's horizontal nav row.
+  // Keep the current section's chip in view on the phone's horizontal nav row: when the section
+  // changes, and when a resize turns the side nav into that row (`phone` flips).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: section and the breakpoint are triggers
   useEffect(() => {
     rootRef.current
       ?.querySelector<HTMLElement>(`#${tabId(section)}`)
       ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-  }, [section]);
+  }, [section, phone]);
 
   // Focus moves in on open and back to the invoking control on close.
   useEffect(() => {

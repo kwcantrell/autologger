@@ -21,6 +21,7 @@ import { PageFrame, RouteLoadingState } from '@/components/RouteState';
 import { settingsOpen } from '@/lib/store';
 import { FeedShell, FeedTable, IconFilter } from '@/session/feed';
 import { CHANGE_COLUMNS, CHANGE_STACK, ChangeRow } from '@/session/tabs/ChangeRow';
+import { useRowErrors } from '@/session/tabs/rowErrors';
 import { showToast } from '@/shared/components/Toast';
 import { Button } from '@/shared/components/ui/button';
 import {
@@ -250,7 +251,7 @@ function ChangeLog({
   }, [changes.data, showQ.data, refetchShow]);
   const now = useNow();
   const { confirm, confirmElement } = useConfirm();
-  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  const [rowErrors, setRowError] = useRowErrors(changes.data);
   // An undo may touch any content of the show: refetch whatever of it is on screen.
   const touched = () => [
     ['show-changes', showId],
@@ -300,10 +301,10 @@ function ChangeLog({
       confirmLabel: group ? 'Undo all' : 'Undo',
     });
     if (!ok) return;
-    setRowErrors(({ [c.id]: _, ...rest }) => rest);
+    setRowError(c.id, undefined);
     const onError = (e: unknown) => {
       const msg = errorMessage(e);
-      setRowErrors((m) => ({ ...m, [c.id]: msg }));
+      setRowError(c.id, msg);
       showToast(`Undo failed: ${msg}`, true);
     };
     if (group)
