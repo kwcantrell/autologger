@@ -49,7 +49,10 @@ transcribed. More on storage and the worker in [Self-hosting](/docs/developers/s
 - Schema changes: edit `apps/server/src/db/schema.ts`, then run `npx drizzle-kit generate` in
   `apps/server`. Never edit generated migrations.
 - UI keeps the established look: see `apps/web/DESIGN.md` and the shared primitives in
-  `apps/web/src/shared`.
+  `apps/web/src/shared`. The primitives are shadcn/ui components on Base UI (style `base-nova`,
+  Tailwind v4); `apps/web/components.json` describes that setup, so the shadcn CLI and its MCP
+  server add new primitives under `src/shared/components/ui`. Restyle anything you add to the
+  tokens in `DESIGN.md` before using it.
 
 ## Tests and checks
 
@@ -88,7 +91,8 @@ The plugin marketplace has contributor plugins that walk you through all of this
 ```bash
 claude plugin marketplace add kwcantrell/autologger-marketplace
 claude plugin install autologger-contribute@autologger   # onboarding, workflow, starter tasks, pre-PR check
-claude plugin install autologger-dev@autologger          # implementation guides, reviewer agent, guard hooks
+claude plugin marketplace add pbakaus/impeccable         # design skill autologger-dev depends on
+claude plugin install autologger-dev@autologger          # implementation guides, reviewer and ui-designer agents, guard hooks
 ```
 
 Then run `/autologger-contribute:start-here` for a guided first tour, or

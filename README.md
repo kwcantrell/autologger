@@ -106,7 +106,8 @@ marketplace's contributor plugins walk you through it:
 
 ```bash
 claude plugin install autologger-contribute@autologger   # onboarding, workflow, starter tasks, pre-PR check
-claude plugin install autologger-dev@autologger          # implementation guides, reviewer agent, guard hooks
+claude plugin marketplace add pbakaus/impeccable         # design skill autologger-dev depends on
+claude plugin install autologger-dev@autologger          # implementation guides, reviewer and ui-designer agents, guard hooks
 ```
 
 Then run `/autologger-contribute:start-here`. Pull requests run lint, typecheck, tests against
