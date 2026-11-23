@@ -6,7 +6,7 @@ import { Trash2 } from 'lucide-react';
 import { fmtSec } from '@/lib/timecode';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
-import { cn } from '@/shared/lib/utils';
+import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 import {
   type Column,
   FEED_CELL,
@@ -194,7 +194,10 @@ export function TopicRow({
             variant="unstyled"
             aria-label="Delete topic"
             title="Delete topic"
-            className="inline-flex size-6 items-center justify-center rounded-[0.35rem] text-si-dim opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover-always:text-si-danger max-md:opacity-100"
+            className={cn(
+              'relative inline-flex size-6 max-md:mr-1 pointer-coarse:mr-1 items-center justify-center rounded-[0.35rem] text-si-dim opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover-always:text-si-danger max-md:opacity-100 pointer-coarse:opacity-100',
+              TOUCH_HIT,
+            )}
             onClick={onDelete}
           >
             <Trash2 className="size-3" aria-hidden="true" />

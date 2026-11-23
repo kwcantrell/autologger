@@ -220,7 +220,12 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
+          // The sheet's close button sits just outside the sheet, on the overlay: the sidebar's
+          // own header fills the top edge. 36px visible, 44px to the touch (TOUCH_HIT).
+          className={cn(
+            'w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:top-2 [&>button]:flex [&>button]:size-9 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-ctl [&>button]:border [&>button]:border-sidebar-border [&>button]:bg-sidebar [&>button]:opacity-100',
+            side === 'left' ? '[&>button]:-right-12' : '[&>button]:right-auto [&>button]:-left-12',
+          )}
           style={
             {
               '--sidebar-width': SIDEBAR_WIDTH_MOBILE,

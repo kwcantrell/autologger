@@ -6,7 +6,7 @@ import { PencilIcon } from 'lucide-react';
 import { memo, useEffect, useRef, useState } from 'react';
 import { fmtSec } from '@/lib/timecode';
 import { Button } from '@/shared/components/ui/button';
-import { cn } from '@/shared/lib/utils';
+import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 import {
   type Column,
   FEED_CELL,
@@ -146,7 +146,10 @@ export const SegmentRow = memo(function SegmentRow({
               <Button
                 variant="ghost"
                 size="icon-xs"
-                className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100"
+                className={cn(
+                  'relative max-md:mr-1 pointer-coarse:mr-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100 pointer-coarse:opacity-100',
+                  TOUCH_HIT,
+                )}
                 aria-label="Edit segment"
                 onClick={() => setEditing(true)}
               >
