@@ -53,6 +53,7 @@ node autologger-import.mjs compile <compilationId> --cookies-from-browser chrome
 | `--cookies-from-browser <browser>`   | yt-dlp reads your YouTube sign-in from this browser (`chrome`, `firefox`, `edge`, `safari`, `brave`, … `[:profile]`). |
 | `--cookies <file>`                   | A Netscape `cookies.txt` instead.                                                                                     |
 | `--dry-run`                          | Show what would be created, uploaded or built; change nothing.                                                        |
+| `--no-transcribe`                    | `playlist` / `video`: upload the audio (and draw its waveform) without transcribing it; transcribe later if needed.   |
 | `--order playlist\|reverse`          | playlist: episode numbers follow the playlist; reverse when it lists newest first.                                    |
 | `--title-template <t>`               | Session titles, with `{title}` and `{episode}` (default `{title}`).                                                   |
 | `--work-dir <dir>`                   | Where downloads and clips go (default `~/.cache/autologger-import`).                                                  |
@@ -64,7 +65,7 @@ AutoLogger are skipped, partial downloads continue, and compilation clips alread
 reused. Sessions are never created twice for the same video in a show.
 
 **Sessions** get the same titles, episode numbers and dates as a server-side playlist import. Their
-audio is transcribed and drawn as a waveform like any upload. Videos the server cannot download
+audio is transcribed (unless `--no-transcribe`) and drawn as a waveform like any upload. Videos the server cannot download
 (private ones) are marked so: compilations of them must be built with this helper.
 
 **Compilations** are encoded exactly like the server's: each clip's section is downloaded at up to

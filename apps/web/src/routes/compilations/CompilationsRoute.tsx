@@ -13,12 +13,20 @@ import {
 import { errorMessage } from '@/api/rpc';
 import { useActive } from '@/app/useActive';
 import { PageFrame, RouteLoadingState } from '@/components/RouteState';
+import { IMPORT_HELPER_ANCHOR, openSettingsAt } from '@/settings/openSettingsAt';
 import { showToast } from '@/shared/components/Toast';
 import { Button } from '@/shared/components/ui/button';
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/shared/components/ui/empty';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { CompilationCard } from './CompilationCard';
+
+function copyCommand(value: string) {
+  navigator.clipboard.writeText(value).then(
+    () => showToast('Command copied.'),
+    () => showToast('Could not copy to the clipboard.', true),
+  );
+}
 
 function CompilationList({ showId, canWrite }: { showId: string; canWrite: boolean }) {
   const { data, isPending, isError, error, refetch } = useCompilations(showId);
@@ -83,6 +91,8 @@ function CompilationList({ showId, canWrite }: { showId: string; canWrite: boole
             deleting={del.isPending && del.variables?.compilationId === c.id}
             onDelete={() => void onDelete(c)}
             retrying={retry.isPending && retry.variables?.compilationId === c.id}
+            onCopy={copyCommand}
+            onOpenHelper={() => openSettingsAt('agents', IMPORT_HELPER_ANCHOR)}
             onRetry={() =>
               retry.mutate(
                 { compilationId: c.id },

@@ -269,6 +269,8 @@ export const opInputs = {
     toSec: sec.optional(),
     format: z.enum(['lines', 'compact']).default('lines'),
     ids: z.boolean().default(false),
+    /** compact only: seconds between inline `[@…]` stamps; 0 stamps every segment. */
+    stampEverySec: z.number().min(0).max(3600).default(60),
   }),
   'transcript.updateSegment': z.object({
     segmentId: id,
@@ -470,7 +472,12 @@ export const opInputs = {
     .refine((v) => (v.origin === 'youtube') === (v.youtube !== undefined), {
       message: 'Pass youtube {url, …} exactly when origin is "youtube".',
     }),
-  'media.completeUpload': z.object({ segmentId: id, durationSec: sec.optional() }),
+  'media.completeUpload': z.object({
+    segmentId: id,
+    durationSec: sec.optional(),
+    /** false: store the audio and draw its waveform, no transcription. */
+    transcribe: z.boolean().default(true),
+  }),
   'media.playbackUrl': z.object({ segmentId: id }),
   'media.waveform': z.object({ sessionId: id }),
   'media.importYoutube': z.object({
@@ -775,6 +782,8 @@ export interface OpOutputs {
     totalSegments: number;
     /** End of the last segment in the session, seconds from session start. */
     durationSec: number;
+    /** As Session.transcriptStatus: done with 0 totalSegments means no speech was found. */
+    transcriptStatus: Session['transcriptStatus'];
   };
   'transcript.updateSegment': TranscriptSegment;
   'transcript.find':

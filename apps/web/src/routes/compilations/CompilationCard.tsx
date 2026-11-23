@@ -1,5 +1,6 @@
-// One compilation on the Compilations page: status, progress or error, the video, its clips and
-// the Download / Retry / Delete actions. Presentational (props in, markup out; actions are
+// One compilation on the Compilations page: status, progress or error (or, for one waiting for a
+// local build, the import helper command to run), the video, its clips and the Download / Retry /
+// Delete actions. Presentational (props in, markup out; actions are
 // callbacks), so the landing page mock renders it too.
 
 import type { Compilation } from '@autologger/contract';
@@ -7,6 +8,7 @@ import { DownloadIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react';
 import { Link } from 'wouter';
 import { fmtEta } from '@/app/ShowJobs';
 import { fmtShort } from '@/lib/timecode';
+import { CopyRow } from '@/session/tabs/CopyRow';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { Spinner } from '@/shared/components/ui/spinner';
@@ -38,6 +40,9 @@ function fmtWait(c: Compilation): string | null {
   return parts.length ? parts.join(' · ') : null;
 }
 
+/** The import helper command that builds a buildLocally compilation (docs/importer.md). */
+export const localBuildCommand = (id: string) => `node autologger-import.mjs compile ${id}`;
+
 const clipHref = (sessionId: string, startSec: number) =>
   `/sessions/${encodeURIComponent(sessionId)}?t=${Math.round(startSec * 100) / 100}`;
 
@@ -48,6 +53,8 @@ export function CompilationCard({
   deleting,
   onRetry,
   retrying,
+  onCopy,
+  onOpenHelper,
 }: {
   c: Compilation;
   canWrite: boolean;
@@ -55,9 +62,15 @@ export function CompilationCard({
   deleting: boolean;
   onRetry: () => void;
   retrying: boolean;
+  /** Copies the local build command (buildLocally compilations waiting for it). */
+  onCopy?: (value: string) => void;
+  /** Opens the import helper's setup (Settings › Agents). */
+  onOpenHelper?: () => void;
 }) {
   const building = c.status === 'queued' || c.status === 'running';
-  const wait = building ? fmtWait(c) : null;
+  // Created with buildLocally: no worker job, it waits for the import helper on someone's computer.
+  const local = c.buildLocally && c.status === 'queued';
+  const wait = building && !local ? fmtWait(c) : null;
   return (
     <li className="flex min-w-0 flex-col gap-3 rounded-ctl border border-si-line bg-si-panel p-4">
       <div className="flex min-w-0 items-start gap-3">
@@ -75,12 +88,32 @@ export function CompilationCard({
             c.status === 'failed' ? 'destructive' : c.status === 'ready' ? 'secondary' : 'outline'
           }
         >
-          {building && <Spinner role="presentation" aria-hidden="true" />}
-          {STATUS_LABEL[c.status]}
+          {building && !local && <Spinner role="presentation" aria-hidden="true" />}
+          {local ? 'Local build' : STATUS_LABEL[c.status]}
         </Badge>
       </div>
 
-      {building && (
+      {local && (
+        <div className="flex min-w-0 flex-col gap-2">
+          <p role="status" className="m-0 text-sm text-si-muted">
+            Waiting for a local build. Run this on your computer with the AutoLogger import helper
+            (add <code className="font-tc text-xs">--cookies-from-browser &lt;browser&gt;</code> for
+            private videos); the video appears here when it is uploaded.
+            {onOpenHelper && (
+              <>
+                {' '}
+                <Button variant="link" size="xs" className="h-auto px-0" onClick={onOpenHelper}>
+                  Set up the import helper
+                </Button>
+              </>
+            )}
+          </p>
+          {onCopy && (
+            <CopyRow label="Build command" value={localBuildCommand(c.id)} onCopy={onCopy} />
+          )}
+        </div>
+      )}
+      {building && !local && (
         <p role="status" className="m-0 text-sm text-si-muted">
           {c.progress ?? 'Waiting for the worker'}
           {wait && ` · ${wait}`}

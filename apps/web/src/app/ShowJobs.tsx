@@ -16,6 +16,7 @@ import { Button } from '@/shared/components/ui/button';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { cn } from '@/shared/lib/utils';
 import { Dialog } from '@/shared/ui/Dialog';
+import { isYoutubeAuthError, YoutubeAuthHelp } from './YoutubeAuthHelp';
 
 const KIND_LABEL: Record<string, string> = {
   youtube_import: 'YouTube import',
@@ -84,6 +85,7 @@ export function ShowJobsDialog({
   canWriteShow,
   onOpenSession,
   onOpenCompilations,
+  onOpenSettings,
   onClose,
 }: {
   showName: string;
@@ -94,6 +96,8 @@ export function ShowJobsDialog({
   canWriteShow: boolean;
   onOpenSession: (sessionId: string) => void;
   onOpenCompilations: () => void;
+  /** Before a failure's help link opens Settings: close this dialog (and the phone rail). */
+  onOpenSettings: () => void;
   onClose: () => void;
 }) {
   const byId = new Map(sessions.map((s) => [s.id, s]));
@@ -314,9 +318,12 @@ export function ShowJobsDialog({
             ) : null;
           return row(
             j,
-            <span className="block text-si-danger [overflow-wrap:anywhere]">
-              {j.error ?? 'Failed without a reason.'}
-            </span>,
+            <>
+              <span className="block text-si-danger [overflow-wrap:anywhere]">
+                {j.error ?? 'Failed without a reason.'}
+              </span>
+              {isYoutubeAuthError(j.error) && <YoutubeAuthHelp onNavigate={onOpenSettings} />}
+            </>,
             <>
               {retryAction}
               <Button

@@ -13,6 +13,7 @@ import {
 import { useRef, useState } from 'react';
 import { qk, useJobs, useOpMutation } from '@/api/queries';
 import { errorMessage, type RpcError } from '@/api/rpc';
+import { isYoutubeAuthError, YoutubeAuthHelp } from '@/app/YoutubeAuthHelp';
 import { useStore } from '@/lib/store';
 import { fmtSec } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
@@ -226,6 +227,9 @@ function YoutubeDialog({ sessionId, onClose }: { sessionId: string; onClose: () 
           <Alert variant="destructive" className="mt-3">
             <AlertDescription>
               Could not start the import. {errorMessage(imp.error)}
+              {isYoutubeAuthError(errorMessage(imp.error)) && (
+                <YoutubeAuthHelp onNavigate={onClose} />
+              )}
             </AlertDescription>
           </Alert>
         )}
