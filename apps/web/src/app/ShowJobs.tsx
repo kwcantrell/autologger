@@ -16,6 +16,7 @@ import { Button } from '@/shared/components/ui/button';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { cn } from '@/shared/lib/utils';
 import { Dialog } from '@/shared/ui/Dialog';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import { isYoutubeAuthError, YoutubeAuthHelp } from './YoutubeAuthHelp';
 
 const KIND_LABEL: Record<string, string> = {
@@ -144,22 +145,25 @@ export function ShowJobsDialog({
       >
         <span className="flex min-w-0 flex-1 basis-48 flex-col">
           {j.sessionId ? (
-            <button
-              type="button"
-              className="min-w-0 cursor-pointer truncate text-left font-semibold hover:underline focus-visible:underline"
+            <Button
+              variant="link"
+              size="inline"
+              className="min-w-0 truncate font-semibold no-underline hover:underline focus-visible:underline"
               onClick={() => onOpenSession(j.sessionId as string)}
             >
               {title}
-            </button>
+            </Button>
           ) : j.kind === 'compile' && j.compilationTitle ? (
-            <button
-              type="button"
-              className="min-w-0 cursor-pointer truncate text-left font-semibold hover:underline focus-visible:underline"
-              title="Open the Compilations page"
-              onClick={onOpenCompilations}
-            >
-              {title}
-            </button>
+            <Tooltip content="Open the Compilations page">
+              <Button
+                variant="link"
+                size="inline"
+                className="min-w-0 truncate font-semibold no-underline hover:underline focus-visible:underline"
+                onClick={onOpenCompilations}
+              >
+                {title}
+              </Button>
+            </Tooltip>
           ) : (
             <span className="truncate font-semibold">{title}</span>
           )}
@@ -221,100 +225,122 @@ export function ShowJobsDialog({
             recompile.isPending && recompile.variables?.compilationId === j.compilationId;
           const retryAction =
             j.kind === 'transcribe' && j.segmentId && s ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={readOnly || !transcription || transcribing || retried.has(j.id)}
-                title={
+              <Tooltip
+                content={
                   readOnly
                     ? 'Read-only access to this show.'
                     : transcription === false
                       ? "Transcription isn't configured on this server."
                       : 'Transcribe this audio segment again (only this segment)'
                 }
-                onClick={() =>
-                  retranscribe.mutate(
-                    { sessionId: s.id, segmentId: j.segmentId },
-                    {
-                      onSuccess: () => setRetried((r) => new Set(r).add(j.id)),
-                      onError: (e) => showToast(errorMessage(e), true),
-                    },
-                  )
-                }
+                disabled={readOnly || !transcription || transcribing || retried.has(j.id)}
+                titleWhenDisabled
               >
-                <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
-                {transcribing ? 'Queuing…' : 'Transcribe again'}
-              </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={readOnly || !transcription || transcribing || retried.has(j.id)}
+                  onClick={() =>
+                    retranscribe.mutate(
+                      { sessionId: s.id, segmentId: j.segmentId },
+                      {
+                        onSuccess: () => setRetried((r) => new Set(r).add(j.id)),
+                        onError: (e) => showToast(errorMessage(e), true),
+                      },
+                    )
+                  }
+                >
+                  <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
+                  {transcribing ? 'Queuing…' : 'Transcribe again'}
+                </Button>
+              </Tooltip>
             ) : j.kind === 'waveform' && s ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={readOnly || rewaving || retried.has(j.id)}
-                title={
+              <Tooltip
+                content={
                   readOnly
                     ? 'Read-only access to this show.'
                     : j.segmentId
                       ? 'Compute the waveform of this audio segment again'
                       : "Compute the waveform of this session's audio again"
                 }
-                onClick={() =>
-                  rewave.mutate(
-                    { sessionId: s.id, segmentId: j.segmentId },
-                    {
-                      onSuccess: () => setRetried((r) => new Set(r).add(j.id)),
-                      onError: (e) => showToast(errorMessage(e), true),
-                    },
-                  )
-                }
+                disabled={readOnly || rewaving || retried.has(j.id)}
+                titleWhenDisabled
               >
-                <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
-                {rewaving ? 'Retrying…' : 'Retry'}
-              </Button>
-            ) : j.kind === 'compile' && j.compilationId && j.compilationTitle ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={readOnly || recompiling || retried.has(j.id)}
-                title={readOnly ? 'Read-only access to this show.' : 'Build this compilation again'}
-                onClick={() =>
-                  recompile.mutate(
-                    { compilationId: j.compilationId as string },
-                    {
-                      onSuccess: () => {
-                        setRetried((r) => new Set(r).add(j.id));
-                        showToast('Compilation queued again.');
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={readOnly || rewaving || retried.has(j.id)}
+                  onClick={() =>
+                    rewave.mutate(
+                      { sessionId: s.id, segmentId: j.segmentId },
+                      {
+                        onSuccess: () => setRetried((r) => new Set(r).add(j.id)),
+                        onError: (e) => showToast(errorMessage(e), true),
                       },
-                      onError: (e) => showToast(errorMessage(e), true),
-                    },
-                  )
+                    )
+                  }
+                >
+                  <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
+                  {rewaving ? 'Retrying…' : 'Retry'}
+                </Button>
+              </Tooltip>
+            ) : j.kind === 'compile' && j.compilationId && j.compilationTitle ? (
+              <Tooltip
+                content={
+                  readOnly ? 'Read-only access to this show.' : 'Build this compilation again'
                 }
+                disabled={readOnly || recompiling || retried.has(j.id)}
+                titleWhenDisabled
               >
-                <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
-                {recompiling ? 'Retrying…' : 'Retry'}
-              </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={readOnly || recompiling || retried.has(j.id)}
+                  onClick={() =>
+                    recompile.mutate(
+                      { compilationId: j.compilationId as string },
+                      {
+                        onSuccess: () => {
+                          setRetried((r) => new Set(r).add(j.id));
+                          showToast('Compilation queued again.');
+                        },
+                        onError: (e) => showToast(errorMessage(e), true),
+                      },
+                    )
+                  }
+                >
+                  <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
+                  {recompiling ? 'Retrying…' : 'Retry'}
+                </Button>
+              </Tooltip>
             ) : j.kind === 'youtube_import' && s && importUrl ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!canRetry || pending || retried.has(j.id)}
-                title={
+              <Tooltip
+                content={
                   s.access === 'read'
                     ? 'Read-only access to this show.'
                     : `Download ${importUrl} again`
                 }
-                onClick={() =>
-                  retry.mutate(
-                    { sessionId: s.id, url: importUrl },
-                    {
-                      onSuccess: () => setRetried((r) => new Set(r).add(j.id)),
-                      onError: (e) => showToast(errorMessage(e), true),
-                    },
-                  )
-                }
+                disabled={!canRetry || pending || retried.has(j.id)}
+                titleWhenDisabled
               >
-                <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
-                {pending ? 'Retrying…' : 'Retry'}
-              </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!canRetry || pending || retried.has(j.id)}
+                  onClick={() =>
+                    retry.mutate(
+                      { sessionId: s.id, url: importUrl },
+                      {
+                        onSuccess: () => setRetried((r) => new Set(r).add(j.id)),
+                        onError: (e) => showToast(errorMessage(e), true),
+                      },
+                    )
+                  }
+                >
+                  <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
+                  {pending ? 'Retrying…' : 'Retry'}
+                </Button>
+              </Tooltip>
             ) : null;
           return row(
             j,
@@ -326,25 +352,30 @@ export function ShowJobsDialog({
             </>,
             <>
               {retryAction}
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={readOnly || dismissing}
-                title={
+              <Tooltip
+                content={
                   readOnly
                     ? 'Read-only access to this show.'
                     : 'Acknowledge this failure and stop listing it'
                 }
-                onClick={() =>
-                  dismiss.mutate(
-                    { jobId: j.id },
-                    { onError: (e) => showToast(errorMessage(e), true) },
-                  )
-                }
+                disabled={readOnly || dismissing}
+                titleWhenDisabled
               >
-                <CheckIcon aria-hidden="true" data-icon="inline-start" />
-                {dismissing ? 'Dismissing…' : 'Dismiss'}
-              </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={readOnly || dismissing}
+                  onClick={() =>
+                    dismiss.mutate(
+                      { jobId: j.id },
+                      { onError: (e) => showToast(errorMessage(e), true) },
+                    )
+                  }
+                >
+                  <CheckIcon aria-hidden="true" data-icon="inline-start" />
+                  {dismissing ? 'Dismissing…' : 'Dismiss'}
+                </Button>
+              </Tooltip>
               {j.kind === 'youtube_import' && !importUrl && (
                 <span className="basis-full text-xs text-muted-foreground">
                   The link isn't stored on this session: open it and import the video again from its

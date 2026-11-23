@@ -5,6 +5,7 @@ import { ConsentPage } from '@/routes/ConsentPage';
 import { LoginPage } from '@/routes/LoginPage';
 import { Toast } from '@/shared/components/Toast';
 import { TooltipProvider } from '@/shared/components/ui/tooltip';
+import { TooltipHost } from '@/shared/ui/Tooltip';
 import { RootGate } from './RootGate';
 
 // The documentation is public: it renders for signed-out and signed-in visitors alike, outside
@@ -31,6 +32,7 @@ export function App() {
   return (
     <TooltipProvider delay={400}>
       <Toast />
+      <TooltipHost />
       <Switch>
         <Route path="/login" component={LoginPage} />
         <Route path="/oauth/consent" component={ConsentPage} />

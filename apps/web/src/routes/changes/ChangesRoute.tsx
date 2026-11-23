@@ -35,6 +35,7 @@ import {
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/shared/components/ui/empty';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { LoadErrorAlert } from '@/shared/ui/LoadErrorAlert';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import { wikiHref } from '../wiki/wikiShared';
 
 const LIMIT = 300;
@@ -140,11 +141,13 @@ function FilterMenu<T extends string>({
 }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button variant="glass" title={`${title}: ${label}`} />}>
-        {/* Three filters side by side: phones keep the labels too, or the icons look alike. */}
-        <IconFilter />
-        <span className="max-w-[11rem] truncate max-md:max-w-[8rem]">{label}</span>
-      </DropdownMenuTrigger>
+      <Tooltip content={`${title}: ${label}`}>
+        <DropdownMenuTrigger render={<Button variant="glass" />}>
+          {/* Three filters side by side: phones keep the labels too, or the icons look alike. */}
+          <IconFilter />
+          <span className="max-w-[11rem] truncate max-md:max-w-[8rem]">{label}</span>
+        </DropdownMenuTrigger>
+      </Tooltip>
       <DropdownMenuContent align="end" className="max-h-[60dvh] w-60 overflow-y-auto">
         <DropdownMenuGroup>
           <DropdownMenuLabel>{title}</DropdownMenuLabel>
@@ -178,13 +181,14 @@ function ChangeContext({ c, sessions }: { c: Change; sessions: Map<string, Sessi
     return (
       <span>
         Show ·{' '}
-        <button
-          type="button"
-          className={`${link} cursor-pointer border-0 bg-transparent p-0`}
+        <Button
+          variant="link"
+          size="inline"
+          className={`${link} no-underline`}
           onClick={() => settingsOpen.set('event-buttons')}
         >
           Event buttons
-        </button>
+        </Button>
       </span>
     );
   // A deleted page has no view until the delete is undone.

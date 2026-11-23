@@ -15,6 +15,11 @@ import { CopyRow } from '@/session/tabs/CopyRow';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { Card } from '@/shared/components/ui/card';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleSummary,
+} from '@/shared/components/ui/collapsible';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { Tooltip } from '@/shared/ui/Tooltip';
 
@@ -160,27 +165,29 @@ export function CompilationCard({
           />
         )}
 
-        <details className="min-w-0 text-sm">
-          <summary className="cursor-pointer text-si-muted hover:text-si-fg">Clips</summary>
-          <ol className="m-0 mt-2 flex list-decimal flex-col gap-1 pl-6">
-            {c.clips.map((clip, i) => (
-              // Clips may repeat the same range; the position keeps keys unique.
-              // biome-ignore lint/suspicious/noArrayIndexKey: order is the identity of a clip
-              <li key={i} className="min-w-0 text-si-fg">
-                <Link
-                  href={clipHref(clip.sessionId, clip.startSec)}
-                  className="text-si-fg underline-offset-2 hover:underline"
-                >
-                  {clip.sessionTitle}
-                </Link>{' '}
-                <span className="font-mono text-xs text-si-dim">
-                  {fmtShort(clip.startSec)}–{fmtShort(clip.endSec)}
-                </span>
-                {clip.label && <span className="text-si-muted"> · {clip.label}</span>}
-              </li>
-            ))}
-          </ol>
-        </details>
+        <Collapsible className="min-w-0 text-sm">
+          <CollapsibleSummary className="text-si-muted hover:text-si-fg">Clips</CollapsibleSummary>
+          <CollapsibleContent hiddenUntilFound>
+            <ol className="m-0 mt-2 flex list-decimal flex-col gap-1 pl-6">
+              {c.clips.map((clip, i) => (
+                // Clips may repeat the same range; the position keeps keys unique.
+                // biome-ignore lint/suspicious/noArrayIndexKey: order is the identity of a clip
+                <li key={i} className="min-w-0 text-si-fg">
+                  <Link
+                    href={clipHref(clip.sessionId, clip.startSec)}
+                    className="text-si-fg underline-offset-2 hover:underline"
+                  >
+                    {clip.sessionTitle}
+                  </Link>{' '}
+                  <span className="font-mono text-xs text-si-dim">
+                    {fmtShort(clip.startSec)}–{fmtShort(clip.endSec)}
+                  </span>
+                  {clip.label && <span className="text-si-muted"> · {clip.label}</span>}
+                </li>
+              ))}
+            </ol>
+          </CollapsibleContent>
+        </Collapsible>
 
         <div className="flex flex-wrap items-center gap-2">
           {c.status === 'ready' && c.url && (

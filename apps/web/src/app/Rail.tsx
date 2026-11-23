@@ -32,6 +32,12 @@ import {
   DropdownMenuTrigger,
 } from '@/shared/components/ui/dropdown-menu';
 import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from '@/shared/components/ui/input-group';
+import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
@@ -39,7 +45,6 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
-  SidebarInput,
   SidebarMenu,
   SidebarMenuAction,
   SidebarMenuButton,
@@ -63,15 +68,26 @@ const SessionDetailsDialog = lazy(() =>
 export const APP_VERSION = '3.0.0';
 const ICON_ONLY_LABEL = 'group-data-[collapsible=icon]:sr-only';
 
-function StripTooltip({ label, children }: { label: string; children: ReactElement }) {
+/** Names an icon-strip control while the rail is collapsed; with a `hint`, explains it while the
+ *  rail is open too (desktop only: the phone sheet is touch). */
+function StripTooltip({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactElement;
+}) {
   const { state, isMobile } = useSidebar();
   const [open, setOpen] = useState(false);
-  const enabled = state === 'collapsed' && !isMobile;
+  const collapsed = state === 'collapsed';
+  const enabled = !isMobile && (collapsed || !!hint);
   return (
     <Tooltip open={enabled && open} onOpenChange={setOpen}>
       <TooltipTrigger render={children} />
       <TooltipContent side="right" align="center" hidden={!enabled}>
-        {label}
+        {collapsed ? label : hint}
       </TooltipContent>
     </Tooltip>
   );
@@ -135,11 +151,13 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
                 <span className={ICON_ONLY_LABEL}>New session</span>
               </Button>
             </StripTooltip>
-            <StripTooltip label="Import">
+            <StripTooltip
+              label="Import"
+              hint="New session from an audio file or a YouTube link, or one session per video of a YouTube playlist"
+            >
               <Button
                 variant="outline"
                 className="w-full min-w-0"
-                title="New session from an audio file or a YouTube link, or one session per video of a YouTube playlist"
                 onClick={() => {
                   closeSheet();
                   newSessionOpen.set('import');
@@ -203,15 +221,12 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
           </StripTooltip>
         </div>
 
-        <div className="relative group-data-[collapsible=icon]:hidden">
-          <Search
-            aria-hidden="true"
-            className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-          />
-          <SidebarInput
+        {/* The icon sits 10px in and the text 33px, as in the rail's narrower field before. */}
+        <InputGroup className="bg-background group-data-[collapsible=icon]:hidden has-[>[data-align=inline-start]]:[&>input]:pl-[0.4375rem]">
+          <InputGroupInput
             ref={searchRef}
             type="search"
-            className="h-(--h-ctl) pr-8 pl-8 [&::-webkit-search-cancel-button]:appearance-none"
+            className="[&::-webkit-search-cancel-button]:appearance-none"
             placeholder="Search sessions…"
             aria-label="Search sessions"
             value={query}
@@ -223,21 +238,24 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
               }
             }}
           />
+          <InputGroupAddon className="pl-[0.5625rem]">
+            <Search aria-hidden="true" />
+          </InputGroupAddon>
           {query !== '' && (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="absolute top-1/2 right-1.5 -translate-y-1/2"
-              aria-label="Clear search"
-              onClick={() => {
-                setQuery('');
-                searchRef.current?.focus({ preventScroll: true });
-              }}
-            >
-              <X aria-hidden="true" />
-            </Button>
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton
+                size="icon-xs"
+                aria-label="Clear search"
+                onClick={() => {
+                  setQuery('');
+                  searchRef.current?.focus({ preventScroll: true });
+                }}
+              >
+                <X aria-hidden="true" />
+              </InputGroupButton>
+            </InputGroupAddon>
           )}
-        </div>
+        </InputGroup>
       </SidebarHeader>
 
       <SidebarContent className="gap-0 group-data-[collapsible=icon]:invisible">
@@ -318,18 +336,18 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
           </SidebarMenuItem>
           {active.show && (
             <SidebarMenuItem>
-              <SidebarMenuButton
-                tooltip="Changes"
-                title="Every change to this show, with undo"
-                onClick={() => {
-                  closeSheet();
-                  settingsOpen.set(null);
-                  navigate('/changes');
-                }}
-              >
-                <History aria-hidden="true" />
-                <span>Changes</span>
-              </SidebarMenuButton>
+              <StripTooltip label="Changes" hint="Every change to this show, with undo">
+                <SidebarMenuButton
+                  onClick={() => {
+                    closeSheet();
+                    settingsOpen.set(null);
+                    navigate('/changes');
+                  }}
+                >
+                  <History aria-hidden="true" />
+                  <span>Changes</span>
+                </SidebarMenuButton>
+              </StripTooltip>
             </SidebarMenuItem>
           )}
           <SidebarMenuItem>

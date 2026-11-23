@@ -13,6 +13,7 @@ import { Field, FieldLabel } from '@/shared/components/ui/field';
 import { Input } from '@/shared/components/ui/input';
 import { Dialog, DialogActions } from '@/shared/ui/Dialog';
 import { isOverlayOpen } from '@/shared/ui/overlayOpen';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import { LogButton } from './LogButton';
 
 type Pending = { cat: Category; atSec: number };
@@ -111,13 +112,9 @@ export function CategoryStrip({
     return (
       <p className="m-0 text-[0.85rem] text-si-muted">
         This show has no event buttons yet.{' '}
-        <button
-          type="button"
-          className="underline underline-offset-2 hover:text-si-fg"
-          onClick={() => settingsOpen.set('event-buttons')}
-        >
+        <Button variant="link" size="inline" onClick={() => settingsOpen.set('event-buttons')}>
           Set them up in Settings → Event buttons
-        </button>
+        </Button>
         .
       </p>
     );
@@ -139,21 +136,32 @@ export function CategoryStrip({
                 : cat.offLabel || cat.name
               : cat.name;
           return (
-            <LogButton
+            <Tooltip
               key={cat.id}
-              ref={(el: HTMLButtonElement | null) => {
-                if (el) btnRefs.current.set(cat.id, el);
-                else btnRefs.current.delete(cat.id);
-              }}
-              hotkey={idx < 9 ? idx + 1 : undefined}
-              color={cat.color}
-              label={label}
-              srName={cat.kind === 'toggle' ? cat.name : undefined}
-              latched={cat.kind === 'toggle' ? (on ? 'on' : 'off') : undefined}
+              shared
+              content={idx < 9 ? `${cat.name} (${idx + 1})` : cat.name}
               disabled={!enabled}
-              title={disabledReason ?? (idx < 9 ? `${cat.name} (${idx + 1})` : cat.name)}
-              onClick={() => press(cat)}
-            />
+            >
+              <LogButton
+                ref={(el: HTMLButtonElement | null) => {
+                  if (el) btnRefs.current.set(cat.id, el);
+                  else btnRefs.current.delete(cat.id);
+                }}
+                hotkey={idx < 9 ? idx + 1 : undefined}
+                color={cat.color}
+                label={label}
+                srName={cat.kind === 'toggle' ? cat.name : undefined}
+                latched={cat.kind === 'toggle' ? (on ? 'on' : 'off') : undefined}
+                disabled={!enabled}
+                // A disabled button gets no events, so the reason stays a native title.
+                title={
+                  enabled
+                    ? undefined
+                    : (disabledReason ?? (idx < 9 ? `${cat.name} (${idx + 1})` : cat.name))
+                }
+                onClick={() => press(cat)}
+              />
+            </Tooltip>
           );
         })}
       </div>

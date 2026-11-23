@@ -41,6 +41,14 @@ const TRANSPORT = `${NEUTRAL} data-[active=true]:border-(--tx-pill-line) data-[a
 // `.cat-btn-press` is the momentary press CategoryButtonStrip toggles for 120ms.
 const LOG = `[--cat:var(--si-accent)] h-auto justify-start border-border bg-card text-foreground text-[0.875rem] not-disabled:hover:border-[color-mix(in_oklab,var(--cat)_55%,var(--si-line))] data-[latched=on]:border-(--cat) data-[latched=on]:bg-[color-mix(in_oklab,var(--cat)_22%,var(--si-panel))] [&.cat-btn-press]:translate-y-px [&.cat-btn-press]:border-(--cat) [&.cat-btn-press]:bg-[color-mix(in_oklab,var(--cat)_22%,var(--si-panel))] not-disabled:active:translate-y-px motion-reduce:[&.cat-btn-press]:translate-y-0 motion-reduce:not-disabled:active:translate-y-0`;
 
+// The inline link (`variant="link" size="inline"`): an action that reads as a link inside running
+// text or a label ("Set them up in Settings", "and 4 more", a job title). No base and no size: it
+// keeps the surrounding font, size and colour (preflight already makes a button inherit them) and
+// the app-wide focus outline, and adds only the underline and the hover lift to foreground. Callers
+// tune the colour or drop the resting underline (`no-underline hover:underline`) with classes.
+const INLINE_LINK =
+  'cursor-pointer text-left underline underline-offset-2 hover:text-foreground disabled:cursor-default';
+
 const buttonVariants = cva('', {
   variants: {
     variant: {
@@ -69,6 +77,8 @@ const buttonVariants = cva('', {
       'icon-xs': "size-6 [&_svg:not([class*='size-'])]:size-3",
       'icon-sm': 'size-(--h-sm)',
       'icon-lg': 'size-10',
+      // Only with `variant="link"`: see INLINE_LINK.
+      inline: '',
     },
   },
   defaultVariants: {
@@ -91,6 +101,7 @@ function Button({
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
   const isGlass = variant === 'glass' || variant === 'glass-primary';
   const isUnstyled = variant === 'unstyled';
+  const isInline = variant === 'link' && size === 'inline';
   const hooks = {
     'data-slot': 'button',
     'data-variant': variant,
@@ -99,13 +110,15 @@ function Button({
       ? typeof className === 'string'
         ? className
         : undefined
-      : cn(
-          buttonVariants({
-            variant,
-            size: isGlass ? null : size,
-            className: typeof className === 'string' ? className : undefined,
-          }),
-        ),
+      : isInline
+        ? cn(INLINE_LINK, typeof className === 'string' ? className : undefined)
+        : cn(
+            buttonVariants({
+              variant,
+              size: isGlass ? null : size,
+              className: typeof className === 'string' ? className : undefined,
+            }),
+          ),
   };
   if (nativeButton === false && render) {
     return <ButtonRender render={render} hooks={hooks} props={props} />;

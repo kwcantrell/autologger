@@ -347,18 +347,19 @@ function Backlinks({ page }: { page: WikiPage }) {
       {hidden > 0 && (
         <li className="flex items-baseline gap-1.5 text-sm text-si-dim">
           {all.isError && <span role="alert">Couldn’t load the other {hidden}.</span>}
-          <button
-            type="button"
+          <Button
+            variant="link"
+            size="inline"
             disabled={all.isFetching}
             aria-busy={all.isFetching}
             onClick={() => (showAll ? void all.refetch() : setShowAll(true))}
-            className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-sm text-si-dim underline decoration-(--si-line-strong) underline-offset-2 hover:text-si-fg disabled:cursor-default"
+            className="inline-flex items-center gap-1 text-sm text-si-dim decoration-(--si-line-strong)"
           >
             {all.isFetching && (
               <Spinner role="presentation" aria-hidden="true" className="size-3" />
             )}
             {all.isError ? 'Try again' : `and ${hidden} more`}
-          </button>
+          </Button>
         </li>
       )}
     </BacklinksSection>

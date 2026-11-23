@@ -6,7 +6,9 @@ import { PencilIcon } from 'lucide-react';
 import { memo, useEffect, useRef, useState } from 'react';
 import { fmtSec } from '@/lib/timecode';
 import { Button } from '@/shared/components/ui/button';
+import { Textarea } from '@/shared/components/ui/textarea';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import {
   type Column,
   FEED_CELL,
@@ -93,14 +95,16 @@ export const SegmentRow = memo(function SegmentRow({
         )}
       >
         {canWrite ? (
-          <button
-            type="button"
-            className="text-left hover:underline"
-            title="Rename this speaker everywhere"
-            onClick={onRenameSpeaker}
-          >
-            {s.speaker || 'Unknown'}
-          </button>
+          <Tooltip shared content="Rename this speaker everywhere">
+            <Button
+              variant="link"
+              size="inline"
+              className="no-underline hover:underline"
+              onClick={onRenameSpeaker}
+            >
+              {s.speaker || 'Unknown'}
+            </Button>
+          </Tooltip>
         ) : (
           s.speaker || 'Unknown'
         )}
@@ -114,12 +118,13 @@ export const SegmentRow = memo(function SegmentRow({
       >
         {editing ? (
           <>
-            <textarea
+            <Textarea
+              variant="unstyled"
               className={cn(
                 FEED_TEXTAREA,
                 'w-full rounded-[3px] border border-[color-mix(in_oklab,var(--si-accent)_55%,transparent)] bg-[color-mix(in_oklab,var(--si-accent)_8%,transparent)] px-1 py-0.5 text-inherit outline-none',
               )}
-              // biome-ignore lint/a11y/noAutofocus: the user just chose Edit; focus moves into the field
+              // The user just chose Edit; focus moves into the field.
               autoFocus
               aria-label="Segment text"
               value={text.value}

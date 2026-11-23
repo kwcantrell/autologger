@@ -6,7 +6,10 @@ import { Trash2 } from 'lucide-react';
 import { fmtSec } from '@/lib/timecode';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
+import { Input } from '@/shared/components/ui/input';
+import { Textarea } from '@/shared/components/ui/textarea';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import {
   type Column,
   FEED_CELL,
@@ -89,7 +92,8 @@ export function TopicRow({
           'align-top @max-md/feed:flex @max-md/feed:flex-wrap @max-md/feed:items-center',
         )}
       >
-        <input
+        <Input
+          variant="unstyled"
           className={cn(
             FEED_INLINE_INPUT,
             'tabular-nums @max-md/feed:w-[calc(8ch+0.6rem+2px)] @max-md/feed:shrink-0',
@@ -111,7 +115,8 @@ export function TopicRow({
         </span>
       </td>
       <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top max-md:hidden @max-md/feed:hidden')}>
-        <input
+        <Input
+          variant="unstyled"
           className={cn(FEED_INLINE_INPUT, 'tabular-nums')}
           type="number"
           min={0}
@@ -130,7 +135,8 @@ export function TopicRow({
         />
       </td>
       <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top max-md:hidden @max-md/feed:hidden')}>
-        <input
+        <Input
+          variant="unstyled"
           className={cn(FEED_INLINE_INPUT, 'tabular-nums')}
           type="number"
           min={1}
@@ -160,7 +166,8 @@ export function TopicRow({
           className={cn('flex items-start gap-1.5', conflicts.length > 0 && 'max-md:flex-wrap')}
         >
           {/* A one-line textarea, not an input, so a long title wraps instead of being cut. */}
-          <textarea
+          <Textarea
+            variant="unstyled"
             className={cn(
               FEED_INLINE_INPUT,
               FEED_TEXTAREA,
@@ -205,7 +212,8 @@ export function TopicRow({
             </Badge>
           )}
         </span>
-        <textarea
+        <Textarea
+          variant="unstyled"
           className={cn(FEED_INLINE_INPUT, FEED_TEXTAREA, 'text-si-muted')}
           aria-label="Summary"
           placeholder={ro ? '' : 'Summary'}
@@ -228,18 +236,19 @@ export function TopicRow({
         )}
       >
         {canWrite && (
-          <Button
-            variant="unstyled"
-            aria-label="Delete topic"
-            title="Delete topic"
-            className={cn(
-              'relative inline-flex size-6 max-md:mr-1 pointer-coarse:mr-1 items-center justify-center rounded-[0.35rem] text-si-dim opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover-always:text-si-danger max-md:opacity-100 pointer-coarse:opacity-100',
-              TOUCH_HIT,
-            )}
-            onClick={onDelete}
-          >
-            <Trash2 className="size-3" aria-hidden="true" />
-          </Button>
+          <Tooltip shared content="Delete topic">
+            <Button
+              variant="unstyled"
+              aria-label="Delete topic"
+              className={cn(
+                'relative inline-flex size-6 max-md:mr-1 pointer-coarse:mr-1 items-center justify-center rounded-[0.35rem] text-si-dim opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover-always:text-si-danger max-md:opacity-100 pointer-coarse:opacity-100',
+                TOUCH_HIT,
+              )}
+              onClick={onDelete}
+            >
+              <Trash2 className="size-3" aria-hidden="true" />
+            </Button>
+          </Tooltip>
         )}
       </td>
     </tr>

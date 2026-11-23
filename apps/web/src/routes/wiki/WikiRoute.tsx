@@ -11,7 +11,7 @@ import { useActive } from '@/app/useActive';
 import { PageFrame, RouteLoadingState } from '@/components/RouteState';
 import { Button } from '@/shared/components/ui/button';
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/shared/components/ui/empty';
-import { Input } from '@/shared/components/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/shared/components/ui/input-group';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui/tabs';
 import { LoadErrorAlert } from '@/shared/ui/LoadErrorAlert';
@@ -139,15 +139,16 @@ export function WikiRoute() {
             {show && <p className="m-0 truncate text-sm text-si-muted">{show.name}</p>}
           </div>
           {show && (
-            <Button
-              variant="outline"
-              nativeButton={false}
-              title="Wiki edits and deletes, with undo"
-              render={<Link href="/changes?where=show&kind=wiki_page" />}
-            >
-              <HistoryIcon data-icon="inline-start" />
-              Changes
-            </Button>
+            <Tooltip content="Wiki edits and deletes, with undo">
+              <Button
+                variant="outline"
+                nativeButton={false}
+                render={<Link href="/changes?where=show&kind=wiki_page" />}
+              >
+                <HistoryIcon data-icon="inline-start" />
+                Changes
+              </Button>
+            </Tooltip>
           )}
           {show && (
             <Tooltip content="You can read this show but not edit it." disabled={canWriteShow}>
@@ -169,20 +170,18 @@ export function WikiRoute() {
           </Empty>
         ) : (
           <>
-            <div className="relative min-w-0">
-              <SearchIcon
-                aria-hidden="true"
-                className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-si-dim"
-              />
-              <Input
+            <InputGroup>
+              <InputGroupInput
                 type="search"
                 aria-label="Filter pages"
                 placeholder="Filter by title or alias"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                className="pl-9"
               />
-            </div>
+              <InputGroupAddon className="text-si-dim">
+                <SearchIcon aria-hidden="true" />
+              </InputGroupAddon>
+            </InputGroup>
             <Tabs value={tab} onValueChange={(v) => setTab(v as WikiKind)} className="min-w-0">
               <div className="flex min-w-0 max-md:overflow-x-auto max-md:[scrollbar-width:none]">
                 <TabsList variant="line" aria-label="Page kinds">

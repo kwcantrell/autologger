@@ -6,7 +6,6 @@ import { qk, useCapabilities } from '@/api/queries';
 import { errorMessage, rpc } from '@/api/rpc';
 import { useActive } from '@/app/useActive';
 import { isYoutubeAuthError } from '@/app/YoutubeAuthHelp';
-import { NativeSelect } from '@/components/NativeSelect';
 import { FRAME_RATES, parseTimecode } from '@/lib/timecode';
 import { enqueueUpload, probeDuration } from '@/session/audio/uploads';
 import {
@@ -17,13 +16,22 @@ import {
 import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
 import { Button } from '@/shared/components/ui/button';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/shared/components/ui/collapsible';
 import { Field, FieldDescription, FieldLabel } from '@/shared/components/ui/field';
 import { Input } from '@/shared/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/shared/components/ui/native-select';
 import { Textarea } from '@/shared/components/ui/textarea';
 import { ToggleGroup, ToggleGroupItem } from '@/shared/components/ui/toggle-group';
-import { cn } from '@/shared/lib/utils';
 import { Dialog, DialogActions } from '@/shared/ui/Dialog';
 import { PlaylistImportForm } from './PlaylistImportForm';
+
+// The disclosure chevron turns a quarter while its section is open.
+const DISCLOSURE_CHEVRON =
+  'transition-transform motion-reduce:transition-none in-data-[panel-open]:rotate-90';
 
 const today = () => new Date().toLocaleDateString('en-CA');
 
@@ -183,9 +191,9 @@ export function NewSessionModal({
               onChange={(e) => setShowId(e.target.value)}
             >
               {writable.map((s) => (
-                <option key={s.id} value={s.id}>
+                <NativeSelectOption key={s.id} value={s.id}>
                   {s.name} ({s.code})
-                </option>
+                </NativeSelectOption>
               ))}
             </NativeSelect>
           )}
@@ -261,103 +269,75 @@ export function NewSessionModal({
           />
         </Field>
 
-        <div>
-          <Button
-            type="button"
-            variant="ghost"
-            className="px-1"
-            aria-expanded={tcOpen}
-            onClick={() => setTcOpen((v) => !v)}
-          >
-            <ChevronRight
-              className={cn(
-                'transition-transform motion-reduce:transition-none',
-                tcOpen && 'rotate-90',
-              )}
-              aria-hidden="true"
-            />
+        <Collapsible open={tcOpen} onOpenChange={setTcOpen}>
+          <CollapsibleTrigger render={<Button type="button" variant="ghost" className="px-1" />}>
+            <ChevronRight className={DISCLOSURE_CHEVRON} aria-hidden="true" />
             Timecode settings — {frameRate} fps · start {startTc}
-          </Button>
-          {tcOpen && (
-            <div className="mt-2 grid grid-cols-2 gap-3 max-md:grid-cols-1">
-              <Field>
-                <FieldLabel htmlFor="ns-fps">Frame rate</FieldLabel>
-                <NativeSelect
-                  id="ns-fps"
-                  value={String(frameRate)}
-                  onChange={(e) => setFps(Number(e.target.value))}
-                >
-                  {FRAME_RATES.map((r) => (
-                    <option key={r} value={r}>
-                      {r} fps
-                    </option>
-                  ))}
-                </NativeSelect>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="ns-tc">Start timecode</FieldLabel>
-                <Input
-                  id="ns-tc"
-                  className="font-tc"
-                  value={startTc}
-                  aria-invalid={!tcValid || undefined}
-                  onChange={(e) => setStartTc(e.target.value)}
-                />
-                {!tcValid && (
-                  <FieldDescription className="text-si-danger">
-                    Use HH:MM:SS:FF with frames below {Math.round(frameRate)}.
-                  </FieldDescription>
-                )}
-              </Field>
-            </div>
-          )}
-        </div>
-
-        <div>
-          <Button
-            type="button"
-            variant="ghost"
-            className="px-1"
-            aria-expanded={srcOpen}
-            onClick={() => setSrcOpen((v) => !v)}
-          >
-            <ChevronRight
-              className={cn(
-                'transition-transform motion-reduce:transition-none',
-                srcOpen && 'rotate-90',
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2 grid grid-cols-2 gap-3 max-md:grid-cols-1">
+            <Field>
+              <FieldLabel htmlFor="ns-fps">Frame rate</FieldLabel>
+              <NativeSelect
+                id="ns-fps"
+                value={String(frameRate)}
+                onChange={(e) => setFps(Number(e.target.value))}
+              >
+                {FRAME_RATES.map((r) => (
+                  <NativeSelectOption key={r} value={r}>
+                    {r} fps
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="ns-tc">Start timecode</FieldLabel>
+              <Input
+                id="ns-tc"
+                className="font-tc"
+                value={startTc}
+                aria-invalid={!tcValid || undefined}
+                onChange={(e) => setStartTc(e.target.value)}
+              />
+              {!tcValid && (
+                <FieldDescription className="text-si-danger">
+                  Use HH:MM:SS:FF with frames below {Math.round(frameRate)}.
+                </FieldDescription>
               )}
-              aria-hidden="true"
-            />
+            </Field>
+          </CollapsibleContent>
+        </Collapsible>
+
+        <Collapsible open={srcOpen} onOpenChange={setSrcOpen}>
+          <CollapsibleTrigger render={<Button type="button" variant="ghost" className="px-1" />}>
+            <ChevronRight className={DISCLOSURE_CHEVRON} aria-hidden="true" />
             Import audio{!srcOpen && (file || ytUrl) ? ' — source added' : ''}
-          </Button>
-          {srcOpen && (
-            <div className="mt-2 flex flex-col gap-3">
-              <Field>
-                <FieldLabel htmlFor="ns-yt">YouTube link</FieldLabel>
-                <Input
-                  id="ns-yt"
-                  type="url"
-                  disabled={!!ytReason || !!file}
-                  placeholder="https://www.youtube.com/watch?v=…"
-                  value={ytUrl}
-                  onChange={(e) => setYtUrl(e.target.value)}
-                />
-                {ytReason && <FieldDescription>{ytReason}</FieldDescription>}
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="ns-file">Or an audio file</FieldLabel>
-                <Input
-                  id="ns-file"
-                  type="file"
-                  accept="audio/*,video/*"
-                  disabled={!!fileReason || !!ytUrl.trim()}
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                />
-                {fileReason && <FieldDescription>{fileReason}</FieldDescription>}
-              </Field>
-            </div>
-          )}
-        </div>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2 flex flex-col gap-3">
+            <Field>
+              <FieldLabel htmlFor="ns-yt">YouTube link</FieldLabel>
+              <Input
+                id="ns-yt"
+                type="url"
+                disabled={!!ytReason || !!file}
+                placeholder="https://www.youtube.com/watch?v=…"
+                value={ytUrl}
+                onChange={(e) => setYtUrl(e.target.value)}
+              />
+              {ytReason && <FieldDescription>{ytReason}</FieldDescription>}
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="ns-file">Or an audio file</FieldLabel>
+              <Input
+                id="ns-file"
+                type="file"
+                accept="audio/*,video/*"
+                disabled={!!fileReason || !!ytUrl.trim()}
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+              {fileReason && <FieldDescription>{fileReason}</FieldDescription>}
+            </Field>
+          </CollapsibleContent>
+        </Collapsible>
 
         {error && (
           <Alert variant="destructive">

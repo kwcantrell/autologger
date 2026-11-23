@@ -7,6 +7,7 @@ import type { ValueFormat, Widget } from '@autologger/contract';
 import type { ReactNode } from 'react';
 import { fmtShort } from '@/lib/timecode';
 import { FEED_CELL, FEED_TABLE, FEED_TH } from '@/session/feed';
+import { Button } from '@/shared/components/ui/button';
 import {
   Table,
   TableBody,
@@ -16,6 +17,7 @@ import {
   TableRow,
 } from '@/shared/components/ui/table';
 import { cn } from '@/shared/lib/utils';
+import { Tooltip } from '@/shared/ui/Tooltip';
 import { fmtField, fmtFormat, fmtNum, fmtValue, type Row, safeColor, toNum } from './data';
 
 // Resolved --si-* values (dark only): recharts writes these as SVG presentation attributes; the
@@ -217,25 +219,25 @@ export function TimelineWidget({
       <div className="relative h-9 w-full rounded-ctl border border-si-line bg-si-bg">
         {items.map((x) =>
           x.dur ? (
-            <button
-              key={x.i}
-              type="button"
-              onClick={() => onSeek(x.at)}
-              title={`${fmtShort(x.at)} · ${x.label}`}
-              aria-label={`Jump to ${fmtShort(x.at)} ${x.label}`}
-              className="absolute top-1.5 bottom-1.5 min-w-[3px] cursor-pointer rounded-[3px] border border-[color-mix(in_oklab,var(--si-accent)_55%,transparent)] bg-[color-mix(in_oklab,var(--si-accent)_22%,transparent)] p-0 hover:bg-[color-mix(in_oklab,var(--si-accent)_40%,transparent)] focus-visible:outline-2 focus-visible:outline-ring"
-              style={{ left: pct(x.at), width: `calc(${pct(x.dur)} - 1px)` }}
-            />
+            <Tooltip key={x.i} shared content={`${fmtShort(x.at)} · ${x.label}`}>
+              <button
+                type="button"
+                onClick={() => onSeek(x.at)}
+                aria-label={`Jump to ${fmtShort(x.at)} ${x.label}`}
+                className="absolute top-1.5 bottom-1.5 min-w-[3px] cursor-pointer rounded-[3px] border border-[color-mix(in_oklab,var(--si-accent)_55%,transparent)] bg-[color-mix(in_oklab,var(--si-accent)_22%,transparent)] p-0 hover:bg-[color-mix(in_oklab,var(--si-accent)_40%,transparent)] focus-visible:outline-2 focus-visible:outline-ring"
+                style={{ left: pct(x.at), width: `calc(${pct(x.dur)} - 1px)` }}
+              />
+            </Tooltip>
           ) : (
-            <button
-              key={x.i}
-              type="button"
-              onClick={() => onSeek(x.at)}
-              title={`${fmtShort(x.at)} · ${x.label}`}
-              aria-label={`Jump to ${fmtShort(x.at)} ${x.label}`}
-              className="absolute top-1 bottom-1 w-[3px] -translate-x-1/2 cursor-pointer rounded-full border-0 p-0 opacity-85 hover:opacity-100 hover:[box-shadow:0_0_0_2px_rgba(255,255,255,0.25)] focus-visible:outline-2 focus-visible:outline-ring"
-              style={{ left: pct(x.at), background: x.color ?? C.accent }}
-            />
+            <Tooltip key={x.i} shared content={`${fmtShort(x.at)} · ${x.label}`}>
+              <button
+                type="button"
+                onClick={() => onSeek(x.at)}
+                aria-label={`Jump to ${fmtShort(x.at)} ${x.label}`}
+                className="absolute top-1 bottom-1 w-[3px] -translate-x-1/2 cursor-pointer rounded-full border-0 p-0 opacity-85 hover:opacity-100 hover:[box-shadow:0_0_0_2px_rgba(255,255,255,0.25)] focus-visible:outline-2 focus-visible:outline-ring"
+                style={{ left: pct(x.at), background: x.color ?? C.accent }}
+              />
+            </Tooltip>
           ),
         )}
       </div>
@@ -249,8 +251,8 @@ export function TimelineWidget({
       <ul className="m-0 flex max-h-[220px] list-none flex-col overflow-auto p-0">
         {items.slice(0, MAX_TABLE_ROWS).map((x) => (
           <li key={x.i}>
-            <button
-              type="button"
+            <Button
+              variant="unstyled"
               onClick={() => onSeek(x.at)}
               className="flex w-full min-w-0 cursor-pointer items-baseline gap-2.5 rounded-[5px] border-0 bg-transparent px-1.5 py-1 text-left text-[0.8rem] text-si-fg hover:bg-white/[0.04] focus-visible:outline-2 focus-visible:outline-ring"
             >
@@ -265,7 +267,7 @@ export function TimelineWidget({
                   {fmtShort(x.dur)}
                 </span>
               )}
-            </button>
+            </Button>
           </li>
         ))}
       </ul>

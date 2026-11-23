@@ -7,13 +7,13 @@ import { InfoIcon, TagsIcon } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { qk, useCapabilities, useJobs, useMedia, useOpMutation } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
-import { NativeSelect } from '@/components/NativeSelect';
 import { FRAME_RATES, parseTimecode } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
 import { Button } from '@/shared/components/ui/button';
 import { Field, FieldDescription, FieldLabel } from '@/shared/components/ui/field';
 import { Input } from '@/shared/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/shared/components/ui/native-select';
 import { Textarea } from '@/shared/components/ui/textarea';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { Dialog, DialogActions } from '@/shared/ui/Dialog';
@@ -160,9 +160,9 @@ export function SessionDetailsDialog({
               }}
             >
               {rates.map((r) => (
-                <option key={r} value={r}>
+                <NativeSelectOption key={r} value={r}>
                   {r} fps
-                </option>
+                </NativeSelectOption>
               ))}
             </NativeSelect>
           </Field>
