@@ -5,9 +5,8 @@
 import type { Category, Session, SessionEvent } from '@autologger/contract';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { byEventTime, upsertList } from '@/api/live';
-import { qk } from '@/api/queries';
 import { errorMessage, rpc } from '@/api/rpc';
+import { applyEntity } from '@/api/session/cache';
 import { isTypingTarget } from '@/lib/keys';
 import { settingsOpen } from '@/lib/store';
 import { showToast } from '@/shared/components/Toast';
@@ -62,9 +61,7 @@ export function CategoryStrip({
         });
         // Show our own write without waiting for the socket echo (same keyed upsert, so the echo
         // is a no-op): toggles read their phase from it, and it shows while reconnecting.
-        qc.setQueryData<SessionEvent[]>(qk.events(session.id), (l) =>
-          upsertList(l, ev, byEventTime),
-        );
+        applyEntity(qc, session.id, { entity: 'event', op: 'upsert', id: ev.id, data: ev });
         showToast('Logged.');
       } catch (e) {
         showToast(`Couldn't log ${cat.name}. ${errorMessage(e)}`, true);

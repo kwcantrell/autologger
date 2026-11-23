@@ -1,7 +1,6 @@
 // Agents tab: how to connect an MCP agent, and the session's change log with undo.
 
-import type { Change, Session } from '@autologger/contract';
-import type { QueryKey } from '@tanstack/react-query';
+import type { Change, ChangeEntity, Session } from '@autologger/contract';
 import { useEffect, useMemo, useState } from 'react';
 import {
   qk,
@@ -12,6 +11,7 @@ import {
   useTopics,
 } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
+import { keysFor } from '@/api/session/entities';
 import { settingsOpen } from '@/lib/store';
 import { eventSec } from '@/lib/timecode';
 import { useWorkspace } from '@/session/context';
@@ -120,6 +120,16 @@ function ConnectCard() {
   );
 }
 
+/** Content a grouped undo may touch (session entries plus what derives from them). */
+const REVERTIBLE: ChangeEntity[] = [
+  'dashboard',
+  'event',
+  'topic',
+  'transcript_segment',
+  'audio_segment',
+  'session',
+];
+
 function ChangeFeed({ session }: { session: Session }) {
   const { canWrite, seek } = useWorkspace();
   const [filter, setFilter] = useState<Filter>('all');
@@ -130,26 +140,13 @@ function ChangeFeed({ session }: { session: Session }) {
   const { confirm, confirmElement } = useConfirm();
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const revert = useOpMutation('changes.revert', {
-    invalidate: (c) => {
-      const keys: QueryKey[] = [qk.changesAll(session.id)];
-      if (c.entity === 'dashboard') keys.push(qk.dashboards(session.id));
-      if (c.entity === 'event') keys.push(qk.events(session.id));
-      if (c.entity === 'topic') keys.push(qk.topics(session.id));
-      if (c.entity === 'transcript_segment') keys.push(qk.transcript(session.id));
-      if (c.entity === 'audio_segment') keys.push(qk.media(session.id), qk.session(session.id));
-      return keys;
-    },
+    invalidate: (c) => [qk.changesAll(session.id), ...keysFor(c.entity, session.id)],
   });
   // A folded row stands for one op call; its changes may touch several kinds of content.
   const revertGroup = useOpMutation('changes.revertGroup', {
     invalidate: () => [
       qk.changesAll(session.id),
-      qk.dashboards(session.id),
-      qk.events(session.id),
-      qk.topics(session.id),
-      qk.transcript(session.id),
-      qk.media(session.id),
-      qk.session(session.id),
+      ...REVERTIBLE.flatMap((e) => keysFor(e, session.id)),
     ],
   });
 
