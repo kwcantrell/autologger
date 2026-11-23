@@ -45,6 +45,14 @@ export function toRpcError(err: unknown): RpcError {
     (err as { code?: string; cause?: { code?: string } })?.cause?.code ??
     (err as { code?: string })?.code;
   if (pgCode === '23505') return { code: 'conflict', message: 'That already exists.' };
+  // NUL (or another byte Postgres cannot store) in text (22021) or jsonb (22P05). Op input is
+  // checked in executeOp; this covers text reaching a query any other way.
+  if (pgCode === '22021' || pgCode === '22P05')
+    return {
+      code: 'bad_request',
+      message:
+        'Text may not contain NUL characters (\\u0000) or other characters the database cannot store.',
+    };
   console.error(loggable(err));
   return { code: 'internal', message: 'Something went wrong on the server.' };
 }

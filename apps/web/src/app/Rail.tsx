@@ -520,7 +520,9 @@ function SessionCard({
         }}
       >
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className={CARD_TITLE}>{s.title || 'Untitled session'}</span>
+          <span className={CARD_TITLE} title={s.title || undefined}>
+            {s.title || 'Untitled session'}
+          </span>
           {s.isRolling && <Badge className="px-1 py-px text-[0.625rem] leading-none">LIVE</Badge>}
           {job && <JobMark job={job} />}
         </span>
@@ -559,7 +561,9 @@ function ArchivedCard({ session: s }: { session: Session }) {
   return (
     <SidebarMenuItem data-session-id={s.id} data-menu-open={menuOpen || undefined}>
       <div className="flex w-full min-w-0 flex-col justify-center gap-0.5 rounded-ctl p-2 pr-8 text-sm">
-        <span className={CARD_TITLE}>{s.title || 'Untitled session'}</span>
+        <span className={CARD_TITLE} title={s.title || undefined}>
+          {s.title || 'Untitled session'}
+        </span>
         <MetaRow session={s} />
       </div>
       {s.access !== 'read' && (

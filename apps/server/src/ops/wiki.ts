@@ -258,6 +258,54 @@ async function nextRevision(ctx: Ctx, row: PageRow): Promise<number> {
   return Math.max(row.revision, r?.max ?? 0) + 1;
 }
 
+/**
+ * With `baseRevision` (the revision an edit started from), lock the page row for the rest of the
+ * transaction and fail with conflict — naming the current revision and its last change — when the
+ * page has moved on since. Returns the locked, current row to save over.
+ */
+async function lockAtRevision(
+  ctx: Ctx,
+  row: PageRow,
+  baseRevision: number | undefined,
+): Promise<PageRow> {
+  if (baseRevision === undefined) return row;
+  const [current] = await ctx.db
+    .select()
+    .from(pages)
+    .where(and(eq(pages.id, row.id), live))
+    .for('update');
+  if (!current) throw notFound('Wiki page');
+  if (current.revision === baseRevision) return current;
+  const [last] = await ctx.db
+    .select({
+      actorId: schema.changes.actorId,
+      via: schema.changes.via,
+      clientName: schema.changes.clientName,
+      at: schema.changes.at,
+    })
+    .from(schema.changes)
+    .where(and(eq(schema.changes.entity, 'wiki_page'), eq(schema.changes.entityId, row.id)))
+    .orderBy(desc(schema.changes.at), desc(schema.changes.id))
+    .limit(1);
+  const actorId = last?.actorId ?? current.updatedBy;
+  const name = actorId ? (await userRefs(ctx.db, [actorId])).get(actorId)?.name : undefined;
+  const by =
+    last?.via === 'mcp'
+      ? ` by ${last.clientName ?? 'an agent'}${name ? ` (acting for ${name})` : ''}`
+      : name
+        ? ` by ${name}`
+        : '';
+  // Agents get the time and what to do next; the web editor shows its own options.
+  const at = (last?.at ?? current.updatedAt)?.toISOString();
+  const agent = ctx.actor.via === 'mcp';
+  throw conflict(
+    `The page “${current.title}” changed since revision ${baseRevision}: it is now revision ${current.revision}, last changed${by}${agent && at ? ` at ${at}` : ''}. Nothing was saved.` +
+      (agent
+        ? ` Read it again (wiki_get), redo your edit on the current text and send baseRevision ${current.revision}.`
+        : ''),
+  );
+}
+
 /** Find a live page by title or alias within a show, resolved like a [[link]] (normTitle). */
 async function findByTitle(ctx: Ctx, showId: string, title: string): Promise<PageRow | undefined> {
   const id = (await wikiNames(ctx.db, showId)).get(normTitle(title));
@@ -658,7 +706,7 @@ defineOp({
   name: 'wiki.upsert',
   description:
     'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated (keeping its title), otherwise a new one is created; pass pageId to rename. bodyMd is raw Markdown text, stored exactly as sent (apart from clamping a citation end slightly past the audio, below): write real newlines and quotes, not JSON escapes like \\n or \\" inside the text. Link other pages with [[Title]] or [[Title|label]]; wiki_lint finds links to missing pages. Kind "session" pages are recaps tied to sessionId. Kind "question" pages store an answered question: title = the question as asked (e.g. "When did Dana talk about her dog?"), bodyMd = the answer, with a citation for every claim. ' +
-    'A citation is a Markdown link to a range of a session: [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), seconds from the session start (the @seconds of transcript_text; `to` optional and greater than t; the range must end within the session\'s audio — audioSeconds in sessions_get / sessions_list is the bound — and a `to` up to 5 s past the audio end is clamped to it on save, so the stored body then differs from what was sent there), e.g. [Dana on the dog](/sessions/ses_abc?t=754.2&to=811). The web shows it as a chip with the session title and range (HH:MM:SS–HH:MM:SS) that plays that range, the label as its tooltip. Short forms save tokens and are indexed, rendered and linted the same: on a page with a sessionId (every "session" recap) [label](@<startSec>-<endSec>) cites that page\'s own session, e.g. [Dana on the dog](@754.2-811), and [@754.2-811] is a citation with no label; on any page [label](@<sessionId>:<startSec>-<endSec>) or [@<sessionId>:<startSec>-<endSec>] names the session (-<endSec> optional in all forms). Saving a sessionless short form on a page without a sessionId is a bad_request. Prefer citations over bare timecodes on every page kind; wiki_lint checks them. Every save keeps a revision. To fix a few sentences of an existing page, use wiki_patch instead of resending the whole body. ' +
+    "A citation is a Markdown link to a range of a session: [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), seconds from the session start (the @seconds of transcript_text; `to` optional and greater than t; the range must end within the session's audio — audioSeconds in sessions_get / sessions_list is the bound — and a `to` up to 5 s past the audio end is clamped to it on save, so the stored body then differs from what was sent there), e.g. [Dana on the dog](/sessions/ses_abc?t=754.2&to=811). The web shows it as a chip with the session title and range (HH:MM:SS–HH:MM:SS) that plays that range, the label as its tooltip. Short forms save tokens and are indexed, rendered and linted the same: on a page with a sessionId (every \"session\" recap) [label](@<startSec>-<endSec>) cites that page's own session, e.g. [Dana on the dog](@754.2-811), and [@754.2-811] is a citation with no label; on any page [label](@<sessionId>:<startSec>-<endSec>) or [@<sessionId>:<startSec>-<endSec>] names the session (-<endSec> optional in all forms). Saving a sessionless short form on a page without a sessionId is a bad_request. Prefer citations over bare timecodes on every page kind; wiki_lint checks them. Every save keeps a revision. To fix a few sentences of an existing page, use wiki_patch instead of resending the whole body. baseRevision (optional): the page revision your edit is based on (`revision` from wiki_get / wiki_list); when the page has moved on since (someone else saved, or a change was undone), the call fails with conflict naming the current revision and who last changed it, and nothing is saved — re-read the page, redo the edit and retry with the new revision. Send it when you rewrite a page you read earlier, so a concurrent human edit isn't overwritten; without it the save always goes through (last write wins). " +
     'Returns the saved page with its body and backlinks; pass `compact: true` (recommended for agents) to get only `{ id, title, kind, revision, unresolvedLinks, citationCount, badCitations, clampedCitations }`, where unresolvedLinks lists the [[link]] targets in the body that match no page title or alias in the show yet (create those pages, or fix the link; wiki_lint checks the whole wiki). Both shapes include citationCount (citations in the saved body, repeats counted) and badCitations: the saved page\'s citations that wiki_lint would flag, in body order, as [{ sessionId, startSec, endSec?, label, problem }] with problem "unknown_session", "bad_range", "past_end" or "label_mismatch" (see wiki_lint) — the page is saved anyway; fix them with wiki_patch. Both shapes also include clampedCitations: the citations whose `to` this save clamped to the audio end, in body order, as [{ sessionId, startSec, endSec, sentEndSec, label }] (endSec as stored, sentEndSec as sent) — when it is not empty the stored body differs from what you sent, so a later wiki_patch `find` must use the stored `to` (or read the body with wiki_get). A citation without `to` whose t is past the audio end is not clamped; it is reported in badCitations as past_end.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
@@ -671,11 +719,16 @@ defineOp({
       if (session.showId !== input.showId)
         throw badRequest('That session belongs to another show.');
     }
-    const existing = input.pageId
+    const found = input.pageId
       ? await loadPage(ctx, input.pageId, 'write')
       : await findByTitle(ctx, input.showId, input.title);
-    if (existing && existing.showId !== input.showId)
+    if (found && found.showId !== input.showId)
       throw badRequest('That page belongs to another show.');
+    if (!found && input.baseRevision !== undefined)
+      throw conflict(
+        `No page titled “${input.title}” exists any more (renamed or deleted since revision ${input.baseRevision}). Nothing was saved; find it with wiki_list, or leave out baseRevision to create a new page.`,
+      );
+    const existing = found && (await lockAtRevision(ctx, found, input.baseRevision));
     const clash = await findByTitle(ctx, input.showId, input.title);
     if (clash && clash.id !== existing?.id)
       throw conflict(`A page titled “${clash.title}” already exists.`);
@@ -761,11 +814,11 @@ function occurrences(text: string, find: string): number {
 defineOp({
   name: 'wiki.patch',
   description:
-    "Fix part of a wiki page without resending its body. edits: [{ find, replace }] are exact, case-sensitive text replacements applied in order; each `find` must occur exactly once in the page at that point (otherwise bad_request saying how often it matched; include more surrounding text to make it unique), and nothing is saved unless every edit applies. append (optional) adds Markdown on a new line at the end. Citations may use the short forms wiki_upsert describes ([label](@<startSec>-<endSec>) on a page with a sessionId). As in wiki_upsert, a citation `to` up to 5 s past its session's audio end is clamped to that end (anywhere in the saved body, not only in the edited text) and listed in clampedCitations; a `to=` in a later `find` must match the stored end. Saved as one new revision, undoable from the change log. pageId comes from wiki_list / wiki_get. Returns the page summary (id, title, revision) without the body, plus citationCount, badCitations and clampedCitations for the saved body (as in wiki_upsert); read the body with wiki_get if needed.",
+    "Fix part of a wiki page without resending its body. edits: [{ find, replace }] are exact, case-sensitive text replacements applied in order; each `find` must occur exactly once in the page at that point (otherwise bad_request saying how often it matched; include more surrounding text to make it unique), and nothing is saved unless every edit applies. append (optional) adds Markdown on a new line at the end. Citations may use the short forms wiki_upsert describes ([label](@<startSec>-<endSec>) on a page with a sessionId). As in wiki_upsert, a citation `to` up to 5 s past its session's audio end is clamped to that end (anywhere in the saved body, not only in the edited text) and listed in clampedCitations; a `to=` in a later `find` must match the stored end. Saved as one new revision, undoable from the change log. baseRevision (optional, as in wiki_upsert): the revision the edits were made against; if the page has moved on since, conflict (naming the current revision and who changed it) and nothing is saved. Without it, the edits apply to whatever the page holds now. pageId comes from wiki_list / wiki_get. Returns the page summary (id, title, revision) without the body, plus citationCount, badCitations and clampedCitations for the saved body (as in wiki_upsert); read the body with wiki_get if needed.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { pageId, edits, append }) {
-    const row = await loadPage(ctx, pageId, 'write');
+  async run(ctx, { pageId, edits, append, baseRevision }) {
+    const row = await lockAtRevision(ctx, await loadPage(ctx, pageId, 'write'), baseRevision);
     if (!edits.length && !append) throw badRequest('Give at least one edit or append.');
     let body = row.bodyMd;
     for (const [i, e] of edits.entries()) {
