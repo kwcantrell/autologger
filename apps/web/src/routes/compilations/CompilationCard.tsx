@@ -14,6 +14,7 @@ import { fmtShort } from '@/lib/timecode';
 import { CopyRow } from '@/session/tabs/CopyRow';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
+import { Card } from '@/shared/components/ui/card';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { Tooltip } from '@/shared/ui/Tooltip';
 
@@ -85,154 +86,156 @@ export function CompilationCard({
   // The server could not download the videos: YouTube wants a sign-in (bot check, private video).
   const authFailed = c.status === 'failed' && isYoutubeAuthError(c.error);
   return (
-    <li className="flex min-w-0 flex-col gap-3 rounded-ctl border border-si-line bg-si-panel p-4">
-      <div className="flex min-w-0 items-start gap-3">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <h2 className="m-0 truncate text-base font-semibold text-si-fg">{c.title}</h2>
-          <p className="m-0 text-xs text-si-dim">
-            {c.clips.length} clip{c.clips.length === 1 ? '' : 's'} · {fmtShort(c.durationSec)}
-            {c.sizeBytes ? ` · ${fmtSize(c.sizeBytes)}` : ''} ·{' '}
-            {new Date(c.createdAt).toLocaleDateString()}
-            {c.createdBy ? ` by ${c.createdBy.name}` : ''}
-          </p>
-        </div>
-        <Badge
-          variant={
-            c.status === 'failed' ? 'destructive' : c.status === 'ready' ? 'secondary' : 'outline'
-          }
-        >
-          {building && !local && <Spinner role="presentation" aria-hidden="true" />}
-          {local ? 'Local build' : STATUS_LABEL[c.status]}
-        </Badge>
-      </div>
-
-      {local && (
-        <div className="flex min-w-0 flex-col gap-2">
-          <p role="status" className="m-0 text-sm text-si-muted">
-            Waiting for a local build. Run this on your computer with the AutoLogger import helper
-            (add <code className="font-tc text-xs">--cookies-from-browser &lt;browser&gt;</code> for
-            private videos); the video appears here when it is uploaded.
-            {onOpenHelper && (
-              <>
-                {' '}
-                <Button variant="link" size="xs" className="h-auto px-0" onClick={onOpenHelper}>
-                  Set up the import helper
-                </Button>
-              </>
-            )}
-          </p>
-          {onCopy && (
-            <CopyRow label="Build command" value={localBuildCommand(c.id)} onCopy={onCopy} />
-          )}
-        </div>
-      )}
-      {building && !local && (
-        <p role="status" className="m-0 text-sm text-si-muted">
-          {c.progress ?? 'Waiting for the worker'}
-          {wait && ` · ${wait}`}
-        </p>
-      )}
-      {c.status === 'failed' && (
-        <p role="alert" className="m-0 text-sm break-words text-si-danger">
-          {c.error ?? 'The build failed.'}
-        </p>
-      )}
-      {authFailed && (
-        <div className="flex min-w-0 flex-col gap-1 text-sm text-si-muted">
-          <p className="m-0">
-            YouTube wants a sign-in before this server can download the videos. Set the team’s
-            YouTube sign-in and retry, or build the video on your computer with the import helper,
-            which uses your own browser’s sign-in.
-          </p>
-          {authHelp}
-        </div>
-      )}
-      {c.status === 'ready' && c.url && (
-        // biome-ignore lint/a11y/useMediaCaption: compilations of interview video have no caption track
-        <video
-          controls
-          preload="metadata"
-          src={c.url}
-          className="aspect-video w-full rounded-ctl bg-black"
-          aria-label={`${c.title} video`}
-        />
-      )}
-
-      <details className="min-w-0 text-sm">
-        <summary className="cursor-pointer text-si-muted hover:text-si-fg">Clips</summary>
-        <ol className="m-0 mt-2 flex list-decimal flex-col gap-1 pl-6">
-          {c.clips.map((clip, i) => (
-            // Clips may repeat the same range; the position keeps keys unique.
-            // biome-ignore lint/suspicious/noArrayIndexKey: order is the identity of a clip
-            <li key={i} className="min-w-0 text-si-fg">
-              <Link
-                href={clipHref(clip.sessionId, clip.startSec)}
-                className="text-si-fg underline-offset-2 hover:underline"
-              >
-                {clip.sessionTitle}
-              </Link>{' '}
-              <span className="font-mono text-xs text-si-dim">
-                {fmtShort(clip.startSec)}–{fmtShort(clip.endSec)}
-              </span>
-              {clip.label && <span className="text-si-muted"> · {clip.label}</span>}
-            </li>
-          ))}
-        </ol>
-      </details>
-
-      <div className="flex flex-wrap items-center gap-2">
-        {c.status === 'ready' && c.url && (
-          <Button
-            variant="outline"
-            nativeButton={false}
-            render={<a href={c.url} download={`${c.title}.mp4`} />}
+    <li className="min-w-0">
+      <Card className="min-w-0 gap-3 rounded-ctl p-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <h2 className="m-0 truncate text-base font-semibold text-si-fg">{c.title}</h2>
+            <p className="m-0 text-xs text-si-dim">
+              {c.clips.length} clip{c.clips.length === 1 ? '' : 's'} · {fmtShort(c.durationSec)}
+              {c.sizeBytes ? ` · ${fmtSize(c.sizeBytes)}` : ''} ·{' '}
+              {new Date(c.createdAt).toLocaleDateString()}
+              {c.createdBy ? ` by ${c.createdBy.name}` : ''}
+            </p>
+          </div>
+          <Badge
+            variant={
+              c.status === 'failed' ? 'destructive' : c.status === 'ready' ? 'secondary' : 'outline'
+            }
           >
-            <DownloadIcon data-icon="inline-start" />
-            Download
-          </Button>
+            {building && !local && <Spinner role="presentation" aria-hidden="true" />}
+            {local ? 'Local build' : STATUS_LABEL[c.status]}
+          </Badge>
+        </div>
+
+        {local && (
+          <div className="flex min-w-0 flex-col gap-2">
+            <p role="status" className="m-0 text-sm text-si-muted">
+              Waiting for a local build. Run this on your computer with the AutoLogger import helper
+              (add <code className="font-tc text-xs">--cookies-from-browser &lt;browser&gt;</code>{' '}
+              for private videos); the video appears here when it is uploaded.
+              {onOpenHelper && (
+                <>
+                  {' '}
+                  <Button variant="link" size="xs" className="h-auto px-0" onClick={onOpenHelper}>
+                    Set up the import helper
+                  </Button>
+                </>
+              )}
+            </p>
+            {onCopy && (
+              <CopyRow label="Build command" value={localBuildCommand(c.id)} onCopy={onCopy} />
+            )}
+          </div>
+        )}
+        {building && !local && (
+          <p role="status" className="m-0 text-sm text-si-muted">
+            {c.progress ?? 'Waiting for the worker'}
+            {wait && ` · ${wait}`}
+          </p>
         )}
         {c.status === 'failed' && (
-          <Tooltip
-            content="You can watch this show's compilations but not build them again."
-            disabled={canWrite}
-          >
-            <span className="inline-flex">
-              <Button variant="outline" onClick={onRetry} disabled={!canWrite || retrying}>
-                <RefreshCwIcon data-icon="inline-start" />
-                {retrying ? 'Retrying…' : 'Retry'}
-              </Button>
-            </span>
-          </Tooltip>
+          <p role="alert" className="m-0 text-sm break-words text-si-danger">
+            {c.error ?? 'The build failed.'}
+          </p>
         )}
-        {authFailed && onBuildLocally && (
-          <Tooltip
-            content="You can watch this show's compilations but not build them again."
-            disabled={canWrite}
-          >
-            <span className="inline-flex">
-              <Button
-                variant="outline"
-                onClick={onBuildLocally}
-                disabled={!canWrite || switching || retrying}
-              >
-                <LaptopIcon data-icon="inline-start" />
-                {switching ? 'Switching…' : 'Build on my computer'}
-              </Button>
-            </span>
-          </Tooltip>
+        {authFailed && (
+          <div className="flex min-w-0 flex-col gap-1 text-sm text-si-muted">
+            <p className="m-0">
+              YouTube wants a sign-in before this server can download the videos. Set the team’s
+              YouTube sign-in and retry, or build the video on your computer with the import helper,
+              which uses your own browser’s sign-in.
+            </p>
+            {authHelp}
+          </div>
         )}
-        <Tooltip
-          content="You can watch this show's compilations but not delete them."
-          disabled={canWrite}
-        >
-          <span className="inline-flex">
-            <Button variant="ghost" onClick={onDelete} disabled={!canWrite || deleting}>
-              <Trash2Icon data-icon="inline-start" />
-              Delete
+        {c.status === 'ready' && c.url && (
+          // biome-ignore lint/a11y/useMediaCaption: compilations of interview video have no caption track
+          <video
+            controls
+            preload="metadata"
+            src={c.url}
+            className="aspect-video w-full rounded-ctl bg-black"
+            aria-label={`${c.title} video`}
+          />
+        )}
+
+        <details className="min-w-0 text-sm">
+          <summary className="cursor-pointer text-si-muted hover:text-si-fg">Clips</summary>
+          <ol className="m-0 mt-2 flex list-decimal flex-col gap-1 pl-6">
+            {c.clips.map((clip, i) => (
+              // Clips may repeat the same range; the position keeps keys unique.
+              // biome-ignore lint/suspicious/noArrayIndexKey: order is the identity of a clip
+              <li key={i} className="min-w-0 text-si-fg">
+                <Link
+                  href={clipHref(clip.sessionId, clip.startSec)}
+                  className="text-si-fg underline-offset-2 hover:underline"
+                >
+                  {clip.sessionTitle}
+                </Link>{' '}
+                <span className="font-mono text-xs text-si-dim">
+                  {fmtShort(clip.startSec)}–{fmtShort(clip.endSec)}
+                </span>
+                {clip.label && <span className="text-si-muted"> · {clip.label}</span>}
+              </li>
+            ))}
+          </ol>
+        </details>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {c.status === 'ready' && c.url && (
+            <Button
+              variant="outline"
+              nativeButton={false}
+              render={<a href={c.url} download={`${c.title}.mp4`} />}
+            >
+              <DownloadIcon data-icon="inline-start" />
+              Download
             </Button>
-          </span>
-        </Tooltip>
-      </div>
+          )}
+          {c.status === 'failed' && (
+            <Tooltip
+              content="You can watch this show's compilations but not build them again."
+              disabled={canWrite}
+            >
+              <span className="inline-flex">
+                <Button variant="outline" onClick={onRetry} disabled={!canWrite || retrying}>
+                  <RefreshCwIcon data-icon="inline-start" />
+                  {retrying ? 'Retrying…' : 'Retry'}
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+          {authFailed && onBuildLocally && (
+            <Tooltip
+              content="You can watch this show's compilations but not build them again."
+              disabled={canWrite}
+            >
+              <span className="inline-flex">
+                <Button
+                  variant="outline"
+                  onClick={onBuildLocally}
+                  disabled={!canWrite || switching || retrying}
+                >
+                  <LaptopIcon data-icon="inline-start" />
+                  {switching ? 'Switching…' : 'Build on my computer'}
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+          <Tooltip
+            content="You can watch this show's compilations but not delete them."
+            disabled={canWrite}
+          >
+            <span className="inline-flex">
+              <Button variant="ghost" onClick={onDelete} disabled={!canWrite || deleting}>
+                <Trash2Icon data-icon="inline-start" />
+                Delete
+              </Button>
+            </span>
+          </Tooltip>
+        </div>
+      </Card>
     </li>
   );
 }

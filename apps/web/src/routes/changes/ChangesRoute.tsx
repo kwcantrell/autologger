@@ -34,6 +34,7 @@ import {
 } from '@/shared/components/ui/dropdown-menu';
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/shared/components/ui/empty';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
+import { LoadErrorAlert } from '@/shared/ui/LoadErrorAlert';
 import { wikiHref } from '../wiki/wikiShared';
 
 const LIMIT = 300;
@@ -369,14 +370,13 @@ function ChangeLog({
   return (
     <FeedShell countLabel={countLabel} toolbar={toolbar} className="mx-0 max-md:mx-0">
       {changes.isError ? (
-        <div role="alert" className="flex flex-col items-start gap-2 py-4 text-[0.85rem]">
-          <p className="m-0 text-(--si-danger)">
-            Could not load the change log. {errorMessage(changes.error)}
-          </p>
-          <Button variant="outline" onClick={() => void changes.refetch()}>
-            Try again
-          </Button>
-        </div>
+        <LoadErrorAlert
+          title="Couldn’t load the change log"
+          onRetry={() => void changes.refetch()}
+          retrying={changes.isRefetching}
+        >
+          {errorMessage(changes.error)}
+        </LoadErrorAlert>
       ) : (
         <FeedTable
           columns={CHANGE_COLUMNS}

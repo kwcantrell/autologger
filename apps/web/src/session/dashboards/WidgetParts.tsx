@@ -6,7 +6,15 @@
 import type { ValueFormat, Widget } from '@autologger/contract';
 import type { ReactNode } from 'react';
 import { fmtShort } from '@/lib/timecode';
-import { FEED_CELL, FEED_TH } from '@/session/feed';
+import { FEED_CELL, FEED_TABLE, FEED_TH } from '@/session/feed';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/shared/components/ui/table';
 import { cn } from '@/shared/lib/utils';
 import { fmtField, fmtFormat, fmtNum, fmtValue, type Row, safeColor, toNum } from './data';
 
@@ -129,24 +137,24 @@ export function TableWidget({
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <div className="max-h-[360px] min-w-0 overflow-auto">
-        <table className="w-full border-collapse">
-          <thead>
-            <tr>
+        <Table className={FEED_TABLE}>
+          <TableHeader>
+            <TableRow>
               {columns.map((c) => (
-                <th key={c.key} scope="col" className={cn(FEED_TH, 'bg-si-panel')}>
+                <TableHead key={c.key} scope="col" className={FEED_TH}>
                   {c.label}
-                </th>
+                </TableHead>
               ))}
-            </tr>
-          </thead>
-          <tbody>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {shown.map((r, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: rows have no identity
-              <tr key={i}>
+              <TableRow key={i}>
                 {columns.map((c) => {
                   const v = r[c.key];
                   return (
-                    <td
+                    <TableCell
                       key={c.key}
                       className={cn(
                         FEED_CELL,
@@ -155,13 +163,13 @@ export function TableWidget({
                       )}
                     >
                       {fmtField(v, c.key, c.format)}
-                    </td>
+                    </TableCell>
                   );
                 })}
-              </tr>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
       {rows.length > MAX_TABLE_ROWS && (
         <p className="m-0 text-[0.75rem] text-si-dim">

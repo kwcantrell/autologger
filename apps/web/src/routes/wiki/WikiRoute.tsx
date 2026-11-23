@@ -14,6 +14,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/shared/compo
 import { Input } from '@/shared/components/ui/input';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui/tabs';
+import { LoadErrorAlert } from '@/shared/ui/LoadErrorAlert';
 import { Tooltip } from '@/shared/ui/Tooltip';
 import { NewWikiPageDialog } from './NewWikiPageDialog';
 import { fmtDate, fold, wikiHref } from './wikiShared';
@@ -74,18 +75,20 @@ function PageList({
   needle: string;
   filterText: string;
 }) {
-  const { data, isPending, isError, error, refetch } = useWikiList(showId);
+  const { data, isPending, isError, error, refetch, isRefetching } = useWikiList(showId);
   const ofKind = useMemo(() => (data ?? []).filter((p) => p.kind === tab.id), [data, tab.id]);
   const pages = useMemo(() => ofKind.filter((p) => matches(p, needle)), [ofKind, needle]);
 
   if (isError)
     return (
-      <div role="alert" className="flex flex-col items-center gap-3 py-10 text-center text-sm">
-        <p className="m-0 text-si-fg">{errorMessage(error) || 'Could not load the wiki.'}</p>
-        <Button variant="outline" onClick={() => void refetch()}>
-          Try again
-        </Button>
-      </div>
+      <LoadErrorAlert
+        title="Couldn’t load the wiki"
+        onRetry={() => void refetch()}
+        retrying={isRefetching}
+        className="my-4"
+      >
+        {errorMessage(error) || 'Check your connection and try again.'}
+      </LoadErrorAlert>
     );
   if (isPending)
     return (

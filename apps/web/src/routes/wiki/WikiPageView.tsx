@@ -18,6 +18,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/shared/components/ui/aler
 import { Button } from '@/shared/components/ui/button';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
+import { LoadErrorAlert } from '@/shared/ui/LoadErrorAlert';
 import { Tooltip } from '@/shared/ui/Tooltip';
 import { citationCandidates, planClips } from '../compilations/clipPlan';
 import { MakeVideoDialog, useMakeVideoBlocked } from '../compilations/MakeVideoDialog';
@@ -76,7 +77,7 @@ function Frame({ children }: { children: ReactNode }) {
 }
 
 export function WikiPageView({ pageId }: { pageId: string }) {
-  const { data: page, isPending, isError, error, refetch } = useWikiPage(pageId);
+  const { data: page, isPending, isError, error, refetch, isRefetching } = useWikiPage(pageId);
 
   if (isPending)
     return (
@@ -90,18 +91,20 @@ export function WikiPageView({ pageId }: { pageId: string }) {
     const missing = error?.code === 'not_found' || error?.code === 'forbidden';
     return (
       <Frame>
-        <div role="alert" className="flex flex-col items-start gap-3 py-6 text-sm text-si-fg">
-          <p className="m-0">
-            {missing
-              ? 'Page not found. It may be in a show you can’t open.'
-              : errorMessage(error) || 'The page could not be loaded.'}
-          </p>
-          {!missing && (
-            <Button variant="outline" onClick={() => void refetch()}>
-              Try again
-            </Button>
-          )}
-        </div>
+        {missing ? (
+          <LoadErrorAlert title="Page not found" missing className="my-6">
+            It may have been deleted, or it’s in a show you can’t open.
+          </LoadErrorAlert>
+        ) : (
+          <LoadErrorAlert
+            title="Couldn’t load the page"
+            onRetry={() => void refetch()}
+            retrying={isRefetching}
+            className="my-6"
+          >
+            {errorMessage(error) || 'Check your connection and try again.'}
+          </LoadErrorAlert>
+        )}
       </Frame>
     );
   }
