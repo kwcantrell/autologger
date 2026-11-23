@@ -5,6 +5,11 @@ const WHITE = combineRgb(255, 255, 255);
 const RED = combineRgb(200, 30, 30);
 const AMBER = combineRgb(180, 120, 0);
 
+// Presets repeat these as the feedback's `style`: Companion 5 treats a preset feedback without a
+// style as an override of every property with empty values, which renders the key fully black.
+export const ROLLING_STYLE = { bgcolor: RED, color: WHITE };
+export const NO_SESSION_STYLE = { bgcolor: AMBER, color: WHITE };
+
 export function feedbackDefinitions(
   getState: () => CompanionState | null,
 ): CompanionFeedbackDefinitions {
@@ -12,14 +17,14 @@ export function feedbackDefinitions(
     rolling: {
       type: 'boolean',
       name: 'Transport is rolling',
-      defaultStyle: { bgcolor: RED, color: WHITE },
+      defaultStyle: ROLLING_STYLE,
       options: [],
       callback: () => Boolean(getState()?.session?.isRolling),
     },
     no_session: {
       type: 'boolean',
       name: 'No session to control (warning)',
-      defaultStyle: { bgcolor: AMBER, color: WHITE },
+      defaultStyle: NO_SESSION_STYLE,
       options: [],
       callback: () => !getState()?.session,
     },

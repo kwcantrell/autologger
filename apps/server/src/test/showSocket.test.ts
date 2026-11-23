@@ -131,6 +131,28 @@ describe('/ws/show/:id', () => {
     live.ws.close();
   });
 
+  it('hints when a Companion device of the show connects or disconnects', async () => {
+    const { owner, show } = await studio();
+    const live = await connect(owner.user.id, show.id);
+    expect(live.got.shift()).toMatchObject({ type: 'hello' });
+    const { device, token } = await call(owner, 'companion.create', { showId: show.id, name: 'A' });
+    await live.next((m) => m.type === 'invalidate' && m.entity === 'device');
+
+    const deck = new WebSocket(`${base}/ws/companion`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    await live.next((m) => m.type === 'invalidate' && m.entity === 'device');
+    let [listed] = await call(owner, 'companion.list', { showId: show.id });
+    expect(listed).toMatchObject({ id: device.id, online: true });
+    expect(listed!.lastSeenAt).not.toBeNull();
+
+    deck.close();
+    await live.next((m) => m.type === 'invalidate' && m.entity === 'device');
+    [listed] = await call(owner, 'companion.list', { showId: show.id });
+    expect(listed).toMatchObject({ id: device.id, online: false });
+    live.ws.close();
+  });
+
   it('closes with 4403 when the reader loses access to the show', async () => {
     const { owner, team, show } = await studio();
     const member = await makeUser('member@example.com');
