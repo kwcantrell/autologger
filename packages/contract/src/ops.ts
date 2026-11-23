@@ -45,6 +45,9 @@ const name = z.string().trim().min(1).max(200);
 /** Show transcription key terms (Deepgram keyterm prompting caps a request at ~500 tokens). */
 /** Largest cookies.txt accepted by media.setYoutubeCookies (before filtering to YouTube/Google). */
 export const MAX_YOUTUBE_COOKIES_CHARS = 1_000_000;
+/** transcript.import limits: content characters and segments per call. */
+export const MAX_TRANSCRIPT_IMPORT_CHARS = 5_000_000;
+export const MAX_TRANSCRIPT_IMPORT_SEGMENTS = 10_000;
 export const MAX_KEY_TERMS = 50;
 export const MAX_KEY_TERM_LENGTH = 50;
 /** Budget for all key terms together (trimmed characters), keeping a request under ~500 tokens. */
@@ -349,6 +352,14 @@ export const opInputs = {
     toSec: sec.optional(),
     dryRun: z.boolean().default(false),
     compact,
+  }),
+  'transcript.import': z.object({
+    sessionId: id,
+    /** Audio segment (media.list) the transcript belongs to; omitted: session-level. */
+    audioSegmentId: id.optional(),
+    format: z.enum(['json', 'srt', 'vtt']),
+    content: z.string().min(1).max(MAX_TRANSCRIPT_IMPORT_CHARS),
+    mode: z.enum(['replace', 'append']),
   }),
 
   // ── topics ────────────────────────────────────────────────
@@ -775,6 +786,20 @@ export interface OpOutputs {
   'transcript.mergeSegments': TranscriptSegment;
   'transcript.splitSegment': TranscriptSegment[];
   'transcript.replace': TranscriptReplaceResult;
+  'transcript.import': {
+    mode: 'replace' | 'append';
+    /** Segments created. */
+    imported: number;
+    /** Segments deleted (replace mode). */
+    removed: number;
+    /** Seconds from session start spanned by the imported segments. */
+    startSec: number;
+    endSec: number;
+    speakers: string[];
+    /** changes.revertGroup(groupId) undoes the whole import. */
+    groupId: string;
+    transcriptStatus: Session['transcriptStatus'];
+  };
   'topics.list': Topic[];
   'topics.create': Topic;
   'topics.update': Topic;
