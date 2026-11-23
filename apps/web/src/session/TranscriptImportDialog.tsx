@@ -295,16 +295,17 @@ export function TranscriptImportDialog({
               </p>
               <p className="m-0">
                 Undo the whole import from the{' '}
-                <button
-                  type="button"
-                  className="cursor-pointer border-0 bg-transparent p-0 font-[inherit] text-si-fg underline underline-offset-2 hover:text-si-accent"
+                <Button
+                  variant="link"
+                  size="inline"
+                  className="text-si-fg hover:text-si-accent"
                   onClick={() => {
                     setTab('agents');
                     onClose();
                   }}
                 >
                   Agents tab
-                </button>
+                </Button>
                 .
               </p>
             </AlertDescription>

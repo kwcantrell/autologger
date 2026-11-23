@@ -7,6 +7,7 @@ import { eventSec, formatFrames, parseTimecode } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
+import { Input } from '@/shared/components/ui/input';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 import { formatWallUtcYmdHms } from '@/shared/utils/timecode';
 import {
@@ -104,7 +105,8 @@ export function EventRow({
         )}
       >
         {editable && timeMode === 'session' ? (
-          <input
+          <Input
+            variant="unstyled"
             className={cn(FEED_INLINE_INPUT, 'min-w-[calc(11ch+0.6rem+2px)] tabular-nums')}
             aria-label="Timecode"
             value={tcText.value}
@@ -184,7 +186,8 @@ export function EventRow({
           className={cn('flex items-center gap-1.5', conflicts.length > 0 && 'max-md:flex-wrap')}
         >
           {editable ? (
-            <input
+            <Input
+              variant="unstyled"
               className={cn(FEED_INLINE_INPUT, conflicts.length > 0 && 'max-md:basis-full')}
               aria-label="Message"
               value={msg.value}

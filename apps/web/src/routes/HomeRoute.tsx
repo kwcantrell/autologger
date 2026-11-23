@@ -78,13 +78,13 @@ export function HomeRoute() {
                   active.canManageTeam ? (
                     <>
                       {active.team?.name} has no shows yet.{' '}
-                      <button
-                        type="button"
-                        className="underline underline-offset-2 hover:text-si-fg"
+                      <Button
+                        variant="link"
+                        size="inline"
                         onClick={() => settingsOpen.set('shows')}
                       >
                         Add one in Settings → Shows
-                      </button>{' '}
+                      </Button>{' '}
                       to start logging.
                     </>
                   ) : (

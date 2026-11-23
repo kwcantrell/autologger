@@ -205,13 +205,14 @@ function MakeVideoForm({
           </h3>
           <span className="flex items-baseline gap-3 text-xs font-normal">
             {plan.clips.length > 1 && (
-              <button
-                type="button"
+              <Button
+                variant="link"
+                size="inline"
                 onClick={() => setPicked(new Set(allTicked ? [] : plan.clips.map((c) => c.key)))}
-                className="cursor-pointer border-0 bg-transparent p-0 text-xs text-si-muted underline decoration-(--si-line-strong) underline-offset-2 hover:text-si-fg"
+                className="text-xs text-si-muted decoration-(--si-line-strong)"
               >
                 {allTicked ? 'Clear' : 'Select all'}
-              </button>
+              </Button>
             )}
             <span className="font-mono text-si-muted">Total {fmtShort(totalSec(chosen))}</span>
           </span>

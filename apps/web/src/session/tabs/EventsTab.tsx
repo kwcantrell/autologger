@@ -157,9 +157,9 @@ export function EventsTab({
       {events.isError ? (
         <p className="m-0 text-sm text-si-danger">
           Couldn't load the events. {errorMessage(events.error)}{' '}
-          <button type="button" className="underline" onClick={() => void events.refetch()}>
+          <Button variant="link" size="inline" onClick={() => void events.refetch()}>
             Try again
-          </button>
+          </Button>
         </p>
       ) : (
         <FeedTable
