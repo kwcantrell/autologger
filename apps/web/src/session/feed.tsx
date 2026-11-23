@@ -1,9 +1,18 @@
 // Feed chrome shared by every workspace tab: the panel card with a count heading and a toolbar,
-// a table with sticky label-type headers, cell faces, and the leading jump-to-time button.
+// a table (the shared Table parts) with sticky label-type headers, cell faces, and the leading
+// jump-to-time button.
 
 import { Check, Clock, Download, Filter, Pencil, Play, Plus, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '@/shared/components/ui/button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/shared/components/ui/table';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 import { Tooltip } from '@/shared/ui/Tooltip';
 
@@ -82,8 +91,12 @@ export const FEED_CELL =
 export const FEED_TC = 'font-tc text-legacy-accent whitespace-nowrap tabular-nums';
 export const FEED_CELL_TEXT = 'text-(--color-text)';
 export const FEED_CELL_LABEL = 'text-(--color-text) font-semibold';
+/** Feed column header, merged over TableHead's: tighter padding, the panel it sticks over, the
+ *  inherited line height and no hairline (feed rows draw their own dividers). */
 export const FEED_TH =
-  'sticky top-0 z-[1] bg-si-panel px-[0.4rem] py-1.5 text-left font-label text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-si-dim whitespace-nowrap';
+  'sticky top-0 z-[1] bg-si-panel px-[0.4rem] py-1.5 text-left font-label text-[0.6875rem] font-semibold uppercase leading-[inherit] tracking-[0.12em] text-si-dim whitespace-nowrap [border-bottom:0_solid]';
+/** Table's own font size is for admin/markdown tables; feed cells size their own text. */
+export const FEED_TABLE = 'text-[length:inherit]';
 export const FEED_INLINE_INPUT =
   'w-full px-[0.3rem] py-[0.18rem] bg-transparent border border-solid border-transparent rounded-[3px] text-inherit [font-family:inherit] [font-size:inherit] [font-weight:inherit] [line-height:inherit] outline-none focus:border-[color-mix(in_oklab,var(--si-accent)_55%,transparent)] focus:bg-[color-mix(in_oklab,var(--si-accent)_8%,transparent)] [&[type=number]::-webkit-inner-spin-button]:appearance-none';
 export const FEED_TEXTAREA =
@@ -144,34 +157,34 @@ export function FeedTable({
   return (
     // `relative`: the stacked table's sr-only header is absolute; it stays inside this scroller.
     <div className={cn('@container/feed relative min-h-[8rem] overflow-auto', maxHeight)}>
-      <table className={cn('w-full border-collapse', STACK_TABLE[stack])}>
-        <thead>
-          <tr>
+      <Table className={cn(FEED_TABLE, STACK_TABLE[stack])}>
+        <TableHeader>
+          <TableRow>
             {columns.map((c) => (
-              <th key={c.key} scope="col" className={cn(FEED_TH, c.className)}>
+              <TableHead key={c.key} scope="col" className={cn(FEED_TH, c.className)}>
                 {c.srOnly ? <span className="sr-only">{c.label}</span> : c.label}
-              </th>
+              </TableHead>
             ))}
-          </tr>
-        </thead>
-        <tbody>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {loading ? (
-            <tr className={block}>
-              <td colSpan={columns.length} className={cn('pt-2', block)}>
+            <TableRow className={block}>
+              <TableCell colSpan={columns.length} className={cn('pt-2', block)}>
                 <div className={FEED_EMPTY}>Loading…</div>
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ) : empty ? (
-            <tr className={block}>
-              <td colSpan={columns.length} className={cn('pt-2', block)}>
+            <TableRow className={block}>
+              <TableCell colSpan={columns.length} className={cn('pt-2', block)}>
                 <div className={FEED_EMPTY}>{emptyMessage}</div>
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ) : (
             children
           )}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }
