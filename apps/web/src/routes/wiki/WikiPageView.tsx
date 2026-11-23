@@ -1,5 +1,7 @@
 // `/wiki/:pageId`: one wiki page. Read mode renders the body (with [[Title]] links resolved against
-// the page's show) and its backlinks; Edit saves through `wiki.upsert` with the pageId; History is
+// the page's show) and its backlinks; Edit saves through `wiki.upsert` with the pageId and the
+// revision the edit started from, so a page changed meanwhile (another tab, an agent) answers
+// conflict and the editor offers to load the latest or overwrite it instead; History is
 // a right sheet with diffs and Restore; Delete confirms first. Write actions follow the show's
 // access; a page of a show other than the active one offers the switch.
 
@@ -19,6 +21,7 @@ import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { Tooltip } from '@/shared/ui/Tooltip';
 import { citationCandidates, planClips } from '../compilations/clipPlan';
 import { MakeVideoDialog, useMakeVideoBlocked } from '../compilations/MakeVideoDialog';
+import { WikiConflictNotice, WikiKeptText } from './WikiConflictNotice';
 import { type WikiDraft, WikiEditor } from './WikiEditor';
 import { WikiHistorySheet } from './WikiHistorySheet';
 import { WikiMarkdown } from './WikiMarkdown';
@@ -35,6 +38,25 @@ const draftOf = (p: WikiPage): WikiDraft => ({
   title: p.title,
   body: p.bodyMd,
   aliases: p.aliases,
+});
+
+interface EditState {
+  draft: WikiDraft;
+  error: string | null;
+  /** The revision the draft started from, sent as baseRevision. */
+  base: number;
+  /** The save was refused because the page moved on past `base` (the server's message). */
+  conflict: string | null;
+  /** The text the user had before loading the latest version, kept to copy from. */
+  kept: string | null;
+}
+
+const startEdit = (p: WikiPage, kept: string | null = null): EditState => ({
+  draft: draftOf(p),
+  error: null,
+  base: p.revision,
+  conflict: null,
+  kept,
 });
 
 function Frame({ children }: { children: ReactNode }) {
@@ -98,6 +120,8 @@ function PageBody({ page }: { page: WikiPage }) {
   const { resolve } = useWikiResolver(page.showId);
   const sessionTitle = useSessionTitles(page.showId, page.bodyMd, page.sessionId);
   const upsert = useWikiUpsert();
+  // The same cached wiki.get as the route: refetched to learn the latest revision on a conflict.
+  const { refetch: refetchPage } = useWikiPage(page.id);
   const del = useWikiDelete(page.showId);
   const { confirm, confirmElement } = useConfirm();
   const [history, setHistory] = useState(false);
@@ -114,10 +138,8 @@ function PageBody({ page }: { page: WikiPage }) {
       : null;
   const videoBlocked = useMakeVideoBlocked(canWrite, pageShow?.name) ?? noVideo;
   // `?edit=1` (a page just created) opens straight in edit mode.
-  const [edit, setEdit] = useState<{ draft: WikiDraft; error: string | null } | null>(() =>
-    new URLSearchParams(search).get('edit') === '1' && canWrite
-      ? { draft: draftOf(page), error: null }
-      : null,
+  const [edit, setEdit] = useState<EditState | null>(() =>
+    new URLSearchParams(search).get('edit') === '1' && canWrite ? startEdit(page) : null,
   );
 
   const readOnlyWhy = !pageShow
@@ -129,8 +151,9 @@ function PageBody({ page }: { page: WikiPage }) {
     if (search) navigate(wikiHref(page.id), { replace: true });
   };
 
-  const save = () => {
-    if (!edit) return;
+  /** Save the draft over `base` (the revision it started from, or the latest one to overwrite). */
+  const save = (base = edit?.base) => {
+    if (!edit || base === undefined) return;
     const title = edit.draft.title.trim();
     if (!title) {
       setEdit({ ...edit, error: 'A page needs a title.' });
@@ -145,11 +168,21 @@ function PageBody({ page }: { page: WikiPage }) {
         bodyMd: edit.draft.body,
         ...(isSession ? {} : { aliases: edit.draft.aliases }),
         ...(page.sessionId ? { sessionId: page.sessionId } : {}),
+        baseRevision: base,
       },
       {
         onSuccess: () => leaveEdit(),
-        onError: (e) =>
-          setEdit((s) => s && { ...s, error: errorMessage(e) || 'The page was not saved.' }),
+        onError: async (e) => {
+          // conflict is also a title clash; only a page that moved on is an edit conflict.
+          if (e.code === 'conflict') {
+            const latest = (await refetchPage()).data;
+            if (latest && latest.revision !== base) {
+              setEdit((s) => s && { ...s, error: null, conflict: e.message });
+              return;
+            }
+          }
+          setEdit((s) => s && { ...s, error: errorMessage(e) || 'The page was not saved.' });
+        },
       },
     );
   };
@@ -195,11 +228,7 @@ function PageBody({ page }: { page: WikiPage }) {
       {!edit && (
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              disabled={!canWrite}
-              onClick={() => setEdit({ draft: draftOf(page), error: null })}
-            >
+            <Button size="sm" disabled={!canWrite} onClick={() => setEdit(startEdit(page))}>
               <PencilIcon aria-hidden="true" /> Edit
             </Button>
             <Button size="sm" variant="outline" onClick={() => setHistory(true)}>
@@ -238,9 +267,12 @@ function PageBody({ page }: { page: WikiPage }) {
 
       {edit ? (
         <section aria-label="Edit page" className="flex flex-col gap-4">
+          {edit.kept !== null && (
+            <WikiKeptText text={edit.kept} onDismiss={() => setEdit({ ...edit, kept: null })} />
+          )}
           <WikiEditor
             draft={edit.draft}
-            onChange={(draft) => setEdit({ draft, error: null })}
+            onChange={(draft) => setEdit({ ...edit, draft, error: null })}
             showAliases={!isSession}
             resolve={resolve}
             showId={page.showId}
@@ -251,11 +283,21 @@ function PageBody({ page }: { page: WikiPage }) {
               {edit.error}
             </p>
           )}
+          {edit.conflict && (
+            <WikiConflictNotice
+              message={edit.conflict}
+              latest={page}
+              busy={upsert.isPending}
+              text={edit.draft.body}
+              onLoadLatest={() => setEdit(startEdit(page, edit.draft.body))}
+              onOverwrite={() => save(page.revision)}
+            />
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={leaveEdit} disabled={upsert.isPending}>
               Cancel
             </Button>
-            <Button onClick={save} disabled={upsert.isPending}>
+            <Button onClick={() => save()} disabled={upsert.isPending}>
               {upsert.isPending && <Spinner role="presentation" aria-hidden="true" />}
               Save
             </Button>
