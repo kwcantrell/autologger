@@ -2,7 +2,8 @@ import type { Session } from '@autologger/contract';
 import { BotIcon, FilmIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTopics } from '@/api/queries';
-import { errorMessage, rpc } from '@/api/rpc';
+import { errorMessage } from '@/api/rpc';
+import { useSessionWrite } from '@/api/session/writes';
 import { settingsOpen } from '@/lib/store';
 import { showToast } from '@/shared/components/Toast';
 import { Button } from '@/shared/components/ui/button';
@@ -43,12 +44,13 @@ export function TopicsTab({ session }: { session: Session }) {
     [q.data],
   );
 
+  const write = useSessionWrite(session.id);
   const insert = async () => {
     try {
       const at = topics.length
         ? topics[topics.length - 1]!.startSec + Math.max(1, topics[topics.length - 1]!.durationSec)
         : 0;
-      await rpc('topics.create', { sessionId: session.id, startSec: at, title: 'New topic' });
+      await write('topics.create', { sessionId: session.id, startSec: at, title: 'New topic' });
     } catch (e) {
       showToast(errorMessage(e), true);
     }
@@ -122,7 +124,7 @@ export function TopicsTab({ session }: { session: Session }) {
               rolling={session.isRolling}
               onJump={(sec) => seek(sec, true)}
               onSave={(patch) =>
-                rpc('topics.update', { topicId: t.id, ...patch }).catch((e) => {
+                write('topics.update', { topicId: t.id, ...patch }).catch((e) => {
                   showToast(`Saving the topic failed. ${errorMessage(e)}`, true);
                   throw e;
                 })
@@ -136,7 +138,7 @@ export function TopicsTab({ session }: { session: Session }) {
                     danger: true,
                   })
                 ) {
-                  rpc('topics.delete', { topicId: t.id }).catch((e) =>
+                  write('topics.delete', { topicId: t.id }).catch((e) =>
                     showToast(errorMessage(e), true),
                   );
                 }

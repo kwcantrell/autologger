@@ -4,6 +4,7 @@ import { type FormEvent, useMemo, useState } from 'react';
 import { useLocation } from 'wouter';
 import { qk, useCapabilities } from '@/api/queries';
 import { errorMessage, rpc } from '@/api/rpc';
+import { applyWrite, sessionWrite } from '@/api/session/writes';
 import { useActive } from '@/app/useActive';
 import { isYoutubeAuthError } from '@/app/YoutubeAuthHelp';
 import { FRAME_RATES, parseTimecode } from '@/lib/timecode';
@@ -84,7 +85,7 @@ export function NewSessionModal({
     setBusy(true);
     setError(null);
     try {
-      const s = await rpc('sessions.create', {
+      const input = {
         showId: show.id,
         title: title.trim() || undefined,
         episode: episode.trim() || undefined,
@@ -93,8 +94,10 @@ export function NewSessionModal({
         startTimecode:
           startTc.trim() && startTc.trim() !== '00:00:00:00' ? startTc.trim() : undefined,
         notes: notes.trim() || undefined,
-      });
-      void qc.invalidateQueries({ queryKey: qk.sessionsAll });
+      };
+      const s = await rpc('sessions.create', input);
+      // Seed the new session (the route opens without a loading flash) and refresh the lists.
+      applyWrite(qc, s.id, 'sessions.create', s, input);
       void qc.invalidateQueries({ queryKey: qk.shows });
       if (file) {
         enqueueUpload({
@@ -109,8 +112,10 @@ export function NewSessionModal({
       }
       if (ytUrl.trim()) {
         try {
-          await rpc('media.importYoutube', { sessionId: s.id, url: ytUrl.trim() });
-          void qc.invalidateQueries({ queryKey: qk.showJobsAll });
+          await sessionWrite(qc, s.id, 'media.importYoutube', {
+            sessionId: s.id,
+            url: ytUrl.trim(),
+          });
         } catch (err) {
           const message = errorMessage(err);
           // YouTube wants a sign-in: keep the toast up, with the way to fix it.

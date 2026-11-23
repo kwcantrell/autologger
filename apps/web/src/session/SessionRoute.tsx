@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
 import { useLocation } from 'wouter';
 import { useLiveSession } from '@/api/live';
-import { qk, useOpMutation, useSession, useShows } from '@/api/queries';
+import { useSession, useShows } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
+import { useSessionMutation } from '@/api/session/writes';
 import { selectShow } from '@/app/useActive';
 import { RouteLoadingState, RouteState } from '@/components/RouteState';
 import { showToast } from '@/shared/components/Toast';
@@ -21,9 +22,7 @@ function BackToSessions() {
 export function SessionRoute({ sessionId }: { sessionId: string }) {
   const q = useSession(sessionId);
   const live = useLiveSession(q.data && !q.data.archivedAt ? sessionId : undefined);
-  const restore = useOpMutation('sessions.archive', {
-    invalidate: () => [qk.sessionsAll, qk.session(sessionId)],
-  });
+  const restore = useSessionMutation(sessionId, 'sessions.archive');
   const s = q.data;
   const shows = useShows().data;
 

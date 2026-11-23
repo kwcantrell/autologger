@@ -1,7 +1,8 @@
 import type { Category, OpInput, Session, SessionEvent } from '@autologger/contract';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCategories, useEvents } from '@/api/queries';
-import { errorMessage, rpc } from '@/api/rpc';
+import { errorMessage } from '@/api/rpc';
+import { useSessionWrite } from '@/api/session/writes';
 import { showToast } from '@/shared/components/Toast';
 import { Button } from '@/shared/components/ui/button';
 import {
@@ -32,12 +33,6 @@ const NO_CATEGORIES: Category[] = [];
 
 type EventTiming = Pick<Session, 'frameRate' | 'startOffsetFrames' | 'isRolling'>;
 
-const saveEvent = (patch: OpInput<'events.update'>) =>
-  rpc('events.update', patch).catch((err) => {
-    showToast(`Update failed. ${errorMessage(err)}`, true);
-    throw err;
-  });
-
 /** An EventRow memoized on stable, id-based handlers: a session push doesn't re-render every row. */
 const FeedEventRow = memo(function FeedEventRow({
   e,
@@ -48,6 +43,7 @@ const FeedEventRow = memo(function FeedEventRow({
   canWrite,
   setRowRef,
   onJump,
+  onSave,
   onDelete,
 }: {
   e: SessionEvent;
@@ -58,6 +54,7 @@ const FeedEventRow = memo(function FeedEventRow({
   canWrite: boolean;
   setRowRef: (id: string, el: HTMLTableRowElement | null) => void;
   onJump: (sec: number) => void;
+  onSave: (patch: OpInput<'events.update'>) => Promise<unknown>;
   onDelete: (e: SessionEvent) => void;
 }) {
   return (
@@ -70,7 +67,7 @@ const FeedEventRow = memo(function FeedEventRow({
       canWrite={canWrite}
       rowRef={(el) => setRowRef(e.id, el)}
       onJump={onJump}
-      onSave={saveEvent}
+      onSave={onSave}
       onDelete={() => onDelete(e)}
     />
   );
@@ -86,6 +83,15 @@ export function EventsTab({
   const events = useEvents(session.id);
   const categories = useCategories(session.showId).data ?? NO_CATEGORIES;
   const { canWrite, seek } = useWorkspace();
+  const write = useSessionWrite(session.id);
+  const saveEvent = useCallback(
+    (patch: OpInput<'events.update'>) =>
+      write('events.update', patch).catch((err) => {
+        showToast(`Update failed. ${errorMessage(err)}`, true);
+        throw err;
+      }),
+    [write],
+  );
   const [timeMode, setTimeMode] = useState<TimeMode>('session');
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState(false);
@@ -148,12 +154,12 @@ export function EventsTab({
       });
       if (!ok) return;
       try {
-        await rpc('events.delete', { eventId: e.id });
+        await write('events.delete', { eventId: e.id });
       } catch (err) {
         showToast(`Delete failed. ${errorMessage(err)}`, true);
       }
     },
-    [confirm],
+    [confirm, write],
   );
 
   const toolbar = (
@@ -256,6 +262,7 @@ export function EventsTab({
               canWrite={canWrite}
               setRowRef={setRowRef}
               onJump={seekAndPlay}
+              onSave={saveEvent}
               onDelete={remove}
             />
           ))}

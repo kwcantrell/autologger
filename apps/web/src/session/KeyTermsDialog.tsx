@@ -13,8 +13,9 @@ import {
 } from '@autologger/contract';
 import { XIcon } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
-import { qk, useOpMutation, useShow } from '@/api/queries';
+import { useShow } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
+import { useSessionMutation } from '@/api/session/writes';
 import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
 import { Badge } from '@/shared/components/ui/badge';
@@ -60,12 +61,8 @@ export function KeyTermsDialog({
   const [entry, setEntry] = useState('');
   const [entryError, setEntryError] = useState<string | null>(null);
   const { confirm, confirmElement } = useConfirm();
-  const update = useOpMutation('sessions.update', {
-    invalidate: () => [qk.session(session.id), qk.sessionsAll],
-  });
-  const retranscribe = useOpMutation('media.retranscribe', {
-    invalidate: () => [qk.jobs(session.id), qk.media(session.id)],
-  });
+  const update = useSessionMutation(session.id, 'sessions.update');
+  const retranscribe = useSessionMutation(session.id, 'media.retranscribe');
   const busy = update.isPending || retranscribe.isPending;
   const error = update.error ?? retranscribe.error;
 

@@ -3,8 +3,9 @@
 import type { Dashboard, Session } from '@autologger/contract';
 import { Braces, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
-import { qk, useDashboards, useOpMutation } from '@/api/queries';
+import { useDashboards } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
+import { useSessionMutation } from '@/api/session/writes';
 import { settingsOpen } from '@/lib/store';
 import { useWorkspace } from '@/session/context';
 import { SpecEditorDialog } from '@/session/dashboards/SpecEditor';
@@ -37,10 +38,8 @@ export function DashboardsTab({ session }: { session: Session }) {
   const [editing, setEditing] = useState(false);
   const { confirm, confirmElement } = useConfirm();
   const { requestText, promptElement } = useTextPrompt();
-  const save = useOpMutation('dashboards.save', {
-    invalidate: (_d, i) => [qk.dashboards(i.sessionId)],
-  });
-  const del = useOpMutation('dashboards.delete', { invalidate: () => [qk.dashboards(session.id)] });
+  const save = useSessionMutation(session.id, 'dashboards.save');
+  const del = useSessionMutation(session.id, 'dashboards.delete');
 
   const dashboards = list.data ?? [];
   const current = dashboards.find((d) => d.id === selectedId) ?? dashboards[0];

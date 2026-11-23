@@ -3,8 +3,8 @@
 
 import { type Dashboard, DashboardSpec, formatIssues } from '@autologger/contract';
 import { useMemo, useState } from 'react';
-import { qk, useOpMutation } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
+import { useSessionMutation } from '@/api/session/writes';
 import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
 import { Button } from '@/shared/components/ui/button';
@@ -52,9 +52,7 @@ export function SpecEditorDialog({
 function Editor({ dashboard, onClose }: { dashboard: Dashboard; onClose: () => void }) {
   const [text, setText] = useState(() => JSON.stringify(dashboard.spec, null, 2));
   const result = useMemo(() => check(text), [text]);
-  const save = useOpMutation('dashboards.save', {
-    invalidate: (_d, i) => [qk.dashboards(i.sessionId)],
-  });
+  const save = useSessionMutation(dashboard.sessionId, 'dashboards.save');
   return (
     <Dialog
       open

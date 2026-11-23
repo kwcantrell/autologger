@@ -2,7 +2,8 @@ import type { Session, TranscriptSegment } from '@autologger/contract';
 import { FileUpIcon } from 'lucide-react';
 import { memo, useCallback, useState, useSyncExternalStore } from 'react';
 import { useJobs, useMedia, useTranscript } from '@/api/queries';
-import { errorMessage, rpc } from '@/api/rpc';
+import { errorMessage } from '@/api/rpc';
+import { useSessionWrite } from '@/api/session/writes';
 import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
@@ -64,12 +65,6 @@ const TranscriptRow = memo(function TranscriptRow({
   );
 });
 
-const saveSegmentText = (segmentId: string, text: string) =>
-  rpc('transcript.updateSegment', { segmentId, text }).catch((e) => {
-    showToast(`Saving the segment failed. ${errorMessage(e)}`, true);
-    throw e;
-  });
-
 export function TranscriptTab({ session }: { session: Session }) {
   const { canWrite, seek, player, caps } = useWorkspace();
   const q = useTranscript(session.id);
@@ -93,6 +88,15 @@ export function TranscriptTab({ session }: { session: Session }) {
     return segs.find((s) => sec >= s.startSec && sec < s.endSec)?.id ?? null;
   });
   const seekAndPlay = useCallback((sec: number) => seek(sec, true), [seek]);
+  const write = useSessionWrite(session.id);
+  const saveSegmentText = useCallback(
+    (segmentId: string, text: string) =>
+      write('transcript.updateSegment', { segmentId, text }).catch((e) => {
+        showToast(`Saving the segment failed. ${errorMessage(e)}`, true);
+        throw e;
+      }),
+    [write],
+  );
 
   const renameSpeaker = useCallback(
     async (from: string) => {
@@ -105,7 +109,7 @@ export function TranscriptTab({ session }: { session: Session }) {
       });
       if (!to || to.trim() === from) return;
       try {
-        const r = await rpc('transcript.renameSpeaker', {
+        const r = await write('transcript.renameSpeaker', {
           sessionId: session.id,
           from,
           to: to.trim(),
@@ -115,7 +119,7 @@ export function TranscriptTab({ session }: { session: Session }) {
         showToast(errorMessage(e), true);
       }
     },
-    [requestText, session.id],
+    [requestText, session.id, write],
   );
 
   const words = segs.reduce(
