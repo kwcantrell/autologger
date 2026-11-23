@@ -266,6 +266,8 @@ export const opInputs = {
     toSec: sec.optional(),
     format: z.enum(['lines', 'compact']).default('lines'),
     ids: z.boolean().default(false),
+    /** compact only: seconds between inline `[@…]` stamps; 0 stamps every segment. */
+    stampEverySec: z.number().min(0).max(3600).default(60),
   }),
   'transcript.updateSegment': z.object({
     segmentId: id,

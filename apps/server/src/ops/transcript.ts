@@ -58,9 +58,6 @@ defineOp({
   },
 });
 
-/** Seconds between `[@…]` stamps inside one long compact paragraph. */
-const COMPACT_STAMP_EVERY_SEC = 60;
-
 type TextRow = { id: string; startSec: number; speaker: string; text: string };
 
 /** One line per segment: `[HH:MM:SS @123.4s] Speaker: text`, optionally prefixed with the id. */
@@ -75,10 +72,11 @@ function linesText(rows: TextRow[], ids: boolean): string {
 
 /**
  * One paragraph per run of consecutive segments by the same speaker: `@123.4 Speaker: text text`,
- * with an inline `[@183.4]` stamp at the first segment starting a minute or more after the last
- * stamp. With `ids`, each segment's text is preceded by `{segmentId}`.
+ * with an inline `[@183.4]` stamp at the first segment starting `stampEverySec` or more after the
+ * last stamp (0: at every segment). With `ids`, each segment's text is preceded by `{segmentId}`,
+ * or `{segmentId@183.4}` where a stamp is due.
  */
-function compactText(rows: TextRow[], ids: boolean): string {
+function compactText(rows: TextRow[], ids: boolean, stampEverySec: number): string {
   const out: string[] = [];
   let line = '';
   let speaker: string | undefined;
@@ -90,9 +88,10 @@ function compactText(rows: TextRow[], ids: boolean): string {
       speaker = r.speaker;
       stampSec = r.startSec;
       line = `@${r.startSec.toFixed(1)} ${r.speaker || 'Speaker'}: ${id}${r.text}`;
-    } else if (r.startSec - stampSec >= COMPACT_STAMP_EVERY_SEC) {
+    } else if (r.startSec - stampSec >= stampEverySec) {
       stampSec = r.startSec;
-      line += ` [@${r.startSec.toFixed(1)}] ${id}${r.text}`;
+      const at = r.startSec.toFixed(1);
+      line += ids ? ` {${r.id}@${at}} ${r.text}` : ` [@${at}] ${r.text}`;
     } else {
       line += ` ${id}${r.text}`;
     }
@@ -105,14 +104,15 @@ defineOp({
   name: 'transcript.text',
   description:
     'The transcript as text for reading. Default `format: "lines"`: one segment (speaker turn) per line, `[HH:MM:SS @123.4s] Speaker: text`. ' +
-    '`format: "compact"` is much shorter (use it to read long sessions): consecutive segments by the same speaker are merged into one paragraph `@123.4 Speaker: text text ...`, with an inline `[@183.4]` stamp about every 60 s inside long paragraphs. ' +
-    'The @seconds values are what atSec / startSec fields in events.create and topics.create expect. ' +
-    "`ids: true` adds segment ids for targeting edits (transcript.updateSegments, mergeSegments, splitSegment): the lines format prefixes each line with its id (`seg_… [HH:MM:SS @123.4s] Speaker: text`), the compact format puts `{seg_…}` before each segment's text. " +
+    '`format: "compact"` is much shorter (use it to read long sessions): consecutive segments by the same speaker are merged into one paragraph `@123.4 Speaker: text text ...`, with an inline `[@183.4]` stamp inside long paragraphs at the first segment starting `stampEverySec` (default 60) or more after the previous stamp. ' +
+    '`stampEverySec: 0` stamps every segment start (`... text [@183.4] text [@185.2] text`) — still far shorter than lines (no clock, no speaker per line). Use it, in one read, when you need exact start times for topics, events or wiki citations; the default 60 is enough to skim. ' +
+    'The @seconds values are what atSec / startSec fields in events.create and topics.create expect, and the start of a citation range. ' +
+    "`ids: true` adds segment ids for targeting edits (transcript.updateSegments, mergeSegments, splitSegment): the lines format prefixes each line with its id (`seg_… [HH:MM:SS @123.4s] Speaker: text`), the compact format puts `{seg_…}` before each segment's text, `{seg_…@183.4}` where a stamp is due. " +
     'Paging: fromSec/toSec (seconds from session start) select the segments that START in [fromSec, toSec), so consecutive pages (0-1500, 1500-3000, ...) never repeat a line. ' +
     'Returns `{ text, segments, chars, totalSegments, durationSec }`: segments and chars describe this page; totalSegments and durationSec (end of the last segment) describe the whole session, so the first call tells you how to page. Over MCP the text comes first, then the numbers as JSON.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, fromSec, toSec, format, ids }) {
+  async run(ctx, { sessionId, fromSec, toSec, format, ids, stampEverySec }) {
     await requireSession(ctx, sessionId, 'read');
     const rows = await ctx.db
       .select({ id: ts.id, startSec: ts.startSec, speaker: ts.speaker, text: ts.text })
@@ -126,7 +126,8 @@ defineOp({
       })
       .from(ts)
       .where(eq(ts.sessionId, sessionId));
-    const text = format === 'compact' ? compactText(rows, ids) : linesText(rows, ids);
+    const text =
+      format === 'compact' ? compactText(rows, ids, stampEverySec) : linesText(rows, ids);
     return {
       text,
       segments: rows.length,
