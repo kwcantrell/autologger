@@ -10,7 +10,7 @@ import type {
 } from '@autologger/contract';
 import { type QueryClient, type QueryKey, replaceEqualDeep } from '@tanstack/react-query';
 import { qk } from '../queries';
-import { removeFromList, SESSION_ENTITIES, upsertList } from './entities';
+import { isOlder, removeFromList, SESSION_ENTITIES, upsertList } from './entities';
 import { recordPatch } from './journal';
 
 type WithId = { id: string };
@@ -23,12 +23,12 @@ export interface EntityChange {
   data?: unknown;
 }
 
-/** Pushed sessions and transport results are plain `Session`s: keep the cached `transcriptJob`. */
+/** Pushed sessions and transport results are plain `Session`s: keep the cached `transcriptJob`.
+ *  A copy older than the cached one (a late op result after a newer push) is dropped. */
 function setSession(qc: QueryClient, sessionId: string, s: Session) {
-  qc.setQueryData<SessionDetail>(qk.session(sessionId), (old) => ({
-    ...s,
-    transcriptJob: old?.transcriptJob ?? null,
-  }));
+  qc.setQueryData<SessionDetail>(qk.session(sessionId), (old) =>
+    old && isOlder(s, old) ? old : { ...s, transcriptJob: old?.transcriptJob ?? null },
+  );
 }
 
 function invalidateDerived(qc: QueryClient, entity: LiveEntity, sessionId: string) {

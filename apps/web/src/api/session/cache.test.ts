@@ -124,6 +124,33 @@ describe('applySessionMessage', () => {
     });
   });
 
+  it('a late op result older than the pushed state does not overwrite it', () => {
+    const qc = client();
+    const at = (s: number) => `2026-11-23T10:00:0${s}.000Z`;
+    // Companion's Stop push landed first; the web's earlier transport.start result arrives after.
+    qc.setQueryData(qk.session(SID), { id: SID, isRolling: false, updatedAt: at(2) });
+    const start = { id: SID, isRolling: true, updatedAt: at(1) } as Session;
+    applySessionMessage(qc, SID, { type: 'transport', session: start });
+    expect(qc.getQueryData<Session>(qk.session(SID))?.isRolling).toBe(false);
+    // Same time (a push that only refreshes derived counts) still applies.
+    applySessionMessage(qc, SID, {
+      type: 'transport',
+      session: { id: SID, isRolling: false, eventCount: 3, updatedAt: at(2) } as Session,
+    });
+    expect(qc.getQueryData<Session>(qk.session(SID))?.eventCount).toBe(3);
+
+    qc.setQueryData(qk.events(SID), [{ ...ev('a', 10), message: 'new', updatedAt: at(2) }]);
+    const stale = { ...ev('a', 10), message: 'old', updatedAt: at(1) };
+    applySessionMessage(qc, SID, {
+      type: 'change',
+      entity: 'event',
+      op: 'upsert',
+      id: 'a',
+      data: stale,
+    });
+    expect(qc.getQueryData<SessionEvent[]>(qk.events(SID))?.[0]?.message).toBe('new');
+  });
+
   it('a session delete drops it from the cache', () => {
     const qc = client();
     qc.setQueryData(qk.session(SID), { id: SID });

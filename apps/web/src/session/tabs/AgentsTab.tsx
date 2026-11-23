@@ -24,6 +24,7 @@ import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { Tooltip } from '@/shared/ui/Tooltip';
 import { CHANGE_COLUMNS, CHANGE_STACK, ChangeRow } from './ChangeRow';
 import { CopyRow } from './CopyRow';
+import { useRowErrors } from './rowErrors';
 
 type Filter = 'all' | 'mcp' | 'operators';
 const FILTER_LABEL: Record<Filter, string> = {
@@ -131,7 +132,7 @@ function ChangeFeed({
   const topics = useTopics(session.id);
   const now = useNow();
   const { confirm, confirmElement } = useConfirm();
-  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  const [rowErrors, setRowError] = useRowErrors(changes.data);
   const revert = useSessionMutation(session.id, 'changes.revert');
   // A folded row stands for one op call; its changes may touch several kinds of content.
   const revertGroup = useSessionMutation(session.id, 'changes.revertGroup');
@@ -183,10 +184,10 @@ function ChangeFeed({
       confirmLabel: group ? 'Undo all' : 'Undo',
     });
     if (!ok) return;
-    setRowErrors(({ [c.id]: _, ...rest }) => rest);
+    setRowError(c.id, undefined);
     const onError = (e: unknown) => {
       const msg = errorMessage(e);
-      setRowErrors((m) => ({ ...m, [c.id]: msg }));
+      setRowError(c.id, msg);
       showToast(`Undo failed: ${msg}`, true);
     };
     if (group)

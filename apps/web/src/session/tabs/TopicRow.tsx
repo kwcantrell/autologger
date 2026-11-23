@@ -171,9 +171,7 @@ export function TopicRow({
             className={cn(
               FEED_INLINE_INPUT,
               FEED_TEXTAREA,
-              // An arbitrary property, so it replaces the input face's `[font-weight:inherit]` (a plain
-              // `font-semibold` lost to it and the title rendered at 400).
-              'min-w-0 [font-weight:600]',
+              'min-w-0 font-semibold',
               conflicts.length > 0 && 'max-md:basis-full',
             )}
             aria-label="Title"

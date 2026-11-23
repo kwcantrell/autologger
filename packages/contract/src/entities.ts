@@ -137,6 +137,9 @@ export interface Session {
   keyTerms: string[];
   archivedAt: string | null;
   createdAt: string;
+  /** When the session row (title, clock, transport, source…) last changed; not bumped by its
+   *  events, recordings or transcript. Clients use it to drop a result older than a live push. */
+  updatedAt: string;
   createdBy: UserRef | null;
   access: ShowAccess;
 }

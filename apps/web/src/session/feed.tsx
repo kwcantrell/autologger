@@ -98,7 +98,7 @@ export const FEED_TH =
 /** Table's own font size is for admin/markdown tables; feed cells size their own text. */
 export const FEED_TABLE = 'text-[length:inherit]';
 export const FEED_INLINE_INPUT =
-  'w-full px-[0.3rem] py-[0.18rem] bg-transparent border border-solid border-transparent rounded-[3px] text-inherit [font-family:inherit] [font-size:inherit] [font-weight:inherit] [line-height:inherit] outline-none focus:border-[color-mix(in_oklab,var(--si-accent)_55%,transparent)] focus:bg-[color-mix(in_oklab,var(--si-accent)_8%,transparent)] [&[type=number]::-webkit-inner-spin-button]:appearance-none';
+  'w-full px-[0.3rem] py-[0.18rem] bg-transparent border border-solid border-transparent rounded-[3px] text-inherit [font-family:inherit] [font-size:inherit] font-[weight:inherit] [line-height:inherit] outline-none focus:border-[color-mix(in_oklab,var(--si-accent)_55%,transparent)] focus:bg-[color-mix(in_oklab,var(--si-accent)_8%,transparent)] [&[type=number]::-webkit-inner-spin-button]:appearance-none';
 export const FEED_TEXTAREA =
   'block box-border min-h-[1.6rem] resize-none overflow-hidden whitespace-pre-wrap [overflow-wrap:anywhere] leading-[1.35] field-sizing-content';
 
