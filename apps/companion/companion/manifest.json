@@ -4,7 +4,7 @@
   "name": "autologger",
   "shortname": "autologger",
   "description": "Drive an AutoLogger live session from Bitfocus Companion: roll/stop the transport, log events with the show's buttons, and show timecode, take and last event on your keys.",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "license": "MIT",
   "repository": "https://github.com/local/autologger",
   "bugs": "https://github.com/local/autologger/issues",
