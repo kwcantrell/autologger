@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { BookOpenIcon, FileTextIcon, WifiOffIcon } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'wouter';
-import { type LiveStatus, setSession } from '@/api/live';
+import type { LiveStatus } from '@/api/live';
 import {
   listAllWikiPages,
   useCapabilities,
@@ -13,6 +13,7 @@ import {
   useWikiCiting,
 } from '@/api/queries';
 import { errorMessage, rpc } from '@/api/rpc';
+import { applySessionMessage } from '@/api/session/cache';
 import { isTypingTarget } from '@/lib/keys';
 import { type TransportTint, transportStatus } from '@/lib/store';
 import { fmtShort, useTransportClockStore } from '@/lib/timecode';
@@ -127,7 +128,8 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
         if (action === 'stop' && recording) await recorder.stop();
         if (action === 'start' && player.isPlaying) void player.toggle();
         // Apply the result now; the socket's transport push carries the same state.
-        setSession(qc, sessionId, await rpc(`transport.${action}`, { sessionId }));
+        const session = await rpc(`transport.${action}`, { sessionId });
+        applySessionMessage(qc, sessionId, { type: 'transport', session });
       } catch (e) {
         showToast(errorMessage(e), true);
       } finally {
