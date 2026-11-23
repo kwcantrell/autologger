@@ -11,14 +11,15 @@ import {
 import { and, asc, eq, gt, gte, ilike, inArray, lt, lte, notInArray, or, sql } from 'drizzle-orm';
 import { requireSession } from '../core/authz.ts';
 import { changeMessage } from '../core/bus.ts';
-import { badRequest, notFound } from '../core/errors.ts';
+import { badRequest, conflict, notFound } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
 import { checkRules, ruleCounts, runRules } from '../media/rules.ts';
+import { parseTranscript } from '../media/transcriptImport.ts';
 import { alignWordTimings } from '../media/words.ts';
-import { toTranscriptSegment } from './map.ts';
-import { sessionTranscriptStatus } from './sessions.ts';
+import { toAudioSegment, toTranscriptSegment } from './map.ts';
+import { publishSession, sessionTranscriptStatus } from './sessions.ts';
 
 const { transcriptSegments: ts } = schema;
 
@@ -815,6 +816,141 @@ defineOp({
       rules: ruleCounts(rules, run.counts),
       segments: changes.slice(0, TRANSCRIPT_REPLACE_LIST_LIMIT),
       truncated: changes.length > TRANSCRIPT_REPLACE_LIST_LIMIT,
+    };
+  },
+});
+
+// ── transcript.import: create segments from an external transcript (#282) ──
+
+defineOp({
+  name: 'transcript.import',
+  description:
+    'Create transcript segments from an existing transcript instead of transcribing audio: an SRT or WebVTT subtitle file, or JSON, e.g. for a session imported with transcribe: false, a human-made or third-party transcript, or restoring one. ' +
+    '`format: "json"`: `content` is a JSON array (as a string) of `{ startSec, endSec, speaker, text }` (speaker optional). `"srt"` / `"vtt"`: the file text; cue timings `HH:MM:SS,mmm --> HH:MM:SS,mmm` (`.` or `,` before the milliseconds, hours optional), multi-line cues are joined with spaces, formatting tags and VTT NOTE/STYLE blocks are dropped. Speakers come from VTT `<v Name>` tags or a leading label on a cue\'s first line: `Name:`, `>> Name:` or `[Name]` (1-4 words, each capitalised or a number, e.g. "Dana:", "Speaker 1:", "Dr. Jane Smith:"); a cue without one keeps the previous cue\'s speaker. ' +
+    "Each cue / item becomes one segment (speaker turn); word timings are interpolated evenly across it. Empty cues are skipped. The show's transcriptRules are not applied (run transcript_replace without rules afterwards if wanted). " +
+    "Times: without `audioSegmentId`, seconds from session start (as in transcript_text) and the segments belong to the session as a whole. With `audioSegmentId` (an audio segment id from media_list), times are seconds from the start of that recording (as in a subtitle file made from it); they are offset by the recording's session start, the segments are attached to it and the recording is marked transcribed. " +
+    '`mode` (required): `"replace"` first deletes the existing transcript — with audioSegmentId only that recording\'s segments, otherwise every segment of the session — including manual corrections made since transcription; `"append"` adds the segments and keeps the existing ones (overlapping times are not checked). ' +
+    'Refused (conflict) while a transcription of that recording (with audioSegmentId) or of the session (without) is queued or running, because it would add its own segments; wait with jobs_list first. A later media_retranscribe replaces only the segments attached to that recording, never session-level ones. ' +
+    'Limits (bad_request, nothing written): content up to 5,000,000 characters and 10,000 segments, text up to 20,000 characters and speaker up to 80 per segment, endSec not before startSec; parse errors name the line (SRT/VTT) or item index (JSON). ' +
+    "Afterwards the session's transcriptStatus is done (session-level import, or every recording transcribed). Undo: every created and deleted segment is its own change-log entry, all sharing the returned groupId: changes_revertGroup(groupId) undoes the whole import (the recording's transcribed status stays). " +
+    'Returns `{ mode, imported, removed, startSec, endSec, speakers, groupId, transcriptStatus }` (startSec/endSec: seconds from session start spanned by the imported segments).',
+  kind: 'write',
+  surfaces: ['web', 'mcp'],
+  async run(ctx, { sessionId, audioSegmentId, format, content, mode }) {
+    const { session } = await requireSession(ctx, sessionId, 'write');
+    const { audioSegments, jobs } = schema;
+    let offset = 0;
+    if (audioSegmentId) {
+      const [audio] = await ctx.db
+        .select()
+        .from(audioSegments)
+        .where(and(eq(audioSegments.id, audioSegmentId), eq(audioSegments.sessionId, sessionId)));
+      if (!audio) throw notFound('Audio segment');
+      if (audio.status === 'uploading')
+        throw badRequest('This audio segment has not finished uploading.');
+      offset = audio.startSec;
+    }
+    const [busy] = await ctx.db
+      .select({ id: jobs.id, kind: jobs.kind })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.sessionId, sessionId),
+          inArray(jobs.status, ['queued', 'running']),
+          audioSegmentId
+            ? and(
+                eq(jobs.kind, 'transcribe'),
+                sql`${jobs.payload}->>'segmentId' = ${audioSegmentId}`,
+              )
+            : or(
+                eq(jobs.kind, 'transcribe'),
+                and(
+                  eq(jobs.kind, 'youtube_import'),
+                  sql`coalesce(${jobs.payload}->>'transcribe', 'true') <> 'false'`,
+                ),
+              ),
+        ),
+      )
+      .limit(1);
+    if (busy)
+      throw conflict(
+        `A ${busy.kind} job (${busy.id}) will write this transcript; wait for it with jobs_list, then import.`,
+      );
+
+    const parsed = parseTranscript(format, content);
+    const rows = parsed.map((p) => ({
+      id: newId('trs'),
+      sessionId,
+      audioSegmentId: audioSegmentId ?? null,
+      startSec: p.startSec + offset,
+      endSec: p.endSec + offset,
+      speaker: p.speaker,
+      text: p.text,
+      words: alignWordTimings([], p.text, p.startSec + offset, p.endSec + offset),
+    }));
+
+    const removed =
+      mode === 'replace'
+        ? await ctx.db
+            .delete(ts)
+            .where(
+              and(
+                eq(ts.sessionId, sessionId),
+                audioSegmentId ? eq(ts.audioSegmentId, audioSegmentId) : undefined,
+              ),
+            )
+            .returning()
+        : [];
+    const created: SegmentRow[] = [];
+    // Chunked to stay under the Postgres bind-parameter limit.
+    for (let i = 0; i < rows.length; i += 1000)
+      created.push(
+        ...(await ctx.db
+          .insert(ts)
+          .values(rows.slice(i, i + 1000))
+          .returning()),
+      );
+
+    const base = { entity: 'transcript_segment' as const, showId: session.showId, sessionId };
+    await ctx.recordMany([
+      ...removed.map((r) => ({
+        ...base,
+        entityId: r.id,
+        kind: 'delete' as const,
+        summary: `Transcript import replaced the segment at ${secondsToClock(r.startSec)}`,
+        before: snapshot(r),
+        after: null,
+      })),
+      ...created.map((r) => ({
+        ...base,
+        entityId: r.id,
+        kind: 'create' as const,
+        summary: `Imported transcript segment at ${secondsToClock(r.startSec)}`,
+        before: null,
+        after: snapshot(r),
+      })),
+    ]);
+
+    if (audioSegmentId) {
+      const [audio] = await ctx.db
+        .update(audioSegments)
+        .set({ status: 'transcribed', error: null })
+        .where(eq(audioSegments.id, audioSegmentId))
+        .returning();
+      const out = toAudioSegment(audio!);
+      ctx.publish(`session:${sessionId}`, changeMessage('audio_segment', 'upsert', out.id, out));
+    }
+    ctx.publish(`session:${sessionId}`, { type: 'invalidate', entity: 'transcript_segment' });
+    const updated = await publishSession(ctx, sessionId);
+    return {
+      mode,
+      imported: created.length,
+      removed: removed.length,
+      startSec: Math.min(...rows.map((r) => r.startSec)),
+      endSec: Math.max(...rows.map((r) => r.endSec)),
+      speakers: [...new Set(rows.map((r) => r.speaker).filter(Boolean))],
+      groupId: ctx.groupId,
+      transcriptStatus: updated.transcriptStatus,
     };
   },
 });

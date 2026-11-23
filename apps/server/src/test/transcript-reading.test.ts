@@ -67,7 +67,8 @@ describe('transcript reading', () => {
       chars: all.text.length,
       totalSegments: 3,
       durationSec: 20.3,
-      transcriptStatus: 'none',
+      // Seeded without an audio segment: a session-level transcript counts as done (#282).
+      transcriptStatus: 'done',
     });
 
     // A segment belongs to the page it starts in: [0, 10) and [10, ∞) do not overlap.
