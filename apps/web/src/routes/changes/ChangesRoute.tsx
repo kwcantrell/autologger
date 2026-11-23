@@ -177,13 +177,14 @@ function ChangeContext({ c, sessions }: { c: Change; sessions: Map<string, Sessi
     return (
       <span>
         Show ·{' '}
-        <button
-          type="button"
-          className={`${link} cursor-pointer border-0 bg-transparent p-0`}
+        <Button
+          variant="link"
+          size="inline"
+          className={`${link} no-underline`}
           onClick={() => settingsOpen.set('event-buttons')}
         >
           Event buttons
-        </button>
+        </Button>
       </span>
     );
   // A deleted page has no view until the delete is undone.

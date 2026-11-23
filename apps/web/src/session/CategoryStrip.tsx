@@ -111,13 +111,9 @@ export function CategoryStrip({
     return (
       <p className="m-0 text-[0.85rem] text-si-muted">
         This show has no event buttons yet.{' '}
-        <button
-          type="button"
-          className="underline underline-offset-2 hover:text-si-fg"
-          onClick={() => settingsOpen.set('event-buttons')}
-        >
+        <Button variant="link" size="inline" onClick={() => settingsOpen.set('event-buttons')}>
           Set them up in Settings → Event buttons
-        </button>
+        </Button>
         .
       </p>
     );
