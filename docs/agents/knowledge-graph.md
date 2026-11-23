@@ -69,8 +69,12 @@ the block.
 - **Link every entity the claim is about**, every time: `- [[Carly]] reads a [[Pig Talk]] letter
   about a moose [VAH_0006 00:20:00](/sessions/…?t=1200&to=1260)`. An unlinked name is invisible to
   entity search on that moment.
-- **Always give a range** (`to=` / `@start-end`). Moments without an end are merged into clips as
-  a fixed-length point.
+- **Always give a tight range** (`to=` / `@start-end`) — the stretch where that item is said,
+  usually under ~2 minutes, never a whole segment. Moments without an end are merged into clips
+  as a fixed-length point.
+- **Depth on shared pages**: one list item per story, letter, headline or fact (not one per
+  episode), each fact written once — by episode on segment pages, by theme on person and topic
+  pages — with a short format summary on top.
 - **Aliases on every page** for every _specific_ name the transcript or a person might use
   (nicknames, misspellings, "We're Wrong" for "You're Wrong"). Aliases also tag topics, events and
   transcript lines that mention them, so **no generic aliases**: no bare first names ("Tom",
