@@ -79,6 +79,7 @@ const KIND_LABEL: Record<Kind, string> = {
   transcript_segment: 'Transcript',
   dashboard: 'Dashboards',
   session: 'Session clock',
+  audio_segment: 'Recording status',
 };
 
 /** `all`: the whole show; `show`: only show-level changes; otherwise a session id. */

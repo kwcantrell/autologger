@@ -33,6 +33,7 @@ const ENTITY_LABEL: Record<Change['entity'], string> = {
   wiki_page: 'wiki page',
   category: 'category',
   session: 'session clock',
+  audio_segment: 'recording',
 };
 
 export const CHANGE_COLUMNS: Column[] = [
