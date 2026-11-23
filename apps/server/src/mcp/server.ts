@@ -101,13 +101,35 @@ export function mcpTools(): ToolCache {
   return toolCache;
 }
 
+/** What transcript_text says instead of an empty page, so agents know whether to wait. */
+function emptyTranscriptText(counts: { totalSegments?: number; transcriptStatus?: string }) {
+  if (counts.totalSegments)
+    return '(no segments start in this range; see totalSegments and durationSec)';
+  switch (counts.transcriptStatus) {
+    case 'done':
+      return '(transcript is empty: no speech detected)';
+    case 'failed':
+      return '(no transcript: transcription failed; jobs_list shows the error, media_retranscribe retries)';
+    case 'partial':
+      return '(no speech in the audio transcribed so far; some audio is still being transcribed or failed)';
+    case 'pending':
+      return '(no transcript yet: transcription is queued or running; wait with jobs_list)';
+    default:
+      return '(no transcript yet: the session has no audio to transcribe)';
+  }
+}
+
 function resultContent(op: OpName, data: unknown): CallToolResult {
   // The transcript is meant to be read as text; everything else is JSON.
   if (op === 'transcript.text' && data && typeof (data as { text?: unknown }).text === 'string') {
-    const { text, ...counts } = data as { text: string };
+    const { text, ...counts } = data as {
+      text: string;
+      totalSegments?: number;
+      transcriptStatus?: string;
+    };
     return {
       content: [
-        { type: 'text', text: text || '(no transcript yet)' },
+        { type: 'text', text: text || emptyTranscriptText(counts) },
         { type: 'text', text: JSON.stringify(counts) },
       ],
     };

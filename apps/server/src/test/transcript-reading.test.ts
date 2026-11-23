@@ -67,6 +67,7 @@ describe('transcript reading', () => {
       chars: all.text.length,
       totalSegments: 3,
       durationSec: 20.3,
+      transcriptStatus: 'none',
     });
 
     // A segment belongs to the page it starts in: [0, 10) and [10, ∞) do not overlap.
