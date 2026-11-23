@@ -3,6 +3,7 @@ import {
   type CompanionPresetDefinitions,
   combineRgb,
 } from '@companion-module/base';
+import { NO_SESSION_STYLE, ROLLING_STYLE } from './feedbacks.js';
 import { type CompanionState, hexToRgb, SLOTS, textColorFor } from './state.js';
 
 const BLACK = combineRgb(0, 0, 0);
@@ -35,8 +36,8 @@ export function presetDefinitions(state: CompanionState | null): CompanionPreset
       '$(autologger:session_title)\n$(autologger:timecode)',
       [{ actionId: 'transport', options: { action: 'toggle' } }],
       [
-        { feedbackId: 'rolling', options: {} },
-        { feedbackId: 'no_session', options: {} },
+        { feedbackId: 'rolling', options: {}, style: ROLLING_STYLE },
+        { feedbackId: 'no_session', options: {}, style: NO_SESSION_STYLE },
       ],
     ),
     transport_start: button(
@@ -44,7 +45,7 @@ export function presetDefinitions(state: CompanionState | null): CompanionPreset
       'Roll',
       'ROLL',
       [{ actionId: 'transport', options: { action: 'start' } }],
-      [{ feedbackId: 'rolling', options: {} }],
+      [{ feedbackId: 'rolling', options: {}, style: ROLLING_STYLE }],
     ),
     transport_stop: button('Transport', 'Stop', 'STOP', [
       { actionId: 'transport', options: { action: 'stop' } },
@@ -54,7 +55,7 @@ export function presetDefinitions(state: CompanionState | null): CompanionPreset
       'Timecode',
       '$(autologger:timecode)\nTake $(autologger:take)',
       [],
-      [{ feedbackId: 'rolling', options: {} }],
+      [{ feedbackId: 'rolling', options: {}, style: ROLLING_STYLE }],
       GREY,
     ),
     last_event: button('Status', 'Last event', '$(autologger:last_event)', [], [], GREY),
