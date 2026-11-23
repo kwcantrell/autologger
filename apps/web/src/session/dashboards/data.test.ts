@@ -1,7 +1,21 @@
 // Spec value formats and label truncation used by stat and bar/line widgets.
 
 import { describe, expect, it } from 'vitest';
-import { fmtField, fmtFormat, truncateLabel } from '@/session/dashboards/data';
+import { fmtField, fmtFormat, isEmptyWidget, truncateLabel } from '@/session/dashboards/data';
+
+describe('isEmptyWidget', () => {
+  const base = { id: 'w', title: '', span: 2 };
+  it('treats no rows, or a null stat value, as empty', () => {
+    const pie = { ...base, type: 'pie' as const, label: 'speaker', value: 'seconds' };
+    expect(isEmptyWidget(pie, [])).toBe(true);
+    expect(isEmptyWidget(pie, [{ speaker: 'A', seconds: 3 }])).toBe(false);
+    const stat = { ...base, type: 'stat' as const, field: 'wpm' };
+    expect(isEmptyWidget(stat, [{ words: 0, wpm: null }])).toBe(true);
+    expect(isEmptyWidget(stat, [])).toBe(true);
+    expect(isEmptyWidget(stat, [{ wpm: 0 }])).toBe(false);
+    expect(isEmptyWidget({ ...base, type: 'stat', value: 12 }, [])).toBe(false);
+  });
+});
 
 describe('fmtFormat', () => {
   it('shows seconds as a duration', () => {

@@ -219,6 +219,9 @@ events {categories?,limit} → {atSec (rounded to ms, as in events_list),label,c
 (speechSec = last transcript segment end − first segment start, 0 without a transcript; wpm = words per minute
 over speechSec, rounded, null when speechSec is 0 — use it for speaking pace).
 Optional format on stat, bar/line and pie values and on table columns: duration (s → M:SS/H:MM:SS) | minutes (s → min, 1 decimal) | number | percent (0–1 ratio); bar labelMaxChars truncates labels (full text in tooltip).
+Empty state on any data widget: emptyText (≤200 chars, e.g. "No speech in this session") replaces the widget's content when
+its query returns no rows (a stat: its value is null, e.g. wpm without a transcript); hideWhenEmpty: true hides the widget instead.
+Use them when one layout is applied to many sessions, some without speech, topics or events.
 Prefer live queries for counts so the dashboard stays current. Markdown is rendered without HTML.
 Returns the saved dashboard including its spec; pass compact: true to get only { id, revision } (revision starts at 1 and
 increases on every save), which saves context.`,
