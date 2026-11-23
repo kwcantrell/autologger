@@ -148,6 +148,13 @@
       "when": 1795395893592,
       "tag": "0020_rich_grey_gargoyle",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795404570010,
+      "tag": "0021_clamp_events_before_start",
+      "breakpoints": true
     }
   ]
 }
