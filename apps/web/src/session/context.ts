@@ -28,6 +28,8 @@ export interface Workspace {
   setTab: (tab: WorkspaceTab) => void;
   /** Reveal and flash an event row in the Event Feed. */
   revealEvent: (eventId: string) => void;
+  /** The latest reveal request (read by the Event Feed); `n` makes a repeat request distinct. */
+  reveal: Store<{ id: string; n: number } | null>;
 }
 
 export const WorkspaceContext = createContext<Workspace | null>(null);
