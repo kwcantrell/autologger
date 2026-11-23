@@ -63,6 +63,9 @@ interface Knowledge {
   citations: Moment[];
 }
 
+/** Most citations a list item can have and still be read as one story (see loadKnowledge). */
+const STORY_CITATIONS = 3;
+
 const entityOf = (p: PageInfo): MomentEntity => ({ pageId: p.id, title: p.title, kind: p.kind });
 
 async function loadKnowledge(ctx: Ctx, showId: string): Promise<Knowledge> {
@@ -137,8 +140,9 @@ async function loadKnowledge(ctx: Ctx, showId: string): Promise<Knowledge> {
   for (const page of pageMap.values()) {
     let ord = 0;
     for (const block of wikiBlocks(page.bodyMd, page.sessionId)) {
-      // Each citation is described by its own sentence. Its entities: in a list item (one story)
-      // every page the item links, even from another sentence; in a table row its own cell and
+      // Each citation is described by its own sentence. Its entities: in a short list item (one
+      // story, at most STORY_CITATIONS citations) every page the item links, even from another
+      // sentence; in a longer one (a list of dates or facts) its own sentence's; in a table row its own cell and
       // the cells before it (a guide row isn't about every segment in its last column); in a
       // paragraph only its own sentence's links.
       const shape = blockKind(block.markdown);
@@ -148,7 +152,11 @@ async function loadKnowledge(ctx: Ctx, showId: string): Promise<Knowledge> {
         const s = sessionMap.get(c.sessionId);
         if (!s) continue;
         // The claim's own sentence and links; a block with one citation is one claim.
-        const linked = (several && shape !== 'list' ? links : block.links)
+        const linked = (
+          several && !(shape === 'list' && block.claims.length <= STORY_CITATIONS)
+            ? links
+            : block.links
+        )
           .map((t) => names.get(normTitle(t)))
           .filter((id): id is string => Boolean(id) && id !== page.id);
         citations.push({
@@ -536,7 +544,7 @@ function compactMoment(m: Moment): CompactMoment {
 defineOp({
   name: 'moments.search',
   description:
-    'Find clip-ready moments of a show: time ranges in sessions, each with what happens there and the wiki pages (people, recurring bits, topics) it is about. Sources, by `kinds` (default all): "citation" — every citation on the show wiki, described by the sentence or list item that cites it and tagged with its page plus the [[pages]] linked in that list item (in a paragraph with several citations: its own sentence; in a table row: its own cell and the cells before it) (the richest source once a wiki exists); "topic" — chapters; "event" — logged events (no end: endSec null; "Note" events are editorial and never tagged with entities); "transcript" — transcript lines (only those matching query or naming an entity). Filter with `query` (full text, websearch syntax: words, "phrases", -exclude, or; page titles and headings weigh most; when nothing matches every word, moments matching at least half the words are returned, ranked by how many, with relaxedQuery: true), `entities` (page titles, aliases or ids — a moment must be about all of them; for topics, events and transcript lines that means naming each entity\'s title or an alias in its text) or both, and `sessionId`. With a query, best matches first; without, in episode order (episode numbers when every session has one, else dates) then time. Every moment has sessionId, startSec and endSec (seconds from the session start; archived sessions included) — cite them, as [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), or use them as compilation clips. `mergeGapSec` > 0 also returns `clips`: this page\'s moments merged per session where they overlap or are at most that many seconds apart (moments without an end count as `pointSec` long), at most `maxClipSec` long (default 180; a moment longer than that, like a whole-segment topic, is left out where tighter moments cover it) and at least 1 s — pass them to compilations_create as they are; `clipsOnly: true` returns just the clips. Agents get compact results by default (text trimmed to 160 characters, entities and page as titles, clips with a moment count); pass `compact: false` for full moments (context, headings, entity ids). transcriptCapped: true means more transcript lines matched than one search considers (5000, best first): narrow it. Use graph_entity first to see an entity\'s aliases, related pages and the sessions it appears in. Paged: total, limit (default 30, max 500), offset / nextOffset.',
+    'Find clip-ready moments of a show: time ranges in sessions, each with what happens there and the wiki pages (people, recurring bits, topics) it is about. Sources, by `kinds` (default all): "citation" — every citation on the show wiki, described by the sentence or list item that cites it and tagged with its page plus the [[pages]] linked in that list item (in a list item with more than 3 citations or a paragraph with several: its own sentence; in a table row: its own cell and the cells before it) (the richest source once a wiki exists); "topic" — chapters; "event" — logged events (no end: endSec null; "Note" events are editorial and never tagged with entities); "transcript" — transcript lines (only those matching query or naming an entity). Filter with `query` (full text, websearch syntax: words, "phrases", -exclude, or; page titles and headings weigh most; when nothing matches every word, moments matching at least half the words are returned, ranked by how many, with relaxedQuery: true), `entities` (page titles, aliases or ids — a moment must be about all of them; for topics, events and transcript lines that means naming each entity\'s title or an alias in its text) or both, and `sessionId`. With a query, best matches first; without, in episode order (episode numbers when every session has one, else dates) then time. Every moment has sessionId, startSec and endSec (seconds from the session start; archived sessions included) — cite them, as [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), or use them as compilation clips. `mergeGapSec` > 0 also returns `clips`: this page\'s moments merged per session where they overlap or are at most that many seconds apart (moments without an end count as `pointSec` long), at most `maxClipSec` long (default 180; a moment longer than that, like a whole-segment topic, is left out where tighter moments cover it) and at least 1 s — pass them to compilations_create as they are; `clipsOnly: true` returns just the clips. Agents get compact results by default (text trimmed to 160 characters, entities and page as titles, clips with a moment count); pass `compact: false` for full moments (context, headings, entity ids). transcriptCapped: true means more transcript lines matched than one search considers (5000, best first): narrow it. Use graph_entity first to see an entity\'s aliases, related pages and the sessions it appears in. Paged: total, limit (default 30, max 500), offset / nextOffset.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {

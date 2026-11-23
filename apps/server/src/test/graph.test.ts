@@ -303,6 +303,8 @@ describe('moments.search', () => {
       bodyMd: [
         `- [[Carly]] picks her own nickname. The [[Pig Talk]] email greets the hounds [EP_02 00:30:00](/sessions/${ep2.id}?t=1800&to=1830) and Joe moves on [EP_02 00:31:00](/sessions/${ep2.id}?t=1860&to=1870).`,
         '',
+        `- Dates: [[Carly]] at home [EP_02 00:50:00](@${ep2.id}:3000-3010); a [[Pig Talk]] taping [EP_02 00:51:00](@${ep2.id}:3060-3070); a cruise [EP_02 00:52:00](@${ep2.id}:3120-3130); a club [EP_02 00:53:00](@${ep2.id}:3180-3190).`,
+        '',
         `[[Carly]] laughs. Joe reads a [[Pig Talk]] letter [EP_02 00:40:00](/sessions/${ep2.id}?t=2400&to=2410). Then an ad [EP_02 00:41:00](/sessions/${ep2.id}?t=2460&to=2470).`,
       ].join('\n'),
     });
@@ -311,7 +313,8 @@ describe('moments.search', () => {
       entities: ['Carly', 'Pig Talk'],
       kinds: ['citation'],
     });
-    // Both list-item citations; in the paragraph neither (Carly is a sentence away from each).
+    // Both citations of the short item; none from the 4-citation list of dates (read per
+    // sentence) or the paragraph (Carly is a sentence away from each).
     expect(
       res.moments.filter((m) => m.source?.pageTitle === 'Greetings').map((m) => m.startSec),
     ).toEqual([1800, 1860]);
