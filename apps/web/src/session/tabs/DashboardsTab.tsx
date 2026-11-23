@@ -15,7 +15,7 @@ import {
   FeedShell,
   feedCountLabel,
   IconPencil,
-  IconX,
+  IconTrash,
   ToolbarCaption,
 } from '@/session/feed';
 import { showToast } from '@/shared/components/Toast';
@@ -106,7 +106,7 @@ export const DashboardsTab = memo(function DashboardsTab() {
         </Tooltip>
         <Tooltip content="Delete this dashboard" disabled={del.isPending} titleWhenDisabled>
           <Button variant="glass" onClick={() => void remove(current)} disabled={del.isPending}>
-            <ToolbarCaption label="Delete" icon={<IconX />} />
+            <ToolbarCaption label="Delete" icon={<IconTrash />} />
           </Button>
         </Tooltip>
       </>

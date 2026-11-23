@@ -157,7 +157,7 @@ export function TopBar() {
               }}
             >
               {statusBadge}
-              <span className="min-w-0 truncate font-tc text-xs font-medium text-muted-foreground max-md:hidden">
+              <span className="min-w-0 truncate text-sm font-medium text-muted-foreground max-md:hidden">
                 {sessionTitle}
               </span>
             </Button>
@@ -165,7 +165,7 @@ export function TopBar() {
         ) : (
           <div className="flex shrink-0 items-center gap-2 px-1.5 max-md:px-1 md:min-w-0 md:shrink">
             {statusBadge}
-            <span className="min-w-0 truncate text-xs text-muted-foreground max-md:sr-only">
+            <span className="min-w-0 truncate text-sm text-muted-foreground max-md:sr-only">
               No session open
             </span>
           </div>
