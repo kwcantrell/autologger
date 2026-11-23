@@ -1,6 +1,6 @@
 import type { Session, WikiListItem } from '@autologger/contract';
 import { BookOpenIcon, FileTextIcon, WifiOffIcon } from 'lucide-react';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useSearch } from 'wouter';
 import type { LiveStatus } from '@/api/live';
 import {
@@ -119,6 +119,20 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
     },
     [playerSeek, session.isRolling],
   );
+
+  // Below lg the tab row scrolls sideways: keep the open tab in view, so a reload or a shared
+  // ?tab= link on a phone shows which tab is open. Only the row scrolls, never the page.
+  const tabRowRef = useRef<HTMLDivElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: tab is the trigger — the active tab moved
+  useEffect(() => {
+    const row = tabRowRef.current;
+    const el = row?.querySelector<HTMLElement>(`[role="tab"][data-active]`);
+    if (!row || !el || row.scrollWidth <= row.clientWidth) return;
+    const r = el.getBoundingClientRect();
+    const c = row.getBoundingClientRect();
+    if (r.left < c.left) row.scrollLeft += r.left - c.left - 12;
+    else if (r.right > c.right) row.scrollLeft += r.right - c.right + 12;
+  }, [tab]);
 
   const revealEvent = useCallback(
     (eventId: string) => {
@@ -271,7 +285,10 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
             onValueChange={(v) => switchTab(v as WorkspaceTab)}
             className="min-h-0 flex-[1_1_0] gap-0"
           >
-            <div className="relative z-0 mx-4 mb-3 flex shrink-0 items-end gap-2 pt-[0.3rem] max-md:mx-3 max-lg:overflow-x-auto max-lg:overflow-y-hidden max-lg:[scrollbar-width:none]">
+            <div
+              ref={tabRowRef}
+              className="relative z-0 mx-4 mb-3 flex shrink-0 items-end gap-2 pt-[0.3rem] max-md:mx-3 max-lg:overflow-x-auto max-lg:overflow-y-hidden max-lg:[scrollbar-width:none]"
+            >
               <TabsList variant="line" aria-label="Feed tabs" className="max-lg:flex-none">
                 {TABS.map((t) => (
                   <TabsTrigger key={t.id} value={t.id}>
