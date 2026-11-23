@@ -18,6 +18,7 @@ import { schema } from '../db/client.ts';
 import { checkRules, ruleCounts, runRules } from '../media/rules.ts';
 import { alignWordTimings } from '../media/words.ts';
 import { toTranscriptSegment } from './map.ts';
+import { sessionTranscriptStatus } from './sessions.ts';
 
 const { transcriptSegments: ts } = schema;
 
@@ -109,7 +110,8 @@ defineOp({
     'The @seconds values are what atSec / startSec fields in events.create and topics.create expect, and the start of a citation range. ' +
     "`ids: true` adds segment ids for targeting edits (transcript.updateSegments, mergeSegments, splitSegment): the lines format prefixes each line with its id (`seg_… [HH:MM:SS @123.4s] Speaker: text`), the compact format puts `{seg_…}` before each segment's text, `{seg_…@183.4}` where a stamp is due. " +
     'Paging: fromSec/toSec (seconds from session start) select the segments that START in [fromSec, toSec), so consecutive pages (0-1500, 1500-3000, ...) never repeat a line. ' +
-    'Returns `{ text, segments, chars, totalSegments, durationSec }`: segments and chars describe this page; totalSegments and durationSec (end of the last segment) describe the whole session, so the first call tells you how to page. Over MCP the text comes first, then the numbers as JSON.',
+    'Returns `{ text, segments, chars, totalSegments, durationSec, transcriptStatus }`: segments and chars describe this page; totalSegments and durationSec (end of the last segment) describe the whole session, so the first call tells you how to page; transcriptStatus is as in sessions.get. Over MCP the text comes first, then the numbers as JSON. ' +
+    'When the page has no segments, the MCP text says why instead: "(transcript is empty: no speech detected)" when transcription finished (status done) but found no speech, e.g. a music-only video — final, do not wait or retranscribe; "(no transcript yet: …)" while it is pending or there is no audio yet; "(no transcript: transcription failed …)" when it failed; "(no segments start in this range …)" for an empty fromSec/toSec page of a non-empty transcript.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, fromSec, toSec, format, ids, stampEverySec }) {
@@ -134,6 +136,7 @@ defineOp({
       chars: text.length,
       totalSegments: whole?.totalSegments ?? 0,
       durationSec: Math.round((whole?.durationSec ?? 0) * 10) / 10,
+      transcriptStatus: await sessionTranscriptStatus(ctx, sessionId),
     };
   },
 });

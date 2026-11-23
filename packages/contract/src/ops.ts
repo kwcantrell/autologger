@@ -766,6 +766,8 @@ export interface OpOutputs {
     totalSegments: number;
     /** End of the last segment in the session, seconds from session start. */
     durationSec: number;
+    /** As Session.transcriptStatus: done with 0 totalSegments means no speech was found. */
+    transcriptStatus: Session['transcriptStatus'];
   };
   'transcript.updateSegment': TranscriptSegment;
   'transcript.find':
