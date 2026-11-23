@@ -31,6 +31,7 @@ import {
 } from '@/shared/components/ui/dropdown-menu';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui/tabs';
+import { cn } from '@/shared/lib/utils';
 import { isOverlayOpen } from '@/shared/ui/overlayOpen';
 import { AudioMenu, UploadBanner } from './AudioMenu';
 import { usePlayer } from './audio/usePlayer';
@@ -295,8 +296,18 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
                 key={t.id}
                 value={t.id}
                 keepMounted
-                hidden={tab !== t.id}
-                className="relative z-[1] flex min-h-0 flex-1 flex-col"
+                // A visited tab stays laid out while hidden: content-visibility skips its
+                // rendering but keeps its layout, so coming back doesn't lay out a long
+                // transcript again (display:none would). `inert` keeps it out of focus and
+                // the accessibility tree.
+                hidden={false}
+                inert={tab !== t.id}
+                className={cn(
+                  'relative z-[1] flex min-h-0 flex-col',
+                  tab === t.id
+                    ? 'flex-1'
+                    : 'h-0 flex-none overflow-hidden [content-visibility:hidden]',
+                )}
               >
                 {visited.has(t.id) && (
                   <Suspense

@@ -99,8 +99,8 @@ describe('shared session pieces', () => {
         onSaveText={resolved}
       />,
     );
-    expect(out).toMatch(/bg-si-accent\/35[^>]*>tickets</);
-    expect(out).not.toMatch(/bg-si-accent\/35[^>]*>Two</);
+    expect(out).toMatch(/bg-si-accent\/35[^>]*>tickets </);
+    expect(out).not.toMatch(/bg-si-accent\/35[^>]*>Two </);
   });
 
   it('TopicRow is read-only without write access', () => {
