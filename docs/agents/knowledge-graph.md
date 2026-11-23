@@ -77,7 +77,10 @@ the block.
   a person's themes — each statement cited to the episodes it rests on. Then one list item per
   story, letter, headline or fact (not one per episode), each fact written once (by episode on
   segment pages, by theme on person and topic pages; repeated mentions as one item with several
-  citations), and no two pages holding the same items.
+  citations), each quote in one section (synthesis links to the item, it doesn't repeat it), and
+  no two pages holding the same items. The hub's episode guide cites every row.
+- **Synthesis without overreach**: a thread across episodes is not a cause, repeated jokes are not
+  an arc; say only what the cited ranges show.
 - **Aliases on every page** for every _specific_ name the transcript or a person might use
   (nicknames, misspellings, "We're Wrong" for "You're Wrong"). Aliases also tag topics, events and
   transcript lines that mention them, so **no generic aliases**: no bare first names ("Tom",
@@ -96,7 +99,9 @@ the block.
    (`graph_export {section: "moments"}`): an entity tagging a large share of them has a generic
    alias — remove it. An entity with 0 moments has no cited block linking it — fix the
    pages, not the search.
-3. Spot-check `moments_search` with the questions users will ask (one entity, two entities, a
+3. Read each shared page once for repeats (the same quote in synthesis, notable lines and the
+   episode list) and for synthesis claims its citations don't support.
+4. Spot-check `moments_search` with the questions users will ask (one entity, two entities, a
    phrase) and open a few `startSec`s in the transcript.
 
 ## 6. Search moments and clips
