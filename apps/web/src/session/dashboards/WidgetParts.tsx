@@ -7,6 +7,7 @@ import type { ValueFormat, Widget } from '@autologger/contract';
 import type { ReactNode } from 'react';
 import { fmtShort } from '@/lib/timecode';
 import { FEED_CELL, FEED_TH } from '@/session/feed';
+import { Button } from '@/shared/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { Tooltip } from '@/shared/ui/Tooltip';
 import { fmtField, fmtFormat, fmtNum, fmtValue, type Row, safeColor, toNum } from './data';
@@ -242,8 +243,8 @@ export function TimelineWidget({
       <ul className="m-0 flex max-h-[220px] list-none flex-col overflow-auto p-0">
         {items.slice(0, MAX_TABLE_ROWS).map((x) => (
           <li key={x.i}>
-            <button
-              type="button"
+            <Button
+              variant="unstyled"
               onClick={() => onSeek(x.at)}
               className="flex w-full min-w-0 cursor-pointer items-baseline gap-2.5 rounded-[5px] border-0 bg-transparent px-1.5 py-1 text-left text-[0.8rem] text-si-fg hover:bg-white/[0.04] focus-visible:outline-2 focus-visible:outline-ring"
             >
@@ -258,7 +259,7 @@ export function TimelineWidget({
                   {fmtShort(x.dur)}
                 </span>
               )}
-            </button>
+            </Button>
           </li>
         ))}
       </ul>

@@ -59,22 +59,6 @@ export function fmtRelative(iso: string, now: number): string {
   return new Date(iso).toLocaleDateString();
 }
 
-function SmallBadge({
-  children,
-  className,
-  title,
-}: {
-  children: ReactNode;
-  className?: string;
-  title?: string;
-}) {
-  return (
-    <Badge variant="outline" title={title} className={cn('px-1 py-0 text-[0.6rem]', className)}>
-      {children}
-    </Badge>
-  );
-}
-
 export function ChangeRow({
   change: c,
   now,
@@ -137,14 +121,18 @@ export function ChangeRow({
         <div className="flex min-w-0 flex-wrap items-center gap-1">
           <span className="truncate font-semibold">{c.actor?.name ?? 'System'}</span>
           {client && (
-            <SmallBadge
+            <Badge
+              variant="outline"
+              size="sm"
               className="border-[color-mix(in_oklab,var(--si-accent)_45%,var(--si-line))] text-(--si-accent-text) @max-3xl/feed:max-w-full @max-3xl/feed:whitespace-normal @max-3xl/feed:[overflow-wrap:anywhere]"
               title={`${c.via === 'mcp' ? 'MCP client' : 'Companion device'}: ${client}`}
             >
               {client}
-            </SmallBadge>
+            </Badge>
           )}
-          <SmallBadge>{VIA_LABEL[c.via]}</SmallBadge>
+          <Badge variant="outline" size="sm">
+            {VIA_LABEL[c.via]}
+          </Badge>
         </div>
       </td>
       <td
@@ -164,14 +152,20 @@ export function ChangeRow({
         )}
       >
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          {c.revertOf && <SmallBadge title="This change undid an earlier one">undo</SmallBadge>}
+          {c.revertOf && (
+            <Badge variant="outline" size="sm" title="This change undid an earlier one">
+              undo
+            </Badge>
+          )}
           {c.groupSize && (
-            <SmallBadge
+            <Badge
+              variant="outline"
+              size="sm"
               title={`One ${c.op} call: ${c.groupSize} changes here${c.groupTotal ? ` (${c.groupTotal} in all sessions)` : ''}, newest shown${c.groupUndone ? `; ${c.groupUndone} already undone` : ''}`}
             >
               {c.groupTotal ? `${c.groupSize} of ${c.groupTotal}` : c.groupSize} changes
               {c.groupUndone ? ` · ${c.groupUndone} undone` : ''}
-            </SmallBadge>
+            </Badge>
           )}
           <span className="[overflow-wrap:anywhere]">
             {c.summary}

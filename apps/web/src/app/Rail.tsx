@@ -32,6 +32,12 @@ import {
   DropdownMenuTrigger,
 } from '@/shared/components/ui/dropdown-menu';
 import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from '@/shared/components/ui/input-group';
+import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
@@ -39,7 +45,6 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
-  SidebarInput,
   SidebarMenu,
   SidebarMenuAction,
   SidebarMenuButton,
@@ -216,15 +221,12 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
           </StripTooltip>
         </div>
 
-        <div className="relative group-data-[collapsible=icon]:hidden">
-          <Search
-            aria-hidden="true"
-            className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-          />
-          <SidebarInput
+        {/* The icon sits 10px in and the text 33px, as in the rail's narrower field before. */}
+        <InputGroup className="bg-background group-data-[collapsible=icon]:hidden has-[>[data-align=inline-start]]:[&>input]:pl-[0.4375rem]">
+          <InputGroupInput
             ref={searchRef}
             type="search"
-            className="h-(--h-ctl) pr-8 pl-8 [&::-webkit-search-cancel-button]:appearance-none"
+            className="[&::-webkit-search-cancel-button]:appearance-none"
             placeholder="Search sessions…"
             aria-label="Search sessions"
             value={query}
@@ -236,21 +238,24 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
               }
             }}
           />
+          <InputGroupAddon className="pl-[0.5625rem]">
+            <Search aria-hidden="true" />
+          </InputGroupAddon>
           {query !== '' && (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="absolute top-1/2 right-1.5 -translate-y-1/2"
-              aria-label="Clear search"
-              onClick={() => {
-                setQuery('');
-                searchRef.current?.focus({ preventScroll: true });
-              }}
-            >
-              <X aria-hidden="true" />
-            </Button>
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton
+                size="icon-xs"
+                aria-label="Clear search"
+                onClick={() => {
+                  setQuery('');
+                  searchRef.current?.focus({ preventScroll: true });
+                }}
+              >
+                <X aria-hidden="true" />
+              </InputGroupButton>
+            </InputGroupAddon>
           )}
-        </div>
+        </InputGroup>
       </SidebarHeader>
 
       <SidebarContent className="gap-0 group-data-[collapsible=icon]:invisible">

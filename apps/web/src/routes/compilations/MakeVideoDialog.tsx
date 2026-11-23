@@ -14,6 +14,11 @@ import { fmtShort } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
 import { Button } from '@/shared/components/ui/button';
 import { Checkbox } from '@/shared/components/ui/checkbox';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleSummary,
+} from '@/shared/components/ui/collapsible';
 import { Field, FieldLabel } from '@/shared/components/ui/field';
 import { Input } from '@/shared/components/ui/input';
 import { Spinner } from '@/shared/components/ui/spinner';
@@ -205,13 +210,14 @@ function MakeVideoForm({
           </h3>
           <span className="flex items-baseline gap-3 text-xs font-normal">
             {plan.clips.length > 1 && (
-              <button
-                type="button"
+              <Button
+                variant="link"
+                size="inline"
                 onClick={() => setPicked(new Set(allTicked ? [] : plan.clips.map((c) => c.key)))}
-                className="cursor-pointer border-0 bg-transparent p-0 text-xs text-si-muted underline decoration-(--si-line-strong) underline-offset-2 hover:text-si-fg"
+                className="text-xs text-si-muted decoration-(--si-line-strong)"
               >
                 {allTicked ? 'Clear' : 'Select all'}
-              </button>
+              </Button>
             )}
             <span className="font-mono text-si-muted">Total {fmtShort(totalSec(chosen))}</span>
           </span>
@@ -259,12 +265,14 @@ function MakeVideoForm({
       </section>
 
       {plan.skipped.length > 0 && (
-        <details className="min-w-0 text-sm">
-          <summary className="cursor-pointer text-si-muted hover:text-si-fg">
+        <Collapsible className="min-w-0 text-sm">
+          <CollapsibleSummary className="text-si-muted hover:text-si-fg">
             {plan.skipped.length} left out
-          </summary>
-          <SkippedList skipped={plan.skipped} />
-        </details>
+          </CollapsibleSummary>
+          <CollapsibleContent hiddenUntilFound>
+            <SkippedList skipped={plan.skipped} />
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       <p className="m-0 text-xs text-si-dim">

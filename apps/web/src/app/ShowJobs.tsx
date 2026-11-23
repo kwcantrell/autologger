@@ -145,22 +145,24 @@ export function ShowJobsDialog({
       >
         <span className="flex min-w-0 flex-1 basis-48 flex-col">
           {j.sessionId ? (
-            <button
-              type="button"
-              className="min-w-0 cursor-pointer truncate text-left font-semibold hover:underline focus-visible:underline"
+            <Button
+              variant="link"
+              size="inline"
+              className="min-w-0 truncate font-semibold no-underline hover:underline focus-visible:underline"
               onClick={() => onOpenSession(j.sessionId as string)}
             >
               {title}
-            </button>
+            </Button>
           ) : j.kind === 'compile' && j.compilationTitle ? (
             <Tooltip content="Open the Compilations page">
-              <button
-                type="button"
-                className="min-w-0 cursor-pointer truncate text-left font-semibold hover:underline focus-visible:underline"
+              <Button
+                variant="link"
+                size="inline"
+                className="min-w-0 truncate font-semibold no-underline hover:underline focus-visible:underline"
                 onClick={onOpenCompilations}
               >
                 {title}
-              </button>
+              </Button>
             </Tooltip>
           ) : (
             <span className="truncate font-semibold">{title}</span>
