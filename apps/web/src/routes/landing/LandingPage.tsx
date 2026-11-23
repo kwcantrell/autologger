@@ -63,8 +63,11 @@ const useLinks = () => useContext(LinksContext);
 // The feature and import/export mocks load when their slot comes within half a screen of the
 // page's scroll viewport, so the first paint fetches only the hero. The wiki and Ask mocks are a
 // module of their own (wikiMocks.tsx) because they pull in react-markdown. Until a mock arrives an
-// empty card of its measured height (phone, sm, lg) holds its place, so the rows around it do not
-// move. Changed a mock's size? Update its height here.
+// empty card of its measured height holds its place, so the rows around it do not move. Heights are
+// measured at 390 (phone), 800 (sm), 1024 (lg) and 1440 px (min-[69.75rem], i.e. 1116 px and up:
+// from there the half-width mocks' feed tables reach 28rem and stop stacking their rows, with an
+// 8 px page scrollbar, from 1108 px with overlay scrollbars; a rem value so it sorts after lg). Changed a mock's size? Re-measure it at those widths and update its
+// height here.
 
 type MockName = keyof typeof Mocks | keyof typeof WikiMocks;
 const loadMock = (name: MockName): Promise<ComponentType> =>
@@ -414,7 +417,12 @@ const features = (links: LandingLinks): Feature[] => [
       'Roll, stop and takes on a shared transport every client follows',
       'Bitfocus Companion turns a Stream Deck into a logging surface',
     ],
-    mock: <LazyMock name="LoggingMock" height="h-[337px] sm:h-[499px] lg:h-[407px]" />,
+    mock: (
+      <LazyMock
+        name="LoggingMock"
+        height="h-[337px] sm:h-[499px] lg:h-[379px] min-[69.75rem]:h-[407px]"
+      />
+    ),
     link: { label: 'Companion setup', href: links.companionDocsHref, hint: '' },
   },
   {
@@ -427,7 +435,12 @@ const features = (links: LandingLinks): Feature[] => [
       'Key terms steer the spelling of guest names and jargon',
       'Fix, merge and split lines by hand, or have an agent clean up',
     ],
-    mock: <LazyMock name="TranscriptMock" height="h-[394px] sm:h-[295px] lg:h-[346px]" />,
+    mock: (
+      <LazyMock
+        name="TranscriptMock"
+        height="h-[394px] sm:h-[295px] lg:h-[383px] min-[69.75rem]:h-[346px]"
+      />
+    ),
   },
   {
     id: 'topics',
@@ -438,7 +451,12 @@ const features = (links: LandingLinks): Feature[] => [
       'Chapter start times line up with events and transcript lines',
       'Ready to paste into show notes, or export as CSV',
     ],
-    mock: <LazyMock name="TopicsMock" height="h-[536px] sm:h-[387px] lg:h-[423px]" />,
+    mock: (
+      <LazyMock
+        name="TopicsMock"
+        height="h-[536px] sm:h-[387px] lg:h-[544px] min-[69.75rem]:h-[423px]"
+      />
+    ),
   },
   {
     id: 'dashboards',
@@ -473,7 +491,12 @@ const features = (links: LandingLinks): Feature[] => [
       'Built on the server: only the cited sections are downloaded, joined into a 720p MP4',
       'The Compilations page plays, downloads and deletes them',
     ],
-    mock: <LazyMock name="CompileMock" height="h-[504px] sm:h-[418px] lg:h-[441px]" />,
+    mock: (
+      <LazyMock
+        name="CompileMock"
+        height="h-[504px] sm:h-[418px] lg:h-[465px] min-[69.75rem]:h-[441px]"
+      />
+    ),
     link: { label: 'The autologger-ask plugin', href: ASK_PLUGIN_HREF, hint: '' },
   },
   {
@@ -730,9 +753,38 @@ function Footer() {
   );
 }
 
+/**
+ * The landing route loads lazily, so on a first load of `/#agents` the browser looks for the
+ * section before it exists and stays at the top. Once the page has mounted, scroll to the hash's
+ * element (once). The lazy mocks' placeholders already hold their measured heights, and the
+ * sections' scroll-mt-14 keeps the heading clear of the sticky header.
+ */
+function useScrollToHashOnLoad() {
+  useEffect(() => {
+    let id = '';
+    try {
+      id = decodeURIComponent(window.location.hash.slice(1));
+    } catch {
+      return;
+    }
+    if (!id) return;
+    const until = performance.now() + 2000;
+    let frame = 0;
+    const scroll = () => {
+      const el = document.getElementById(id);
+      // Instant: the page's scroll-smooth would otherwise animate across the whole page.
+      if (el) el.scrollIntoView({ block: 'start', behavior: 'instant' });
+      else if (performance.now() < until) frame = requestAnimationFrame(scroll);
+    };
+    frame = requestAnimationFrame(scroll);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+}
+
 export function LandingPage() {
   const docsUrl = useCapabilities().data?.docsUrl;
   const links = useMemo(() => landingLinks(docsUrl), [docsUrl]);
+  useScrollToHashOnLoad();
   return (
     <LinksContext value={links}>
       <div

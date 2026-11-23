@@ -35,6 +35,10 @@ const DataSource = {
   data: z.array(Row).max(1000).optional(),
   /** Or a live query. Exactly one of `data` / `query` must be present for data widgets. */
   query: DashboardQuery.optional(),
+  /** Shown instead of the widget when it has nothing to show (no rows, or a stat value of null). */
+  emptyText: z.string().min(1).max(200).optional(),
+  /** Hide the whole widget when it has nothing to show (wins over emptyText). */
+  hideWhenEmpty: z.boolean().optional(),
 };
 
 /**
