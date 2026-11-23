@@ -25,6 +25,11 @@
       "tailwindDirectives": true
     }
   },
+  "markdown": {
+    "parser": {
+      "frontmatter": true
+    }
+  },
   "overrides": [
     {
       "includes": ["apps/web/src/shared/theme/**"],
