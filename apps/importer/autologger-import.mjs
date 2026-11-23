@@ -4,7 +4,7 @@
 // browser's YouTube cookies, and sends only the audio or the finished compilation MP4 to
 // AutoLogger. Cookies leave this machine only with `youtube-login`, which hands a team's YouTube
 // sign-in to the server so it can download by itself. One dependency-free file (Node >= 22); the
-// server serves it at /api/importer/autologger-import.mjs. Docs: docs/importer.md.
+// server serves it at /api/importer/autologger-import.mjs. Docs: docs/developers/import-helper.md.
 
 import { spawn } from 'node:child_process';
 import { createReadStream, realpathSync } from 'node:fs';

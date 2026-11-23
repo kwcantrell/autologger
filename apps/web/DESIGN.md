@@ -1,5 +1,4 @@
 ---
-
 name: AutoLogger
 description: Session-logging workspace whose shell ignites in one accent while the session is live.
 colors:

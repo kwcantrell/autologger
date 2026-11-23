@@ -618,8 +618,9 @@ export interface Capabilities {
   /** Signed-out visitors at `/` see the public landing page; false sends them to /login (LANDING_PAGE=0). */
   landingPage: boolean;
   /**
-   * Base URL of this instance's own docs (DOCS_URL); the landing page's doc links resolve as
-   * `<docsUrl>/mcp.md` etc. Null keeps the upstream GitHub docs.
+   * Base URL of an external copy of the docs (DOCS_URL); the web app's doc links resolve as
+   * `<docsUrl>/<section>/<slug>` (e.g. `<docsUrl>/developers/mcp-server`). Null keeps the
+   * built-in pages at `/docs/<section>/<slug>`.
    */
   docsUrl: string | null;
 }

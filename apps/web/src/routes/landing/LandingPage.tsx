@@ -1,63 +1,45 @@
 // Public landing page for signed-out visitors at `/` (RootGate lazy-loads it). Static: no RPC,
-// no session state; only /api/capabilities (already loaded by RootGate) for the docs base URL. The document is viewport-locked on desktop (tailwind.css), so the page is its
-// own scroll container and the header sticks inside it.
+// no session state; only /api/capabilities (already loaded by RootGate) for the docs base URL.
+// The header and footer (chrome.tsx) are shared with the docs pages. The document is
+// viewport-locked on desktop (tailwind.css), so the page is its own scroll container and the
+// header sticks inside it.
 
-import { ArrowRight, ChevronDown, ExternalLink, Menu } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import {
   type ComponentType,
-  createContext,
   type LazyExoticComponent,
   lazy,
   type ReactNode,
   type RefObject,
   Suspense,
-  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
-import { Link } from 'wouter';
 import { useCapabilities } from '@/api/queries';
 import { Button } from '@/shared/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLinkItem,
-  DropdownMenuTrigger,
-} from '@/shared/components/ui/dropdown-menu';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/shared/components/ui/sheet';
 import { cn } from '@/shared/lib/utils';
-import { WorkspaceMock } from './heroMock';
 import {
-  ASK_PLUGIN_HREF,
-  type LandingLinks,
-  landingLinks,
-  type NavLink,
-  PRODUCT_LINKS,
-  SIGN_IN_HREF,
-} from './links';
+  AccountButton,
+  ChromeLink,
+  ChromeProvider,
+  FOCUS,
+  Footer,
+  Header,
+  linkRender,
+  useLinks,
+  WRAP,
+} from './chrome';
+import { WorkspaceMock } from './heroMock';
+import { ASK_PLUGIN_HREF, type LandingLinks, landingLinks, type NavLink } from './links';
 import type * as Mocks from './mocks';
 import type * as WikiMocks from './wikiMocks';
 
-const WRAP = 'mx-auto w-full max-w-[72rem] px-4 sm:px-6 lg:px-8';
 const EYEBROW =
   'm-0 font-label text-[0.75rem] font-semibold uppercase leading-none tracking-[0.14em] text-[color-mix(in_oklab,var(--si-accent)_72%,#ffffff)]';
 const H2 = 'm-0 text-[1.75rem] font-semibold leading-[1.15] tracking-[-0.01em] sm:text-[2.25rem]';
 const LEAD = 'm-0 text-[1rem] leading-[1.6] text-si-muted sm:text-[1.0625rem]';
-const FOCUS =
-  'outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:rounded-ctl';
-
-// Doc links follow the server's DOCS_URL (capabilities.docsUrl); upstream docs until it loads.
-const LinksContext = createContext<LandingLinks>(landingLinks());
-const useLinks = () => useContext(LinksContext);
 
 // ── lazily loaded mocks ─────────────────────────────────────────────
 // The feature and import/export mocks load when their slot comes within half a screen of the
@@ -131,177 +113,6 @@ function LazyMock({ name, height }: { name: MockName; height: string }) {
   );
 }
 
-function useMenuGroups() {
-  const { navGroups } = useLinks();
-  return [{ id: 'product', label: 'Product', links: PRODUCT_LINKS }, ...navGroups];
-}
-
-function isExternal(href: string) {
-  return href.startsWith('http');
-}
-
-function ext(href: string) {
-  return isExternal(href) ? { target: '_blank', rel: 'noreferrer' } : {};
-}
-
-function Logo() {
-  return (
-    <a
-      href="#top"
-      className={cn('flex shrink-0 items-center gap-2 text-si-fg no-underline', FOCUS)}
-    >
-      <img
-        src="/static/logo-autologger-transparent.png"
-        alt=""
-        width={28}
-        height={28}
-        className="size-7"
-      />
-      <span className="font-league-gothic text-[1.6rem] uppercase leading-none tracking-[0.02em]">
-        AutoLogger
-      </span>
-    </a>
-  );
-}
-
-function SignInButton({ className, size }: { className?: string; size?: 'default' | 'lg' }) {
-  return (
-    <Button
-      nativeButton={false}
-      size={size}
-      className={className}
-      render={<Link href={SIGN_IN_HREF} />}
-    >
-      Sign in
-    </Button>
-  );
-}
-
-function DesktopNav() {
-  const menuGroups = useMenuGroups();
-  return (
-    <nav aria-label="Main" className="flex items-center gap-1 max-md:hidden">
-      {menuGroups.map((g) => (
-        <DropdownMenu key={g.id}>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                className="gap-1 px-3 text-si-muted data-popup-open:text-si-fg hover:text-si-fg"
-              />
-            }
-          >
-            {g.label}
-            <ChevronDown aria-hidden="true" className="size-3.5" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-[17rem]">
-            {g.links.map((l) => (
-              <DropdownMenuLinkItem
-                key={l.href + l.label}
-                href={l.href}
-                {...ext(l.href)}
-                className="flex-col items-start gap-0.5 py-2"
-              >
-                <span className="flex items-center gap-1.5 text-[0.84rem] font-semibold tracking-normal">
-                  {l.label}
-                  {isExternal(l.href) && (
-                    <ExternalLink aria-hidden="true" className="size-3 text-si-dim" />
-                  )}
-                </span>
-                <span className="text-[0.75rem] tracking-normal text-si-dim">{l.hint}</span>
-              </DropdownMenuLinkItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ))}
-    </nav>
-  );
-}
-
-function MobileNav() {
-  const [open, setOpen] = useState(false);
-  const menuGroups = useMenuGroups();
-  return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-11 md:hidden"
-            aria-label="Open menu"
-          />
-        }
-      >
-        <Menu aria-hidden="true" />
-      </SheetTrigger>
-      <SheetContent side="right" className="w-full gap-0 overflow-y-auto sm:max-w-sm">
-        <SheetHeader className="pr-12">
-          <SheetTitle>AutoLogger</SheetTitle>
-          <SheetDescription>Product tour, docs and developer links.</SheetDescription>
-        </SheetHeader>
-        <nav aria-label="Main" className="flex flex-col gap-5 px-4 pb-6">
-          {menuGroups.map((g) => (
-            <section key={g.id} aria-labelledby={`m-nav-${g.id}`}>
-              <h2
-                id={`m-nav-${g.id}`}
-                className="m-0 mb-1.5 font-label text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-si-dim"
-              >
-                {g.label}
-              </h2>
-              <ul className="m-0 flex list-none flex-col p-0">
-                {g.links.map((l) => (
-                  <li key={l.href + l.label}>
-                    <a
-                      href={l.href}
-                      {...ext(l.href)}
-                      onClick={() => setOpen(false)}
-                      className={cn(
-                        'flex min-h-11 items-center gap-1.5 rounded-ctl px-2 text-[0.9375rem] text-si-fg no-underline hover:bg-[rgba(255,255,255,0.06)]',
-                        FOCUS,
-                      )}
-                    >
-                      {l.label}
-                      {isExternal(l.href) && (
-                        <ExternalLink aria-hidden="true" className="size-3.5 text-si-dim" />
-                      )}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-          <SignInButton className="h-11 w-full" />
-        </nav>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
-function Header() {
-  const { mcpDocsHref } = useLinks();
-  return (
-    <header className="sticky top-0 z-30 border-b border-[color-mix(in_oklab,var(--si-accent)_22%,var(--si-line))] bg-[color-mix(in_oklab,var(--si-accent)_10%,#0c0d10)]">
-      <div className={cn(WRAP, 'flex h-14 items-center gap-4 lg:gap-8')}>
-        <Logo />
-        <DesktopNav />
-        <div className="ml-auto flex items-center gap-2">
-          <Button
-            nativeButton={false}
-            variant="ghost"
-            className="text-si-muted hover:text-si-fg max-lg:hidden"
-            render={<a href={mcpDocsHref} {...ext(mcpDocsHref)} />}
-          >
-            Connect an agent
-          </Button>
-          <SignInButton className="max-md:hidden" />
-          <MobileNav />
-        </div>
-      </div>
-    </header>
-  );
-}
-
 function Hero() {
   return (
     <section aria-labelledby="hero-title" className="border-b border-si-line">
@@ -326,7 +137,7 @@ function Hero() {
             show wiki you can undo at any time.
           </p>
           <div className="flex flex-wrap gap-3">
-            <SignInButton size="lg" className="h-11 px-6 max-sm:flex-1" />
+            <AccountButton size="lg" className="h-11 px-6 max-sm:flex-1" />
             <Button
               nativeButton={false}
               variant="outline"
@@ -510,7 +321,7 @@ const features = (links: LandingLinks): Feature[] => [
       'Ready-made skills for topics, moments, dashboards, wiki, briefs and questions',
     ],
     mock: <LazyMock name="AgentsMock" height="h-[447px] sm:h-[455px] lg:h-[455px]" />,
-    link: { label: 'Connect an agent', href: links.mcpDocsHref, hint: '' },
+    link: { label: 'Connect an agent', href: links.connectAgentHref, hint: '' },
   },
 ];
 
@@ -545,9 +356,8 @@ function FeatureRow({ f, flip }: { f: Feature; flip: boolean }) {
 
 function TextLink({ link }: { link: NavLink }) {
   return (
-    <a
+    <ChromeLink
       href={link.href}
-      {...ext(link.href)}
       className={cn(
         'inline-flex w-fit items-center gap-1.5 text-[0.9375rem] font-semibold text-[color-mix(in_oklab,var(--si-accent)_72%,#ffffff)] no-underline hover:underline',
         FOCUS,
@@ -555,7 +365,7 @@ function TextLink({ link }: { link: NavLink }) {
     >
       {link.label}
       <ArrowRight aria-hidden="true" className="size-4" />
-    </a>
+    </ChromeLink>
   );
 }
 
@@ -603,30 +413,30 @@ function MediaSection() {
 }
 
 function Developers() {
-  const { navGroups } = useLinks();
+  const links = useLinks();
   const cards = [
     {
       title: 'MCP server',
       body: 'Every capability is one op in a registry, and every op an agent may use becomes an MCP tool. OAuth or personal access tokens.',
-      link: navGroups[2].links[0],
+      link: links.mcpServer,
       cta: 'Read the MCP guide',
     },
     {
       title: 'Plugin marketplace',
       body: 'Install the autologger plugin for Claude Code: skills to chapter, log moments, build dashboards, keep the wiki and write briefs — and autologger-ask to answer questions with cited clips and compilations.',
-      link: navGroups[1].links[0],
+      link: links.marketplace,
       cta: 'Browse the plugins',
     },
     {
       title: 'Companion module',
       body: 'Roll, stop and log from a Stream Deck, with timecode, take and the last event shown on the keys.',
-      link: navGroups[1].links[1],
+      link: links.companionModule,
       cta: 'Get the module',
     },
     {
       title: 'Open source',
       body: 'TypeScript end to end: Hono, Postgres, React. The contributor plugins walk you from first checkout to pull request.',
-      link: navGroups[2].links[2],
+      link: links.github,
       cta: 'View on GitHub',
     },
   ];
@@ -664,7 +474,7 @@ function Developers() {
 }
 
 function CtaBand() {
-  const { mcpDocsHref } = useLinks();
+  const { docsHomeHref } = useLinks();
   return (
     <section aria-labelledby="cta-title" className="border-t border-si-line">
       <div className={cn(WRAP, 'py-16 sm:py-20')}>
@@ -677,13 +487,13 @@ function CtaBand() {
             AutoLogger server, or straight away when you were invited to a team.
           </p>
           <div className="flex flex-wrap justify-center gap-3">
-            <SignInButton size="lg" className="h-11 px-6" />
+            <AccountButton size="lg" className="h-11 px-6" />
             <Button
               nativeButton={false}
               variant="outline"
               size="lg"
               className="h-11 px-5"
-              render={<a href={mcpDocsHref} {...ext(mcpDocsHref)} />}
+              render={linkRender(docsHomeHref)}
             >
               Read the docs
             </Button>
@@ -691,65 +501,6 @@ function CtaBand() {
         </div>
       </div>
     </section>
-  );
-}
-
-function Footer() {
-  const menuGroups = useMenuGroups();
-  return (
-    <footer className="border-t border-si-line bg-[color-mix(in_oklab,var(--si-accent)_10%,#0c0d10)]">
-      <div
-        className={cn(
-          WRAP,
-          'grid grid-cols-2 gap-x-6 gap-y-10 py-12 lg:grid-cols-[1.4fr_repeat(4,minmax(0,1fr))]',
-        )}
-      >
-        <div className="col-span-2 flex flex-col gap-3 lg:col-span-1">
-          <Logo />
-          <p className="m-0 max-w-[18rem] text-[0.875rem] leading-[1.55] text-si-muted">
-            Session logging for production teams, with AI that works through MCP.
-          </p>
-        </div>
-        {menuGroups.map((g) => (
-          <nav key={g.id} aria-labelledby={`f-nav-${g.id}`}>
-            <h2
-              id={`f-nav-${g.id}`}
-              className="m-0 mb-3 font-label text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-si-dim"
-            >
-              {g.label}
-            </h2>
-            <ul className="m-0 flex list-none flex-col gap-2 p-0">
-              {g.links.map((l) => (
-                <li key={l.href + l.label}>
-                  <a
-                    href={l.href}
-                    {...ext(l.href)}
-                    className={cn(
-                      'text-[0.875rem] text-si-muted no-underline hover:text-si-fg hover:underline',
-                      FOCUS,
-                    )}
-                  >
-                    {l.label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </nav>
-        ))}
-      </div>
-      <div className={WRAP}>
-        {/* The hairline sits inside the padding so it lines up with the content column. */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-si-line py-5">
-          <p className="m-0 text-[0.8125rem] text-si-dim">AutoLogger is open source.</p>
-          <Link
-            href={SIGN_IN_HREF}
-            className={cn('text-[0.8125rem] text-si-muted no-underline hover:text-si-fg', FOCUS)}
-          >
-            Sign in
-          </Link>
-        </div>
-      </div>
-    </footer>
   );
 }
 
@@ -784,9 +535,10 @@ function useScrollToHashOnLoad() {
 export function LandingPage() {
   const docsUrl = useCapabilities().data?.docsUrl;
   const links = useMemo(() => landingLinks(docsUrl), [docsUrl]);
+  const chrome = useMemo(() => ({ links, page: 'landing' as const, signedIn: false }), [links]);
   useScrollToHashOnLoad();
   return (
-    <LinksContext value={links}>
+    <ChromeProvider value={chrome}>
       <div
         id="top"
         className="h-dvh w-full overflow-x-hidden overflow-y-auto scroll-smooth bg-si-bg text-si-fg motion-reduce:scroll-auto"
@@ -814,6 +566,6 @@ export function LandingPage() {
         </main>
         <Footer />
       </div>
-    </LinksContext>
+    </ChromeProvider>
   );
 }

@@ -81,4 +81,4 @@ Exit codes: 0 done, 1 failed (the message says why), 2 usage or configuration er
 fake yt-dlp/ffmpeg scripts and a stub AutoLogger server (`npm test -w @autologger/importer`); they
 never touch the network. Keep its yt-dlp format and ffmpeg arguments in step with
 `apps/server/src/media/youtube.ts` and `apps/server/src/media/compilations.ts`. The ops it calls are
-listed in [docs/importer.md](../../docs/importer.md).
+listed in [docs/developers/import-helper.md](../../docs/developers/import-helper.md).
