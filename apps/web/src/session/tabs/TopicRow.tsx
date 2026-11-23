@@ -3,7 +3,6 @@
 
 import type { OpInput, Topic } from '@autologger/contract';
 import { Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
 import { fmtSec } from '@/lib/timecode';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
@@ -19,6 +18,7 @@ import {
   JUMP_COLUMN,
   JumpButton,
 } from '../feed';
+import { ChangedElsewhere, type ServerDraft, useServerDraft } from '../serverDraft';
 
 export const TOPIC_COLUMNS: Column[] = [
   JUMP_COLUMN,
@@ -51,29 +51,16 @@ export function TopicRow({
   onSave: (patch: Omit<OpInput<'topics.update'>, 'topicId'>) => Promise<unknown>;
   onDelete: () => void;
 }) {
-  const [start, setStart] = useState(fmtSec(t.startSec));
-  const [dur, setDur] = useState(String(Math.round(t.durationSec)));
-  const [level, setLevel] = useState(String(t.level));
-  const [title, setTitle] = useState(t.title);
-  const [summary, setSummary] = useState(t.summary);
-  useEffect(() => {
-    setStart(fmtSec(t.startSec));
-    setDur(String(Math.round(t.durationSec)));
-    setLevel(String(t.level));
-    setTitle(t.title);
-    setSummary(t.summary);
-  }, [t]);
-
-  const save = async (patch: Omit<OpInput<'topics.update'>, 'topicId'>) => {
-    try {
-      await onSave(patch);
-    } catch {
-      setStart(fmtSec(t.startSec));
-      setDur(String(Math.round(t.durationSec)));
-      setLevel(String(t.level));
-      setTitle(t.title);
-      setSummary(t.summary);
-    }
+  // Each field follows the server until the user edits it; remote changes then don't overwrite
+  // the draft (#231).
+  const start = useServerDraft(fmtSec(t.startSec));
+  const dur = useServerDraft(String(Math.round(t.durationSec)));
+  const level = useServerDraft(String(t.level));
+  const title = useServerDraft(t.title);
+  const summary = useServerDraft(t.summary);
+  const conflicts = [start, dur, level, title, summary].filter((f) => f.conflict);
+  const revertOnEsc = (f: ServerDraft) => (e: { key: string }) => {
+    if (e.key === 'Escape') f.reset();
   };
 
   const ro = !canWrite;
@@ -92,15 +79,14 @@ export function TopicRow({
           className={cn(FEED_INLINE_INPUT, 'tabular-nums')}
           aria-label="Start time"
           readOnly={ro}
-          value={start}
-          onChange={(e) => setStart(e.target.value)}
-          onBlur={() => {
-            const sec = parseClock(start);
-            if (sec == null) {
-              setStart(fmtSec(t.startSec));
-              return;
-            }
-            if (sec !== Math.floor(t.startSec)) void save({ startSec: sec });
+          value={start.value}
+          onChange={(e) => start.set(e.target.value)}
+          onKeyDown={revertOnEsc(start)}
+          onBlur={(e) => {
+            if (start.keepOnWindowBlur(e.target)) return;
+            const sec = parseClock(start.value);
+            if (sec == null || sec === Math.floor(t.startSec)) return start.reset();
+            void start.commit(fmtSec(sec), () => onSave({ startSec: sec }));
           }}
         />
         <span className="block px-[0.3rem] text-[0.68rem] text-si-dim md:hidden">
@@ -114,12 +100,15 @@ export function TopicRow({
           min={0}
           aria-label="Duration in seconds"
           readOnly={ro}
-          value={dur}
-          onChange={(e) => setDur(e.target.value)}
-          onBlur={() => {
-            const n = Number(dur);
+          value={dur.value}
+          onChange={(e) => dur.set(e.target.value)}
+          onKeyDown={revertOnEsc(dur)}
+          onBlur={(e) => {
+            if (dur.keepOnWindowBlur(e.target)) return;
+            const n = Number(dur.value);
             if (Number.isFinite(n) && n >= 0 && Math.round(n) !== Math.round(t.durationSec))
-              void save({ durationSec: n });
+              void dur.commit(String(Math.round(n)), () => onSave({ durationSec: n }));
+            else dur.reset();
           }}
         />
       </td>
@@ -131,28 +120,48 @@ export function TopicRow({
           max={3}
           aria-label="Level"
           readOnly={ro}
-          value={level}
-          onChange={(e) => setLevel(e.target.value)}
-          onBlur={() => {
-            const n = Number(level);
-            if ([1, 2, 3].includes(n) && n !== t.level) void save({ level: n });
-            else setLevel(String(t.level));
+          value={level.value}
+          onChange={(e) => level.set(e.target.value)}
+          onKeyDown={revertOnEsc(level)}
+          onBlur={(e) => {
+            if (level.keepOnWindowBlur(e.target)) return;
+            const n = Number(level.value);
+            if ([1, 2, 3].includes(n) && n !== t.level)
+              void level.commit(String(n), () => onSave({ level: n }));
+            else level.reset();
           }}
         />
       </td>
       <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top py-0.5')}>
-        <span className="flex items-center gap-1.5">
+        <span
+          className={cn('flex items-center gap-1.5', conflicts.length > 0 && 'max-md:flex-wrap')}
+        >
           <input
-            className={cn(FEED_INLINE_INPUT, 'font-semibold')}
+            className={cn(
+              FEED_INLINE_INPUT,
+              'font-semibold',
+              conflicts.length > 0 && 'max-md:basis-full',
+            )}
             aria-label="Title"
             readOnly={ro}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={() => {
-              if (title.trim() && title !== t.title) void save({ title: title.trim() });
-              else setTitle(t.title);
+            value={title.value}
+            onChange={(e) => title.set(e.target.value)}
+            onKeyDown={revertOnEsc(title)}
+            onBlur={(e) => {
+              if (title.keepOnWindowBlur(e.target)) return;
+              const v = title.value.trim();
+              if (v && v !== t.title) void title.commit(v, () => onSave({ title: v }));
+              else title.reset();
             }}
           />
+          {conflicts.length > 0 && (
+            <ChangedElsewhere
+              remote={conflicts.map((f) => f.server).join(' · ')}
+              onTakeTheirs={() => {
+                for (const f of conflicts) f.reset();
+              }}
+            />
+          )}
           {t.via === 'mcp' && (
             <Badge
               variant="outline"
@@ -169,10 +178,13 @@ export function TopicRow({
           placeholder={ro ? '' : 'Summary'}
           readOnly={ro}
           rows={1}
-          value={summary}
-          onChange={(e) => setSummary(e.target.value)}
-          onBlur={() => {
-            if (summary !== t.summary) void save({ summary });
+          value={summary.value}
+          onChange={(e) => summary.set(e.target.value)}
+          onKeyDown={revertOnEsc(summary)}
+          onBlur={(e) => {
+            if (summary.keepOnWindowBlur(e.target)) return;
+            if (summary.value === t.summary) return summary.reset();
+            void summary.commit(summary.value, (v) => onSave({ summary: v }));
           }}
         />
       </td>
