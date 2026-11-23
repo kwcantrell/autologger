@@ -41,7 +41,9 @@ function applyShowMessage(
           ? qk.compilations(showId)
           : m.entity === 'change'
             ? qk.showChangesAll(showId)
-            : qk.sessions(showId),
+            : m.entity === 'device'
+              ? qk.companion
+              : qk.sessions(showId),
     );
   }
 }
