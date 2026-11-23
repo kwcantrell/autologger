@@ -170,7 +170,7 @@ export function EventsTab({
             list.length === 0
               ? session.isRolling
                 ? 'No events yet. Press an event button (or 1–9) to log one.'
-                : '— No logged items yet. Roll timecode to log, or let an agent add events over MCP.'
+                : 'No logged items yet. Roll timecode to log, or let an agent add events over MCP.'
               : 'No events match the filter.'
           }
         >

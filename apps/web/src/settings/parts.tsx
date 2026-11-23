@@ -340,7 +340,7 @@ export function CopyField({
         readOnly
         aria-label={label}
         value={value}
-        className="min-w-0 flex-1 font-tc"
+        className="min-w-0 flex-1 font-tc text-[0.78rem]"
         onFocus={(e) => e.currentTarget.select()}
       />
       <Button type="button" variant="outline" onClick={() => void copyText(value, what)}>

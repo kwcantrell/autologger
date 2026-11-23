@@ -18,7 +18,7 @@ import { cn } from '@/shared/lib/utils';
 import { ROLE_LABEL, useActive } from './useActive';
 
 const CRUMB = 'min-w-0 shrink px-2 max-md:gap-0.5 max-md:px-1!';
-const TEAM_CRUMB = 'max-md:min-w-[5.75rem] max-md:shrink-[3]';
+const TEAM_CRUMB = 'max-md:min-w-[min(4.5rem,16vw)] max-md:shrink-[3]';
 const CRUMB_NAME = 'min-w-0 max-w-[22ch] truncate text-[15px] max-md:text-sm';
 const CRUMB_SEP = 'size-3.5 shrink-0 text-si-dim';
 
@@ -105,7 +105,7 @@ export function TopBar() {
             render={
               <Button
                 variant="ghost"
-                className={cn(CRUMB, 'max-md:min-w-[4.5rem]')}
+                className={cn(CRUMB, 'max-md:min-w-[min(4.5rem,13vw)]')}
                 title={active.show?.name || 'Switch show'}
               />
             }
@@ -138,12 +138,13 @@ export function TopBar() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <ChevronRightIcon aria-hidden="true" className={CRUMB_SEP} />
+        {/* Phones drop this separator: the pill must fit beside the crumbs, not under Search. */}
+        <ChevronRightIcon aria-hidden="true" className={cn(CRUMB_SEP, 'max-md:hidden')} />
 
         {status.sessionId ? (
           <Button
             variant="ghost"
-            className="shrink-0 px-1.5 md:min-w-0 md:shrink"
+            className="shrink-0 px-1.5 max-md:px-1 md:min-w-0 md:shrink"
             aria-label={`${label}, ${sessionTitle}. Return to session`}
             title={`Return to ${sessionTitle}`}
             onClick={() => {
@@ -158,7 +159,7 @@ export function TopBar() {
             </span>
           </Button>
         ) : (
-          <div className="flex shrink-0 items-center gap-2 px-1.5 max-md:pr-0 md:min-w-0 md:shrink">
+          <div className="flex shrink-0 items-center gap-2 px-1.5 max-md:px-1 md:min-w-0 md:shrink">
             {statusBadge}
             <span className="min-w-0 truncate text-xs text-muted-foreground max-md:sr-only">
               No session open

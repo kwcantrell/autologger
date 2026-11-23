@@ -714,19 +714,17 @@ function Footer() {
           </nav>
         ))}
       </div>
-      <div
-        className={cn(
-          WRAP,
-          'flex flex-wrap items-center justify-between gap-3 border-t border-si-line py-5',
-        )}
-      >
-        <p className="m-0 text-[0.8125rem] text-si-dim">AutoLogger is open source.</p>
-        <Link
-          href={SIGN_IN_HREF}
-          className={cn('text-[0.8125rem] text-si-muted no-underline hover:text-si-fg', FOCUS)}
-        >
-          Sign in
-        </Link>
+      <div className={WRAP}>
+        {/* The hairline sits inside the padding so it lines up with the content column. */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-si-line py-5">
+          <p className="m-0 text-[0.8125rem] text-si-dim">AutoLogger is open source.</p>
+          <Link
+            href={SIGN_IN_HREF}
+            className={cn('text-[0.8125rem] text-si-muted no-underline hover:text-si-fg', FOCUS)}
+          >
+            Sign in
+          </Link>
+        </div>
       </div>
     </footer>
   );
