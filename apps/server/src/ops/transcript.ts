@@ -832,7 +832,7 @@ defineOp({
     '`mode` (required): `"replace"` first deletes the existing transcript — with audioSegmentId only that recording\'s segments, otherwise every segment of the session — including manual corrections made since transcription; `"append"` adds the segments and keeps the existing ones (overlapping times are not checked). ' +
     'Refused (conflict) while a transcription of that recording (with audioSegmentId) or of the session (without) is queued or running, because it would add its own segments; wait with jobs_list first. A later media_retranscribe replaces only the segments attached to that recording, never session-level ones. ' +
     'Limits (bad_request, nothing written): content up to 5,000,000 characters and 10,000 segments, text up to 20,000 characters and speaker up to 80 per segment, endSec not before startSec; parse errors name the line (SRT/VTT) or item index (JSON). ' +
-    "Afterwards the session's transcriptStatus is done (session-level import, or every recording transcribed). Undo: every created and deleted segment is its own change-log entry, all sharing the returned groupId: changes_revertGroup(groupId) undoes the whole import (the recording's transcribed status stays). " +
+    "Afterwards the session's transcriptStatus is done (session-level import, or every recording transcribed). Undo: every created and deleted segment is its own change-log entry, all sharing the returned groupId: changes_revertGroup(groupId) undoes the whole import, including the recording's transcribed status (an audio_segment change in the same group). " +
     'Returns `{ mode, imported, removed, startSec, endSec, speakers, groupId, transcriptStatus }` (startSec/endSec: seconds from session start spanned by the imported segments).',
   kind: 'write',
   surfaces: ['web', 'mcp'],
@@ -840,6 +840,7 @@ defineOp({
     const { session } = await requireSession(ctx, sessionId, 'write');
     const { audioSegments, jobs } = schema;
     let offset = 0;
+    let prev: { ordinal: number; status: string; error: string | null } | undefined;
     if (audioSegmentId) {
       const [audio] = await ctx.db
         .select()
@@ -849,6 +850,7 @@ defineOp({
       if (audio.status === 'uploading')
         throw badRequest('This audio segment has not finished uploading.');
       offset = audio.startSec;
+      prev = { ordinal: audio.ordinal, status: audio.status, error: audio.error };
     }
     const [busy] = await ctx.db
       .select({ id: jobs.id, kind: jobs.kind })
@@ -913,6 +915,22 @@ defineOp({
 
     const base = { entity: 'transcript_segment' as const, showId: session.showId, sessionId };
     await ctx.recordMany([
+      // The recording's status is part of the import, so undoing it puts the status back (#294).
+      // Recorded even when unchanged, so a later import blocks undoing an earlier one out of
+      // order. First, so the group's newest change (its headline) is still a segment.
+      ...(prev
+        ? [
+            {
+              ...base,
+              entity: 'audio_segment' as const,
+              entityId: audioSegmentId!,
+              kind: 'update' as const,
+              summary: `Transcript import marked recording ${prev.ordinal + 1} transcribed`,
+              before: { status: prev.status, error: prev.error },
+              after: { status: 'transcribed', error: null },
+            },
+          ]
+        : []),
       ...removed.map((r) => ({
         ...base,
         entityId: r.id,

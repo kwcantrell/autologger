@@ -135,6 +135,7 @@ function ChangeFeed({ session }: { session: Session }) {
       if (c.entity === 'event') keys.push(qk.events(session.id));
       if (c.entity === 'topic') keys.push(qk.topics(session.id));
       if (c.entity === 'transcript_segment') keys.push(qk.transcript(session.id));
+      if (c.entity === 'audio_segment') keys.push(qk.media(session.id), qk.session(session.id));
       return keys;
     },
   });
@@ -146,6 +147,8 @@ function ChangeFeed({ session }: { session: Session }) {
       qk.events(session.id),
       qk.topics(session.id),
       qk.transcript(session.id),
+      qk.media(session.id),
+      qk.session(session.id),
     ],
   });
 

@@ -110,7 +110,8 @@ Every edit shows in the Agents tab and can be undone, a whole call at once.
 When you already have a transcript, an agent can load it instead of transcribing the audio. The
 `transcript_import` tool takes an SRT or WebVTT subtitle file, or JSON lines with start, end,
 speaker and text. It can replace the existing transcript or add to it, and the whole import can be
-undone in one step from the Agents tab.
+undone in one step from the Agents tab. An import onto one recording marks it transcribed; undoing
+the import puts the recording's status back too.
 
 | Limit         | Value                |
 | ------------- | -------------------- |
