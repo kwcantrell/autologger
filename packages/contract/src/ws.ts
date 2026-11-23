@@ -48,8 +48,10 @@ export type ShowServerMessage =
    * `compilation`: a compilation of the show was created, progressed, finished or was deleted.
    * `change`: the show's change log grew (a change in any of its sessions, or a show-level one;
    * at most one such hint every few seconds per socket).
+   * `device`: a Companion device of the show was added, revoked, retargeted, connected or
+   * disconnected (Settings → Companion devices: online state and last seen).
    */
-  | { type: 'invalidate'; entity: 'job' | 'session' | 'compilation' | 'change' }
+  | { type: 'invalidate'; entity: 'job' | 'session' | 'compilation' | 'change' | 'device' }
   | { type: 'closed'; reason: 'access_revoked' | 'deleted' }
   | { type: 'pong' };
 

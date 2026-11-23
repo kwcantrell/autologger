@@ -15,7 +15,7 @@ import {
 } from '@autologger/contract';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { WebSocket } from 'ws';
-import { type BusMessage, subscribe } from '../core/bus.ts';
+import { type BusMessage, publish, subscribe } from '../core/bus.ts';
 import { toRpcError } from '../core/errors.ts';
 import { sha256 } from '../core/ids.ts';
 import { type Actor, executeOp } from '../core/op.ts';
@@ -93,6 +93,13 @@ async function touch(deviceId: string) {
     .update(companionDevices)
     .set({ lastSeenAt: new Date() })
     .where(eq(companionDevices.id, deviceId));
+}
+
+/** A device connected or disconnected: stamp last seen, then let the show's sockets (Settings →
+ * Companion devices) refetch the online state. */
+async function announcePresence(deviceId: string, showId: string) {
+  await touch(deviceId).catch(() => {});
+  publish(`show:${showId}`, { type: 'show_changed', showId, entity: 'device' });
 }
 
 // ── socket ──────────────────────────────────────────────────
@@ -188,6 +195,7 @@ registerWs(
       offShow();
       sessionSub?.off();
       markOffline(deviceId, ws);
+      void announcePresence(deviceId, device.showId);
     });
 
     ws.on('message', async (raw) => {
@@ -246,7 +254,7 @@ registerWs(
       }
     });
 
-    void touch(deviceId).catch(() => {});
+    void announcePresence(deviceId, device.showId);
     await refresh();
   },
   async (req, url) => {

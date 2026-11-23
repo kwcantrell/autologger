@@ -355,7 +355,10 @@ export const useSearchPages = (input: OpInput<'search'> | null) => {
   });
 };
 export const useTokens = () => useOpQuery(qk.tokens, 'tokens.list', {});
-export const useCompanionDevices = () => useOpQuery(qk.companion, 'companion.list', {});
+/** Online state also arrives as a show-socket hint, but only for the active show: other shows'
+ * devices are refetched every 20 s while the page is visible. */
+export const useCompanionDevices = () =>
+  useOpQuery(qk.companion, 'companion.list', {}, { refetchInterval: 20_000 });
 export const useAdminUsers = (enabled: boolean) =>
   useOpQuery(qk.adminUsers, 'admin.users', {}, { enabled });
 
