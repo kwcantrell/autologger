@@ -1,5 +1,4 @@
 import type { Session, WikiListItem } from '@autologger/contract';
-import { useQueryClient } from '@tanstack/react-query';
 import { BookOpenIcon, FileTextIcon, WifiOffIcon } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'wouter';
@@ -13,7 +12,7 @@ import {
   useWikiCiting,
 } from '@/api/queries';
 import { errorMessage, rpc } from '@/api/rpc';
-import { applySessionMessage } from '@/api/session/cache';
+import { useSessionWrite } from '@/api/session/writes';
 import { isTypingTarget } from '@/lib/keys';
 import { type TransportTint, transportStatus } from '@/lib/store';
 import { fmtShort, useTransportClockStore } from '@/lib/timecode';
@@ -60,7 +59,7 @@ const TABS: { id: WorkspaceTab; label: string }[] = [
 
 export function Workspace({ session, live }: { session: Session; live: LiveStatus }) {
   const sessionId = session.id;
-  const qc = useQueryClient();
+  const write = useSessionWrite(sessionId);
   const caps = useCapabilities().data;
   const canWrite = session.access !== 'read';
   const categories = useCategories(session.showId);
@@ -128,15 +127,15 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
         if (action === 'stop' && recording) await recorder.stop();
         if (action === 'start' && player.isPlaying) void player.toggle();
         // Apply the result now; the socket's transport push carries the same state.
-        const session = await rpc(`transport.${action}`, { sessionId });
-        applySessionMessage(qc, sessionId, { type: 'transport', session });
+        // The result shows at once; the socket's transport push carries the same state.
+        await write(`transport.${action}`, { sessionId });
       } catch (e) {
         showToast(errorMessage(e), true);
       } finally {
         setBusy(false);
       }
     },
-    [sessionId, recording, recorder, player, qc],
+    [sessionId, recording, recorder, player, write],
   );
 
   // Recording ends when the transport stops (here or in another tab / Companion).

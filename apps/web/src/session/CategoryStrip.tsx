@@ -3,10 +3,9 @@
 // Toggle flips between its on/off labels (state derived from the last logged value).
 
 import type { Category, Session, SessionEvent } from '@autologger/contract';
-import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { errorMessage, rpc } from '@/api/rpc';
-import { applyEntity } from '@/api/session/cache';
+import { errorMessage } from '@/api/rpc';
+import { useSessionWrite } from '@/api/session/writes';
 import { isTypingTarget } from '@/lib/keys';
 import { settingsOpen } from '@/lib/store';
 import { showToast } from '@/shared/components/Toast';
@@ -50,24 +49,19 @@ export function CategoryStrip({
     return m;
   }, [events]);
 
-  const qc = useQueryClient();
+  // The result lands in the cache at once (toggles read their phase from it, and it shows while
+  // the socket reconnects); the socket echo is a no-op.
+  const write = useSessionWrite(session.id);
   const log = useCallback(
     async (cat: Category, fields: { value?: string | null; message?: string; atSec?: number }) => {
       try {
-        const ev = await rpc('events.create', {
-          sessionId: session.id,
-          categoryId: cat.id,
-          ...fields,
-        });
-        // Show our own write without waiting for the socket echo (same keyed upsert, so the echo
-        // is a no-op): toggles read their phase from it, and it shows while reconnecting.
-        applyEntity(qc, session.id, { entity: 'event', op: 'upsert', id: ev.id, data: ev });
+        await write('events.create', { sessionId: session.id, categoryId: cat.id, ...fields });
         showToast('Logged.');
       } catch (e) {
         showToast(`Couldn't log ${cat.name}. ${errorMessage(e)}`, true);
       }
     },
-    [session.id, qc],
+    [session.id, write],
   );
 
   const press = useCallback(

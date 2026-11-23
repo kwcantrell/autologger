@@ -10,8 +10,9 @@ import {
 } from '@autologger/contract';
 import { FileTextIcon, TriangleAlertIcon } from 'lucide-react';
 import { useId, useRef, useState } from 'react';
-import { qk, useOpMutation, useTranscript } from '@/api/queries';
+import { useTranscript } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
+import { useSessionMutation } from '@/api/session/writes';
 import { fmtSec } from '@/lib/timecode';
 import { Alert, AlertDescription, AlertTitle } from '@/shared/components/ui/alert';
 import { Button } from '@/shared/components/ui/button';
@@ -70,14 +71,7 @@ export function TranscriptImportDialog({
   const [target, setTarget] = useState<string>(SESSION);
   const [mode, setMode] = useState<Mode | null>(null);
   const [result, setResult] = useState<Result | null>(null);
-  const imp = useOpMutation('transcript.import', {
-    invalidate: () => [
-      qk.transcript(session.id),
-      qk.media(session.id),
-      qk.session(session.id),
-      qk.changesAll(session.id),
-    ],
-  });
+  const imp = useSessionMutation(session.id, 'transcript.import');
 
   const recordings = (segments ?? []).filter((s) => s.status !== 'uploading');
   const audioSegmentId = target === SESSION ? undefined : target;

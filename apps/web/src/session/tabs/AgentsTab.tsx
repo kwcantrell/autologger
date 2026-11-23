@@ -1,17 +1,10 @@
 // Agents tab: how to connect an MCP agent, and the session's change log with undo.
 
-import type { Change, ChangeEntity, Session } from '@autologger/contract';
+import type { Change, Session } from '@autologger/contract';
 import { useEffect, useMemo, useState } from 'react';
-import {
-  qk,
-  useCapabilities,
-  useChanges,
-  useEvents,
-  useOpMutation,
-  useTopics,
-} from '@/api/queries';
+import { useCapabilities, useChanges, useEvents, useTopics } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
-import { keysFor } from '@/api/session/entities';
+import { useSessionMutation } from '@/api/session/writes';
 import { settingsOpen } from '@/lib/store';
 import { eventSec } from '@/lib/timecode';
 import { useWorkspace } from '@/session/context';
@@ -120,16 +113,6 @@ function ConnectCard() {
   );
 }
 
-/** Content a grouped undo may touch (session entries plus what derives from them). */
-const REVERTIBLE: ChangeEntity[] = [
-  'dashboard',
-  'event',
-  'topic',
-  'transcript_segment',
-  'audio_segment',
-  'session',
-];
-
 function ChangeFeed({ session }: { session: Session }) {
   const { canWrite, seek } = useWorkspace();
   const [filter, setFilter] = useState<Filter>('all');
@@ -139,16 +122,9 @@ function ChangeFeed({ session }: { session: Session }) {
   const now = useNow();
   const { confirm, confirmElement } = useConfirm();
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
-  const revert = useOpMutation('changes.revert', {
-    invalidate: (c) => [qk.changesAll(session.id), ...keysFor(c.entity, session.id)],
-  });
+  const revert = useSessionMutation(session.id, 'changes.revert');
   // A folded row stands for one op call; its changes may touch several kinds of content.
-  const revertGroup = useOpMutation('changes.revertGroup', {
-    invalidate: () => [
-      qk.changesAll(session.id),
-      ...REVERTIBLE.flatMap((e) => keysFor(e, session.id)),
-    ],
-  });
+  const revertGroup = useSessionMutation(session.id, 'changes.revertGroup');
 
   const rows = useMemo(() => {
     const all = changes.data ?? [];

@@ -12,8 +12,9 @@ import {
   TriangleAlertIcon,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { qk, useJobs, useOpMutation } from '@/api/queries';
+import { useJobs } from '@/api/queries';
 import { errorMessage, type RpcError } from '@/api/rpc';
+import { useSessionMutation } from '@/api/session/writes';
 import { isYoutubeAuthError, YoutubeAuthHelp } from '@/app/YoutubeAuthHelp';
 import { useStore } from '@/lib/store';
 import { fmtSec } from '@/lib/timecode';
@@ -210,7 +211,7 @@ export function AudioMenu({
 
 function YoutubeDialog({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
   const [url, setUrl] = useState('');
-  const imp = useOpMutation('media.importYoutube', { invalidate: () => [qk.jobs(sessionId)] });
+  const imp = useSessionMutation(sessionId, 'media.importYoutube');
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()} title="Import from YouTube">
       <form
@@ -284,10 +285,9 @@ function SegmentsDialog({
   onClose: () => void;
 }) {
   const { confirm, confirmElement } = useConfirm();
-  const del = useOpMutation('media.delete', { invalidate: () => [qk.media(session.id)] });
-  const retr = useOpMutation('media.retranscribe', { invalidate: () => [qk.jobs(session.id)] });
-  const rewave = useOpMutation('media.rewaveform', {
-    invalidate: () => [qk.jobs(session.id)],
+  const del = useSessionMutation(session.id, 'media.delete');
+  const retr = useSessionMutation(session.id, 'media.retranscribe');
+  const rewave = useSessionMutation(session.id, 'media.rewaveform', {
     onSuccess: () => showToast('Waveform queued.'),
   });
   return (

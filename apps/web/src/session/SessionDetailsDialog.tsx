@@ -5,8 +5,9 @@
 import type { Session } from '@autologger/contract';
 import { InfoIcon, TagsIcon } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
-import { qk, useCapabilities, useJobs, useMedia, useOpMutation } from '@/api/queries';
+import { useCapabilities, useJobs, useMedia } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
+import { useSessionMutation } from '@/api/session/writes';
 import { FRAME_RATES, parseTimecode } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
@@ -45,9 +46,7 @@ export function SessionDetailsDialog({
   const canWrite = s.access !== 'read';
   const [termsOpen, setTermsOpen] = useState(false);
   const { confirm, confirmElement } = useConfirm();
-  const update = useOpMutation('sessions.update', {
-    invalidate: () => [qk.session(s.id), qk.sessionsAll],
-  });
+  const update = useSessionMutation(s.id, 'sessions.update');
 
   const rates: number[] = FRAME_RATES.includes(base.frameRate as (typeof FRAME_RATES)[number])
     ? [...FRAME_RATES]
