@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/shared/components/ui/card';
 import {
   Collapsible,
   CollapsibleContent,
+  CollapsibleSummary,
   CollapsibleTrigger,
 } from '@/shared/components/ui/collapsible';
 import {
@@ -73,6 +74,20 @@ describe('base-nova primitives', () => {
     );
     expect(open).toMatch(/aria-expanded="true"/);
     expect(open).toContain('clip list');
+  });
+
+  it('collapsible summary: a button with the native disclosure marker, panel findable', () => {
+    const html = renderToStaticMarkup(
+      <Collapsible>
+        <CollapsibleSummary className="text-si-muted">Clips</CollapsibleSummary>
+        <CollapsibleContent hiddenUntilFound>clip list</CollapsibleContent>
+      </Collapsible>,
+    );
+    expect(html).toMatch(/<button[^>]*aria-expanded="false"/);
+    expect(html).toContain('[list-style-type:disclosure-closed]');
+    expect(html).toContain('group-data-[panel-open]/summary:[list-style-type:disclosure-open]');
+    // Kept in the page while closed (the browser sets `until-found` once mounted).
+    expect(html).toMatch(/<div[^>]*hidden=""[^>]*>clip list</);
   });
 
   it('progress: a progressbar with an accent fill on the hairline track', () => {

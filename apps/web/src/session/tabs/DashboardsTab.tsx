@@ -21,6 +21,7 @@ import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
+import { Tabs, TabsList, TabsTrigger } from '@/shared/components/ui/tabs';
 import { cn } from '@/shared/lib/utils';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { useTextPrompt } from '@/shared/ui/PromptDialog';
@@ -168,6 +169,13 @@ export function DashboardsTab({ session }: { session: Session }) {
   );
 }
 
+// One line tab per dashboard (Tabs variant="line": arrow keys move between them). Dashboard
+// titles are agent-written data, so the tabs keep the UI face in sentence case at 0.85rem rather
+// than the uppercase tab type, and truncate at 16rem. `shrink-0`: the list sits in a
+// height-capped scrolling column, where a scroll container would otherwise shrink to its border.
+const DASHBOARD_TAB =
+  'flex max-w-[16rem] items-center gap-1.5 group-data-[variant=line]/tabs-list:py-2 group-data-[variant=line]/tabs-list:font-ui group-data-[variant=line]/tabs-list:text-[0.85rem] group-data-[variant=line]/tabs-list:normal-case group-data-[variant=line]/tabs-list:tracking-normal';
+
 function DashboardTabs({
   dashboards,
   currentId,
@@ -178,37 +186,24 @@ function DashboardTabs({
   onSelect: (id: string) => void;
 }) {
   return (
-    <div
-      role="tablist"
-      aria-label="Dashboards"
-      className="flex min-w-0 gap-1 overflow-x-auto border-b border-si-line"
-    >
-      {dashboards.map((d) => {
-        const active = d.id === currentId;
-        return (
-          <button
-            key={d.id}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            onClick={() => onSelect(d.id)}
-            className={cn(
-              '-mb-px flex max-w-[16rem] shrink-0 cursor-pointer items-center gap-1.5 border-0 border-b-2 border-solid bg-transparent px-3 py-2 text-[0.85rem] font-semibold',
-              active
-                ? 'border-(--si-accent) text-si-fg'
-                : 'border-transparent text-si-muted hover:text-si-fg',
-            )}
-          >
+    <Tabs value={currentId} onValueChange={(v) => onSelect(String(v))} className="shrink-0">
+      <TabsList
+        variant="line"
+        aria-label="Dashboards"
+        className="flex-none gap-1 overflow-x-auto border-si-line"
+      >
+        {dashboards.map((d) => (
+          <TabsTrigger key={d.id} value={d.id} className={DASHBOARD_TAB}>
             <span className="truncate">{d.title}</span>
             {d.via === 'mcp' && (
-              <Badge variant="outline" className="px-1 py-0 text-[0.6rem]">
+              <Badge variant="outline" size="sm">
                 agent
               </Badge>
             )}
-          </button>
-        );
-      })}
-    </div>
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }
 
