@@ -9,7 +9,8 @@ description: Connect Claude Code, claude.ai or any MCP client to AutoLogger, wit
 
 AutoLogger never calls a model itself. Claude Code, claude.ai or any MCP client connects as you,
 with your access. Its changes apply right away, and each one carries the name of the client that
-made it, so you can see and undo it from the session's Agents tab.
+made it, so you can see and undo it from the session's Agents tab (wiki and event-button changes
+from the show's Changes page).
 
 ## What an agent can do
 

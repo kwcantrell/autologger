@@ -33,7 +33,8 @@ already added the server by hand, see [Connecting agents](/docs/agents/connectin
 
 Ask in plain words, such as "chapter yesterday's episode", and Claude picks the matching skill. Or
 run one by name, such as `/autologger:session-topics`. Everything a skill writes is attributed to
-you plus the client name, and can be undone from the session's Agents tab.
+you plus the client name, and can be undone from the session's Agents tab. Wiki pages and event
+buttons belong to the show, not a session: undo those from the show's **Changes** page.
 
 ## autologger
 

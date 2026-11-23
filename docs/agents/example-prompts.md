@@ -12,7 +12,8 @@ names the [plugin skill](/docs/agents/plugins) that picks it up, or the MCP tool
 the plugins would use. Name the show or session the way you would to a colleague; the agent looks
 up the ids.
 
-Everything an agent writes shows in the session's Agents tab and can be undone; see
+Everything an agent writes shows in the session's Agents tab (wiki and event-button changes on the
+show's Changes page) and can be undone; see
 [Changes and undo](/docs/guide/changes-and-undo).
 
 ## Setup
