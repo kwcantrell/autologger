@@ -39,8 +39,9 @@ the session start), a title, a text saying what happens, and the **entities** it
   where it sits on the page, and its entities are the citing page plus every page `[[linked]]` in
   the same block. So "- [[Carly]] reads a letter about a moose [EP_01 00:10:00](…)" on the
   _Pig Talk_ page is a moment about Pig Talk and Carly.
-  A block with several citations gives each its own sentence and that sentence's links. A table
-  row is read cell by cell: a citation is tagged with the links in its own cell and in the cells
+  A block with several citations describes each by its own sentence. A list item is one story,
+  so each of its citations is tagged with every page the item links; in a paragraph only the
+  citing sentence's links count. A table row is read cell by cell: a citation is tagged with the links in its own cell and in the cells
   before it (the row's subject), so an episode-guide row is not a moment about every segment
   listed in its last column.
 - **Topic moments** are chapters (title — summary, start, end).

@@ -53,6 +53,12 @@ export interface WikiSection {
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 const HEADING = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
 const LIST_ITEM = /^\s*(?:[-*+]|\d{1,3}[.)])\s+/;
+
+/** What a block is: a list item, a table row or a paragraph. */
+export function blockKind(markdown: string): 'list' | 'row' | 'paragraph' {
+  if (LIST_ITEM.test(markdown)) return 'list';
+  return markdown.trimStart().startsWith('|') ? 'row' : 'paragraph';
+}
 const TABLE_ROW = /^\s*\|/;
 const TABLE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$/;
 

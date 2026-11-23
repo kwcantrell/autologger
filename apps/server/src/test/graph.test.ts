@@ -294,6 +294,31 @@ describe('moments.search', () => {
     expect(res.total).toBe(3);
   });
 
+  it('tags a list item citation with every page the item links, a paragraph only its sentence', async () => {
+    const { owner, show, ep2 } = await knowledgeShow();
+    await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'topic',
+      title: 'Greetings',
+      bodyMd: [
+        `- [[Carly]] picks her own nickname. The [[Pig Talk]] email greets the hounds [EP_02 00:30:00](/sessions/${ep2.id}?t=1800&to=1830) and Joe moves on [EP_02 00:31:00](/sessions/${ep2.id}?t=1860&to=1870).`,
+        '',
+        `[[Carly]] laughs. Joe reads a [[Pig Talk]] letter [EP_02 00:40:00](/sessions/${ep2.id}?t=2400&to=2410). Then an ad [EP_02 00:41:00](/sessions/${ep2.id}?t=2460&to=2470).`,
+      ].join('\n'),
+    });
+    const res = await call(owner, 'moments.search', {
+      showId: show.id,
+      entities: ['Carly', 'Pig Talk'],
+      kinds: ['citation'],
+    });
+    // Both list-item citations; in the paragraph neither (Carly is a sentence away from each).
+    expect(
+      res.moments.filter((m) => m.source?.pageTitle === 'Greetings').map((m) => m.startSec),
+    ).toEqual([1800, 1860]);
+    const item = res.moments.find((m) => m.startSec === 1860)!;
+    expect(item.text).toContain('Joe moves on');
+  });
+
   it('tags guide rows by their own cell, skips Note events, orders by episode number', async () => {
     const { owner, show, ep1, ep2 } = await knowledgeShow();
     // Dates say EP_02 aired first; the episode numbers say otherwise and win.
