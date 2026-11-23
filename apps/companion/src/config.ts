@@ -17,15 +17,19 @@ export function getConfigFields(): SomeCompanionConfigField[] {
       label: 'Setup',
       width: 12,
       value:
-        'In AutoLogger open Settings → Companion devices, create a device for your show and paste its URL and token here.',
+        'In AutoLogger open Settings → Companion devices, create a device for your show and paste its token here. ' +
+        'The server URL is the address you open AutoLogger at in your browser, e.g. https://autologger.example.com ' +
+        '(for a local dev stack, http://localhost:5173).',
     },
     {
       type: 'textinput',
       id: 'url',
       label: 'AutoLogger server URL',
-      tooltip: 'The address you open AutoLogger at, e.g. https://autologger.example.com',
+      tooltip:
+        'The address you open AutoLogger at, e.g. https://autologger.example.com or http://localhost:5173',
       width: 8,
-      default: 'http://127.0.0.1:8787',
+      default: '',
+      required: true,
       regex: Regex.SOMETHING,
     },
     {

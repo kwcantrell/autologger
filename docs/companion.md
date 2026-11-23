@@ -9,11 +9,20 @@ timecode, take and the last event on keys.
 1. **Create a device.** In AutoLogger open **Settings → Companion devices**, choose the show and
    create a device (needs owner/admin on the show's team). Copy the token — it starts with `ald_`
    and is shown once. Only its SHA-256 hash is stored.
-2. **Install the module.** `npm run build -w companion-module-autologger` (or `npm run package`
-   for a `.tgz`), then load it as a developer module in Companion, or install the package.
-3. **Configure the connection** in Companion: _Server URL_ = the address you open AutoLogger at
-   (e.g. `https://autologger.example.com`), _Device token_ = the `ald_…` token.
+2. **Install the module.** Build the package with `npm run package -w companion-module-autologger`
+   (writes `apps/companion/autologger-<version>.tgz`). In Companion 5 open **Modules → Import
+   module package** and choose the `.tgz`; it is then listed as _AutoLogger: Live Session
+   Logging_. A newer version imports next to the old one: pick it per connection under _Module
+   Version_. (Alternatively `npm run build -w companion-module-autologger` and load
+   `apps/companion` as a developer module.)
+3. **Add a connection** (Connections → search "AutoLogger") and set _AutoLogger server URL_ = the
+   address you open AutoLogger at in your browser (e.g. `https://autologger.example.com`), _Device
+   token_ = the `ald_…` token. The module connects its WebSocket to `<url>/ws/companion`. For a
+   local dev stack, the Vite dev URL `http://localhost:5173` works: Vite proxies `/ws` to the API.
 4. Add presets from the **AutoLogger** preset list (transport, slots 1–9, options, status).
+
+A revoked or wrong token shows the connection as **Error** ("Device token revoked …"): the module
+stops retrying until you paste a new token. A missing URL or token shows **Bad configuration**.
 
 The device acts as the user who created it, limited to its one show and never above write
 access. If that user is disabled or loses access to the show, the device stops working.
@@ -64,5 +73,5 @@ updates the device's `last_seen_at` on connect and every few minutes.
 
 - Unit tests: `npm test -w companion-module-autologger` (state → variables, timecode ticking).
 - End-to-end against a dev server with `DEV_LOGIN=1`:
-  `node apps/companion/scripts/smoke.mjs http://localhost:8787` (raw protocol) and, after a build,
-  `node apps/companion/scripts/connection-check.mjs http://localhost:8787` (the module's client).
+  `node apps/companion/scripts/smoke.mjs http://localhost:5173` (raw protocol) and, after a build,
+  `node apps/companion/scripts/connection-check.mjs http://localhost:5173` (the module's client).

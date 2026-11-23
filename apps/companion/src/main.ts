@@ -101,9 +101,11 @@ class AutologgerInstance extends InstanceBase<ModuleConfig, ModuleSecrets> {
         this.updateStatus(InstanceStatus.Connecting);
         break;
       case 'bad_token':
+        // An error, not Companion's (yellow) authentication warning: a rejected or revoked token
+        // never recovers, and the module stops retrying until the config gets a new one.
         this.applyState(null);
         this.updateStatus(
-          InstanceStatus.AuthenticationFailure,
+          InstanceStatus.UnknownError,
           `${message ?? 'Device token rejected'}: create a new device in AutoLogger Settings → Companion devices`,
         );
         break;

@@ -6,8 +6,10 @@ AutoLogger server; no browser needs to be open.
 ## Setup
 
 1. In AutoLogger open **Settings → Companion devices**, pick the show and create a device.
-2. Copy the **server URL** and the **device token** (starts with `ald_`, shown once).
-3. Paste both into this connection's config. The token is kept in Companion's secrets store.
+2. Copy the **device token** (starts with `ald_`, shown once).
+3. In this connection's config, set the **server URL** to the address you open AutoLogger at in
+   your browser (e.g. `https://autologger.example.com`; for a local dev stack
+   `http://localhost:5173`) and paste the token. The token is kept in Companion's secrets store.
 
 The device acts as the AutoLogger user who created it, limited to that one show.
 
@@ -46,6 +48,7 @@ current show's buttons.
 
 ## Status
 
-- **Authentication failure** — the token is wrong or the device was revoked: create a new device
-  and paste its token. The module does not retry until the config changes.
+- **Error: Device token revoked / rejected** — the device was revoked or the token is wrong:
+  create a new device and paste its token. The module does not retry until the config changes.
+- **Bad configuration** — the server URL or the device token is missing.
 - **Connection failure** — the server is unreachable; the module reconnects with backoff (1–30 s).
