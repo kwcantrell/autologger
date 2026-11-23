@@ -126,6 +126,48 @@ describe('transcript reading', () => {
     }
   });
 
+  it('compact with stampEverySec: 0 stamps every segment start and stays well under lines', async () => {
+    const { owner, session } = await studio();
+    const [a, b, c] = await seed(session.id, [
+      { startSec: 0, endSec: 2, speaker: 'Dana', text: 'one' },
+      { startSec: 2.5, endSec: 4, speaker: 'Dana', text: 'two' },
+      { startSec: 5, endSec: 6, speaker: 'Tom', text: 'three' },
+    ]);
+    const text = (args: Record<string, unknown>) =>
+      call(owner, 'transcript.text', { sessionId: session.id, format: 'compact', ...args }).then(
+        (r) => r.text,
+      );
+    expect(await text({})).toBe('@0.0 Dana: one two\n@5.0 Tom: three');
+    expect(await text({ stampEverySec: 0 })).toBe('@0.0 Dana: one [@2.5] two\n@5.0 Tom: three');
+    expect(await text({ stampEverySec: 0, ids: true })).toBe(
+      `@0.0 Dana: {${a}} one {${b}@2.5} two\n@5.0 Tom: {${c}} three`,
+    );
+    await failsWith(
+      call(owner, 'transcript.text', { sessionId: session.id, stampEverySec: -1 }),
+      'bad_request',
+    );
+
+    // Size on a synthetic hour: the stamped compact text must stay far below the lines format.
+    const { owner: hourOwner, session: hour } = await studio();
+    const segs = syntheticHour();
+    await seed(hour.id, segs);
+    const chars = async (args: Record<string, unknown>) =>
+      (await call(hourOwner, 'transcript.text', { sessionId: hour.id, ...args })).chars;
+    const lines = await chars({});
+    const compact = await chars({ format: 'compact' });
+    const stamped = await chars({ format: 'compact', stampEverySec: 0 });
+    const stampedText = await call(hourOwner, 'transcript.text', {
+      sessionId: hour.id,
+      format: 'compact',
+      stampEverySec: 0,
+    });
+    console.info(
+      `transcript.text on ${segs.length} segments: lines ${lines}, compact ${compact}, compact stampEverySec 0 ${stamped} chars`,
+    );
+    expect(stampedText.text.match(/@\d+\.\d/g)).toHaveLength(segs.length);
+    expect(stamped).toBeLessThan(lines * 0.85);
+  });
+
   it('transcript.find returns total, per-pattern counts and ids only', async () => {
     const { owner, session } = await studio();
     const [a, b, c] = await seed(session.id, [
