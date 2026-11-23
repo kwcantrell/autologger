@@ -91,6 +91,27 @@ export const teamInvites = pgTable(
 
 // ── shows ───────────────────────────────────────────────────
 
+/**
+ * A team's YouTube sign-in for yt-dlp: a Netscape cookies.txt (youtube.com / google.com lines
+ * only), used by every yt-dlp run for the team's shows (import probe, playlist listing, import
+ * and compile jobs). One copy per team, because every copy of a Google session forks it: yt-dlp
+ * rotates the cookies on each run and the refreshed file is written back here.
+ */
+export const teamYoutubeCookies = pgTable('team_youtube_cookies', {
+  teamId: text('team_id')
+    .primaryKey()
+    .references(() => teams.id, { onDelete: 'cascade' }),
+  cookies: text('cookies').notNull(),
+  /** Earliest expiry of the sign-in cookies (SID family), when they have one. */
+  expiresAt: ts('expires_at'),
+  updatedBy: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+  /** Last yt-dlp run with these cookies that YouTube accepted / refused for a sign-in. */
+  lastOkAt: ts('last_ok_at'),
+  lastFailedAt: ts('last_failed_at'),
+  lastError: text('last_error'),
+});
+
 export const shows = pgTable(
   'shows',
   {

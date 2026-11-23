@@ -91,6 +91,27 @@ export interface Show {
   lastSessionAt: string | null;
 }
 
+/**
+ * A team's YouTube sign-in for the server's yt-dlp (media.youtubeAccess), used by all its shows.
+ * Never includes the cookies themselves.
+ */
+export interface YoutubeAccess {
+  teamId: string;
+  teamName: string;
+  /** Cookies are stored for this team. */
+  configured: boolean;
+  /** The server also has instance-wide cookies (YTDLP_COOKIES_FILE), used when the team has none. */
+  serverCookies: boolean;
+  updatedAt: string | null;
+  updatedBy: { id: string; name: string } | null;
+  /** Earliest expiry of the stored sign-in cookies, when they have one. */
+  expiresAt: string | null;
+  /** Last time YouTube accepted / refused the cookies (refused = bot check or sign-in error). */
+  lastOkAt: string | null;
+  lastFailedAt: string | null;
+  lastError: string | null;
+}
+
 export type MediaSource = 'recorded' | 'file' | 'youtube';
 
 export interface Session {

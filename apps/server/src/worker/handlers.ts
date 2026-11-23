@@ -45,6 +45,7 @@ import {
 import { lockSession, nextSegmentSlot, STORED } from '../media/segments.ts';
 import { computePeaks, encodePeaks, ffmpegAvailable } from '../media/waveform.ts';
 import { downloadAudio, downloadSection } from '../media/youtube.ts';
+import { youtubeCookiesForShow } from '../media/youtubeCookies.ts';
 import { toAudioSegment } from '../ops/map.ts';
 import { setProgress } from './queue.ts';
 
@@ -202,13 +203,14 @@ const youtubeImport: Handler = {
         id: sessions.id,
         episodeDate: sessions.episodeDate,
         createdAt: sessions.createdAt,
+        showId: sessions.showId,
       })
       .from(sessions)
       .where(eq(sessions.id, sessionId));
     if (!session) return 'Session was deleted';
 
     await setProgress(job, 'Downloading from YouTube');
-    const dl = await downloadAudio(env.ytDlpPath, url);
+    const dl = await downloadAudio(env.ytDlpPath, url, await youtubeCookiesForShow(session.showId));
     try {
       const segmentId = newId('aud');
       const objectKey = objectKeyFor(sessionId, segmentId, dl.ext);
@@ -249,13 +251,14 @@ const youtubeImport: Handler = {
             updatedAt: sql`now()`,
           })
           .where(eq(sessions.id, sessionId));
-        const transcribeJob = transcriptionConfigured
-          ? await enqueueJob(
-              tx,
-              { kind: 'transcribe', sessionId, actorId: job.actorId, payload: { segmentId } },
-              { after: job },
-            )
-          : null;
+        const transcribeJob =
+          transcriptionConfigured && (job.payload as { transcribe?: boolean }).transcribe !== false
+            ? await enqueueJob(
+                tx,
+                { kind: 'transcribe', sessionId, actorId: job.actorId, payload: { segmentId } },
+                { after: job },
+              )
+            : null;
         const waveformJob = await enqueueJob(
           tx,
           { kind: 'waveform', sessionId, actorId: job.actorId, payload: { segmentId } },
@@ -423,6 +426,7 @@ const compile: Handler = {
           src.toSec,
           dir,
           `raw-${i}`,
+          await youtubeCookiesForShow(found.showId),
         );
         await step(`clip ${i + 1}/${n}: encoding`);
         const part = join(dir, `part-${String(i).padStart(3, '0')}.mp4`);

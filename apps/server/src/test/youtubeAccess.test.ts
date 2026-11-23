@@ -7,9 +7,10 @@ import { db, schema } from '../db/client.ts';
 import { env } from '../env.ts';
 import { PermanentError } from '../media/deepgram.ts';
 import { YoutubeAuthError, youtubeAuthError } from '../media/youtube.ts';
+import { parseYoutubeCookies } from '../media/youtubeCookies.ts';
 import { handlers } from '../worker/handlers.ts';
 import { failJob } from '../worker/queue.ts';
-import { call, failsWith, resetDb, setupDb, studio } from './harness.ts';
+import { call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
 
 // YouTube's bot check (#241). yt-dlp is a shell script: it records its arguments and the cookies
 // it was given, lists a canned playlist, and otherwise fails like a blocked server (or prints a
@@ -42,7 +43,7 @@ beforeAll(async () => {
 printf '%s\\n' "$@" > '${dir}/args.txt'
 prev=''
 for a in "$@"; do
-  if [ "$prev" = --cookies ]; then cp "$a" '${dir}/seen-cookies.txt'; echo '# saved' >> "$a"; fi
+  if [ "$prev" = --cookies ]; then cp "$a" '${dir}/seen-cookies.txt'; printf '.youtube.com\tTRUE\t/\tTRUE\t0\tROTATED\t%s\n' "$$" >> "$a"; fi
   if [ "$a" = --flat-playlist ]; then cat '${dir}/playlist.json'; exit 0; fi
   prev="$a"
 done
@@ -64,16 +65,16 @@ beforeEach(async () => {
 
 describe('YouTube sign-in errors', () => {
   it('classifies the bot check and restricted videos as permanent', () => {
-    const bot = youtubeAuthError(BOT, false);
+    const bot = youtubeAuthError(BOT, null);
     expect(bot).toBeInstanceOf(PermanentError);
     expect(bot).toMatchObject({ reason: 'bot_check' });
     expect(bot!.message).toMatch(/^YouTube is blocking this server's downloads \(bot check\)/);
     expect(bot!.message).toContain('YTDLP_COOKIES_FILE');
-    expect(youtubeAuthError(BOT, true)!.message).toContain('probably expired');
+    expect(youtubeAuthError(BOT, 'server')!.message).toContain('probably expired');
     expect(
-      youtubeAuthError('ERROR: [youtube] x: Sign in to confirm your age. Use --cookies', false),
+      youtubeAuthError('ERROR: [youtube] x: Sign in to confirm your age. Use --cookies', null),
     ).toMatchObject({ reason: 'restricted' });
-    expect(youtubeAuthError('ERROR: [youtube] x: Video unavailable', false)).toBeNull();
+    expect(youtubeAuthError('ERROR: [youtube] x: Video unavailable', null)).toBeNull();
   });
 
   it('fails the import job once, without retries', async () => {
@@ -150,5 +151,95 @@ describe('import probe', () => {
     );
     expect(await call(owner, 'sessions.list', { showId: show.id })).toHaveLength(1);
     expect(await call(owner, 'jobs.list', { showId: show.id })).toHaveLength(0);
+  });
+});
+
+const SIGNED_IN = [
+  '# Netscape HTTP Cookie File',
+  '.youtube.com\tTRUE\t/\tTRUE\t4102444800\tLOGIN_INFO\tlogin',
+  '#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t4102444800\t__Secure-3PSID\tsid',
+  '.google.com\tTRUE\t/\tTRUE\t4102444800\tSID\tgsid',
+  '.example.com\tTRUE\t/\tFALSE\t0\tother\tsecret',
+].join('\n');
+
+describe('team YouTube sign-in', () => {
+  it('keeps only signed-in YouTube and Google cookies, from cookies.txt or JSON', () => {
+    const p = parseYoutubeCookies(SIGNED_IN);
+    expect(p.count).toBe(3);
+    expect(p.text).not.toContain('example.com');
+    expect(p.text).toContain('#HttpOnly_.youtube.com\tTRUE');
+    expect(p.expiresAt?.toISOString()).toBe('2100-01-01T00:00:00.000Z');
+    const json = parseYoutubeCookies(
+      JSON.stringify([
+        { domain: '.youtube.com', name: 'SID', value: 'x', path: '/', secure: true },
+      ]),
+    );
+    expect(json.text).toContain('.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tx');
+    expect(() =>
+      parseYoutubeCookies('.youtube.com\tTRUE\t/\tTRUE\t0\tVISITOR_INFO1_LIVE\tv'),
+    ).toThrow(/not from a signed-in/);
+    expect(() => parseYoutubeCookies('hello')).toThrow(/not a cookie export/);
+  });
+
+  it("stores, tests, uses and refreshes the team's cookies for all its shows", async () => {
+    const { owner, team, show } = await studio();
+    // A second show of the team uses the sign-in set through the first one.
+    const other = await call(owner, 'shows.create', { teamId: team.id, name: 'Other' });
+    const session = await call(owner, 'sessions.create', { showId: other.id });
+    const stranger = await makeUser('stranger@example.com');
+    await failsWith(
+      call(stranger, 'media.setYoutubeCookies', { showId: show.id, cookies: SIGNED_IN }),
+      'not_found',
+    );
+    await failsWith(
+      call(owner, 'media.setYoutubeCookies', { showId: show.id, cookies: 'nope' }),
+      'bad_request',
+    );
+
+    // The check reads a public video with them; YouTube refuses here, they are saved anyway.
+    const set = await call(owner, 'media.setYoutubeCookies', {
+      showId: show.id,
+      cookies: SIGNED_IN,
+    });
+    expect(set).toMatchObject({
+      configured: true,
+      check: { ok: false },
+      lastError: expect.any(String),
+    });
+    expect(JSON.stringify(set)).not.toContain('gsid');
+
+    // Imports of the show run yt-dlp with them, and the error names the show setting.
+    const err = await call(owner, 'media.importYoutube', {
+      sessionId: session.id,
+      url: 'https://youtu.be/aaaaaaaaaaa',
+    }).catch((e) => e);
+    expect(err.message).toMatch(/even with the team’s YouTube sign-in/);
+    expect(await readFile(join(dir, 'seen-cookies.txt'), 'utf8')).toContain('\tLOGIN_INFO\tlogin');
+
+    // A successful run records it and stores yt-dlp's rotated cookies.
+    await setMode('ok');
+    const job = await call(owner, 'media.importYoutube', {
+      sessionId: session.id,
+      url: 'https://youtu.be/aaaaaaaaaaa',
+      transcribe: false,
+    });
+    const [jobRow] = await db.select().from(schema.jobs).where(eq(schema.jobs.id, job.id));
+    expect(jobRow!.payload).toMatchObject({ transcribe: false });
+    const [row] = await db
+      .select()
+      .from(schema.teamYoutubeCookies)
+      .where(eq(schema.teamYoutubeCookies.teamId, team.id));
+    expect(row!.cookies).toContain('\tROTATED\t');
+    expect(row!.lastOkAt).not.toBeNull();
+    expect(await call(owner, 'media.youtubeAccess', { showId: show.id })).toMatchObject({
+      teamId: team.id,
+      configured: true,
+      lastError: null,
+    });
+
+    await call(owner, 'media.setYoutubeCookies', { teamId: team.id, cookies: null });
+    expect(await call(owner, 'media.youtubeAccess', { teamId: team.id })).toMatchObject({
+      configured: false,
+    });
   });
 });

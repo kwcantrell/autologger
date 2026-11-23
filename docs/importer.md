@@ -4,7 +4,7 @@ YouTube often bot-checks downloads from datacenter IPs (see _YouTube bot check_ 
 [media.md](media.md)), and the server can never read **private** videos and playlists. The local
 import helper runs yt-dlp on the user's own computer — their home IP, their browser's YouTube
 cookies (`--cookies-from-browser`) — and sends only the audio (or a finished compilation MP4) to
-AutoLogger. No cookies ever reach the server.
+AutoLogger. No cookies reach the server, except with `youtube-login` (below).
 
 ### Download
 
@@ -51,3 +51,22 @@ completed, makes it the session's source (`sessions.source_kind/source_url`), so
 compiled like a server import. `private: true` (`audio_segments.source_private`) marks audio the
 server could never download: `compilations.create` / `compilations.retry` and the worker's
 `compile` job refuse clips of it with a message pointing at `buildLocally`.
+
+## Giving the server a YouTube sign-in (`youtube-login`)
+
+Instead of downloading on your computer every time, you can hand your team a YouTube sign-in on
+the server once; from then on the server imports and compiles all the team's videos by itself,
+even from an IP YouTube bot-checks:
+
+```sh
+node autologger-import.mjs youtube-login --team <teamId> --cookies-from-browser firefox
+```
+
+It reads the browser's cookies with yt-dlp (`--cookies <file>` sends a cookies.txt instead) and
+calls `media.setYoutubeCookies`, which keeps only the youtube.com and google.com cookies, tests
+them on a public video and prints the result. `--show <showId>` instead of `--team` sets it for that show's team. Needs owner or admin in the
+team. Use a
+spare Google account (the cookies give full access to it), preferably in a browser profile used
+only for this: signing out of YouTube there, or YouTube rotating the cookies of its open tabs,
+ends the server's sign-in, and you run the command again. See
+[media.md › YouTube bot check](media.md#youtube-bot-check).
