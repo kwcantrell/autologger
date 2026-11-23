@@ -50,12 +50,12 @@ yt-dlp; `--dry-run` changes nothing; re-running a command resumes. All options:
 The helper authenticates with a personal access token (Settings › Agents) as `Authorization:
 Bearer alp_…` and calls `POST /api/rpc/<op>`, so it gets the MCP surface and acts as the user:
 
-| Step                     | Op                                                                                                                                                                                             |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sessions for a playlist  | `media.importPlaylist` with `videos: [{url, title, durationSec?, uploadDate?}]` instead of `url`: same skipping, titles, episodes and `dryRun`, but no download jobs.                          |
-| Upload one video's audio | `media.createUpload` with `origin: "youtube"`, `youtube: {url, title?, uploadDate?, private?}` → PUT → `media.completeUpload` (waveform; transcription unless `transcribe: false`).            |
-| Resume                   | `media.list`: a session whose YouTube segment is stored (status other than `uploading`) is done. A new YouTube upload replaces an unfinished one of the session.                               |
-| Build a compilation      | `compilations.create` with `buildLocally: true` (no compile job), then `compilations.createUpload` (clip plan in video seconds + presigned PUT) → PUT → `compilations.completeUpload` (ready). |
+| Step                     | Op                                                                                                                                                                                                                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Sessions for a playlist  | `media.importPlaylist` with `videos: [{url, title, durationSec?, uploadDate?}]` instead of `url`: same skipping, titles, episodes and `dryRun`, but no download jobs.                                                                                                                      |
+| Upload one video's audio | `media.createUpload` with `origin: "youtube"`, `youtube: {url, title?, uploadDate?, private?}` → PUT → `media.completeUpload` (waveform; transcription unless `transcribe: false`).                                                                                                        |
+| Resume                   | `media.list`: a session whose YouTube segment is stored (status other than `uploading`) is done. A new YouTube upload replaces an unfinished one of the session.                                                                                                                           |
+| Build a compilation      | `compilations.create` with `buildLocally: true` (or `compilations.retry` with `buildLocally: true` for a failed / still-queued server build; no compile job), then `compilations.createUpload` (clip plan in video seconds + presigned PUT) → PUT → `compilations.completeUpload` (ready). |
 
 A YouTube upload stores the video URL on the segment (`audio_segments.source_url`) and, once
 completed, makes it the session's source (`sessions.source_kind/source_url`), so the session can be

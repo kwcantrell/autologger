@@ -201,7 +201,7 @@ async function requireCompilable(
 defineOp({
   name: 'compilations.create',
   description:
-    'Build one MP4 video from ranges of a show\'s sessions that were imported from YouTube (sessions_get: sourceKind "youtube" with a sourceUrl; media_importYoutube / media_importPlaylist). showId from shows_list; needs write access to the show. clips: 1–100 ranges in play order, each {sessionId, startSec, endSec, label?} in SECONDS FROM THE SESSION START — the same @seconds as transcript_text, search hits and topics — each 1 s to 20 min long, together at most 3 hours. Every session must belong to this show and its range must lie within the session\'s stored YouTube audio; otherwise the call fails with bad_request listing the offending clips (e.g. "clip 2 (sessionId …): the session was not imported from YouTube") and nothing is created. Sessions recorded or uploaded in the app have no video and cannot be compiled. The server then downloads just those sections of the YouTube videos (≤720p), re-encodes them to one H.264/AAC MP4 (1280×720, 30 fps) and stores it; this runs in the background and takes roughly a few seconds per clip-minute plus download time. Returns the Compilation with status "queued". Wait for it with compilations_get {compilationId, waitSec: 55} in a loop until status is "ready" (then url is a presigned download link valid about 1 hour — call compilations_get again for a fresh one, do not store it) or "failed" (error says why; compilations_retry builds it again when the cause was temporary). progress reads like "clip 3/12" meanwhile. Users see and play compilations in the web app\'s Compilations page. Side effect: unless logEvents is false, it also logs one event per clip in the clip\'s session — category "Compilation" (a free label, grey marker), at the clip\'s startSec, message like `Compilation "Best bits" · clip 3: label (0:42)` (clip length) — so operators and agents see which moments were already clipped (events_list; each clip\'s eventId in the result). These events are in the change log as one group with this call: changes_revertGroup on it removes them (the compilation itself stays; delete it with compilations_delete). compilations_retry does not log them again. Pass logEvents: false to skip them (e.g. for a throwaway draft). buildLocally: true (default false) builds the video on the user\'s own computer with the AutoLogger import helper instead of the server — use it when the server cannot download the videos: a clip error says the video is private (imported with the helper), or the server\'s compile job failed with YouTube\'s bot check. The clips are checked the same way (private videos allowed) but no compile job is queued: the compilation stays "queued" (progress "Waiting for a local build…") until the user runs `autologger-import compile <compilationId>` (/docs/developers/import-helper), which downloads the sections with their browser cookies, encodes the same 720p H.264/AAC MP4 and uploads it (compilations_createUpload, compilations_completeUpload); then it is "ready" like any other. Tell the user the command to run.',
+    'Build one MP4 video from ranges of a show\'s sessions that were imported from YouTube (sessions_get: sourceKind "youtube" with a sourceUrl; media_importYoutube / media_importPlaylist). showId from shows_list; needs write access to the show. clips: 1–100 ranges in play order, each {sessionId, startSec, endSec, label?} in SECONDS FROM THE SESSION START — the same @seconds as transcript_text, search hits and topics — each 1 s to 20 min long, together at most 3 hours. Every session must belong to this show and its range must lie within the session\'s stored YouTube audio; otherwise the call fails with bad_request listing the offending clips (e.g. "clip 2 (sessionId …): the session was not imported from YouTube") and nothing is created. Sessions recorded or uploaded in the app have no video and cannot be compiled. The server then downloads just those sections of the YouTube videos (≤720p), re-encodes them to one H.264/AAC MP4 (1280×720, 30 fps) and stores it; this runs in the background and takes roughly a few seconds per clip-minute plus download time. Returns the Compilation with status "queued". Wait for it with compilations_get {compilationId, waitSec: 55} in a loop until status is "ready" (then url is a presigned download link valid about 1 hour — call compilations_get again for a fresh one, do not store it) or "failed" (error says why; compilations_retry builds it again when the cause was temporary, and compilations_retry with buildLocally: true switches it to a local build when the error is YouTube\'s bot check or a sign-in). progress reads like "clip 3/12" meanwhile. Users see and play compilations in the web app\'s Compilations page. Side effect: unless logEvents is false, it also logs one event per clip in the clip\'s session — category "Compilation" (a free label, grey marker), at the clip\'s startSec, message like `Compilation "Best bits" · clip 3: label (0:42)` (clip length) — so operators and agents see which moments were already clipped (events_list; each clip\'s eventId in the result). These events are in the change log as one group with this call: changes_revertGroup on it removes them (the compilation itself stays; delete it with compilations_delete). compilations_retry does not log them again. Pass logEvents: false to skip them (e.g. for a throwaway draft). buildLocally: true (default false) builds the video on the user\'s own computer with the AutoLogger import helper instead of the server — use it when the server cannot download the videos: a clip error says the video is private (imported with the helper), or the server\'s compile job failed with YouTube\'s bot check (for an existing compilation, compilations_retry with buildLocally: true switches it without re-creating it). The clips are checked the same way (private videos allowed) but no compile job is queued: the compilation stays "queued" (progress "Waiting for a local build…") until the user runs `autologger-import compile <compilationId>` (/docs/developers/import-helper), which downloads the sections with their browser cookies, encodes the same 720p H.264/AAC MP4 and uploads it (compilations_createUpload, compilations_completeUpload); then it is "ready" like any other. Tell the user the command to run.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId, title, clips, logEvents, buildLocally }) {
@@ -366,11 +366,12 @@ defineOp({
 defineOp({
   name: 'compilations.retry',
   description:
-    'Build a failed video compilation again (compilationId from compilations_list or compilations_get with status "failed"; jobs_list with showId also lists its failed compile job, with compilationId). Use it when the error looks temporary (a YouTube download or network error, the worker restarting) instead of deleting and re-creating the compilation: it keeps the same compilationId, title and clips. The clips are checked again first, like compilations_create: if a session was deleted or re-imported without its YouTube video, the call fails with bad_request naming the clips and nothing changes — create a new compilation without them instead. Only a compilation with status "failed" can be retried (conflict otherwise; a queued or running one is already being built, a ready one has its video). Resets it to status "queued" (error cleared) and queues a new compile job; then wait with compilations_get {compilationId, waitSec: 55} as after compilations_create. Needs write access to the show. Returns the Compilation.',
+    'Build a failed video compilation again (compilationId from compilations_list or compilations_get with status "failed"; jobs_list with showId also lists its failed compile job, with compilationId). Use it when the error looks temporary (a YouTube download or network error, the worker restarting) instead of deleting and re-creating the compilation: it keeps the same compilationId, title, clips and their "Compilation" events (not logged again). The clips are checked again first, like compilations_create: if a session was deleted or re-imported without its YouTube video, the call fails with bad_request naming the clips and nothing changes — create a new compilation without them instead. Resets it to status "queued" (error cleared) and queues a new compile job on the server; then wait with compilations_get {compilationId, waitSec: 55} as after compilations_create. buildLocally: true instead switches it to a local build on the user\'s computer with the AutoLogger import helper — use it when the server build failed with YouTube\'s bot check or a sign-in error ("YouTube is blocking this server\'s downloads (bot check)" / "YouTube requires a signed-in account") and the team\'s YouTube sign-in cannot be fixed (media_youtubeAccess, media_setYoutubeCookies), or the video is private. It works on a failed compilation and on a server-built one that is still queued (its waiting compile job is cancelled); no compile job is queued: the compilation becomes "queued" with buildLocally true and progress "Waiting for a local build: run autologger-import compile <compilationId>" until the user runs that command (/docs/developers/import-helper) — tell them to. Calling it with buildLocally: true on a compilation already waiting for a local build returns it unchanged. Fails with conflict for a ready compilation (it has its video), one the worker is building right now, and (without buildLocally) one that is queued. Needs write access to the show. Returns the Compilation.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { compilationId }) {
+  async run(ctx, { compilationId, buildLocally }) {
     const found = await loadCompilation(ctx, compilationId, 'write');
+    if (buildLocally) return switchToLocalBuild(ctx, found);
     if (found.status !== 'failed')
       throw conflict(
         `Only a failed compilation can be retried; this one is ${found.status === 'ready' ? 'ready' : 'already being built'}.`,
@@ -379,7 +380,13 @@ defineOp({
     // Conditional on still being failed, so two concurrent retries queue one build.
     const [row] = await ctx.db
       .update(compilations)
-      .set({ status: 'queued', progress: 'Queued', error: null, updatedAt: new Date() })
+      .set({
+        status: 'queued',
+        progress: 'Queued',
+        error: null,
+        buildLocally: false,
+        updatedAt: new Date(),
+      })
       .where(and(eq(compilations.id, found.id), eq(compilations.status, 'failed')))
       .returning();
     if (!row) throw conflict('This compilation is already being built again.');
@@ -398,13 +405,63 @@ defineOp({
   },
 });
 
+/**
+ * compilations.retry with buildLocally: turn a failed (or queued, not yet started) server build
+ * into a local build for the import helper. Same id, title, clips and events; no compile job.
+ */
+async function switchToLocalBuild(ctx: Ctx, found: Row): Promise<Compilation> {
+  if (found.buildLocally && found.status === 'queued') return (await toEntities(ctx, [found]))[0]!;
+  if (found.status === 'ready')
+    throw conflict('This compilation is already ready; it has its video.');
+  if (found.status === 'running')
+    throw conflict('The server is building this compilation right now; wait for it to finish.');
+  await requireCompilable(ctx, found.clips, found.showId, true);
+  // A queued server build: cancel its waiting compile job. Row locks keep the worker from
+  // claiming it meanwhile; a job it already claimed (running) means it is too late to switch.
+  const now = new Date();
+  const ofThis = and(
+    eq(jobs.kind, 'compile'),
+    sql`${jobs.payload}->>'compilationId' = ${found.id}`,
+  );
+  await ctx.db
+    .update(jobs)
+    .set({
+      status: 'failed',
+      error: 'Switched to a local build.',
+      dismissedAt: now,
+      updatedAt: now,
+    })
+    .where(and(ofThis, eq(jobs.status, 'queued')));
+  const [running] = await ctx.db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(and(ofThis, eq(jobs.status, 'running')));
+  if (running)
+    throw conflict('The server is building this compilation right now; wait for it to finish.');
+  const [row] = await ctx.db
+    .update(compilations)
+    .set({
+      status: 'queued',
+      progress: localProgress(found.id),
+      error: null,
+      buildLocally: true,
+      updatedAt: now,
+    })
+    .where(and(eq(compilations.id, found.id), eq(compilations.status, found.status)))
+    .returning();
+  if (!row) throw conflict('This compilation changed meanwhile; load it again.');
+  ctx.publish(`show:${row.showId}`, { type: 'invalidate', entity: 'job' });
+  ctx.publish(`show:${row.showId}`, compilationMessage(row.showId, row.id, 'queued'));
+  return (await toEntities(ctx, [row]))[0]!;
+}
+
 /** A local-build compilation, for its upload ops; anything else is a conflict. */
 async function loadLocalBuild(ctx: Ctx, compilationId: string) {
   requireStorage();
   const row = await loadCompilation(ctx, compilationId, 'write');
   if (!row.buildLocally)
     throw conflict(
-      'This compilation is built by the server. Create one with buildLocally: true to build it with the import helper.',
+      'This compilation is built by the server. Switch it to a local build with compilations_retry {compilationId, buildLocally: true} (failed or still queued), or create one with buildLocally: true.',
     );
   return row;
 }

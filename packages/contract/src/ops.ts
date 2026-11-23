@@ -582,7 +582,7 @@ export const opInputs = {
   }),
   'compilations.list': z.object({ showId: id }),
   'compilations.delete': z.object({ compilationId: id }),
-  'compilations.retry': z.object({ compilationId: id }),
+  'compilations.retry': z.object({ compilationId: id, buildLocally: z.boolean().default(false) }),
   'compilations.createUpload': z.object({ compilationId: id }),
   'compilations.completeUpload': z.object({ compilationId: id, durationSec: sec.optional() }),
 

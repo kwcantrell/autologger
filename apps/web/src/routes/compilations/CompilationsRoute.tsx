@@ -1,7 +1,8 @@
 // `/compilations`: video compilations of the active show. Agents create them over MCP and people
 // with "Make video" on a wiki page's citations or a session's topics (MakeVideoDialog), both through
 // compilations.create, from ranges of YouTube-imported sessions; the worker builds one MP4 each.
-// Here people watch, download, retry (failed builds) and delete them. Updates arrive as show-socket hints (liveShow.ts).
+// Here people watch, download, retry (failed builds), switch a build YouTube blocked to a local build
+// with the import helper, and delete them. Updates arrive as show-socket hints (liveShow.ts).
 
 import type { Compilation } from '@autologger/contract';
 import {
@@ -12,6 +13,7 @@ import {
 } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { useActive } from '@/app/useActive';
+import { YoutubeAuthHelp } from '@/app/YoutubeAuthHelp';
 import { PageFrame, RouteLoadingState } from '@/components/RouteState';
 import { IMPORT_HELPER_ANCHOR, openSettingsAt } from '@/settings/openSettingsAt';
 import { showToast } from '@/shared/components/Toast';
@@ -90,9 +92,32 @@ function CompilationList({ showId, canWrite }: { showId: string; canWrite: boole
             canWrite={canWrite}
             deleting={del.isPending && del.variables?.compilationId === c.id}
             onDelete={() => void onDelete(c)}
-            retrying={retry.isPending && retry.variables?.compilationId === c.id}
+            retrying={
+              retry.isPending &&
+              retry.variables?.compilationId === c.id &&
+              !retry.variables.buildLocally
+            }
             onCopy={copyCommand}
             onOpenHelper={() => openSettingsAt('agents', IMPORT_HELPER_ANCHOR)}
+            authHelp={<YoutubeAuthHelp />}
+            switching={
+              retry.isPending &&
+              retry.variables?.compilationId === c.id &&
+              !!retry.variables.buildLocally
+            }
+            onBuildLocally={() =>
+              retry.mutate(
+                { compilationId: c.id, buildLocally: true },
+                {
+                  onSuccess: () =>
+                    showToast(
+                      `“${c.title}” will be built on your computer. Copy the command below.`,
+                    ),
+                  onError: (e) =>
+                    showToast(`Couldn't switch to a local build: ${errorMessage(e)}`, true),
+                },
+              )
+            }
             onRetry={() =>
               retry.mutate(
                 { compilationId: c.id },
