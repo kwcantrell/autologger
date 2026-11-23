@@ -19,6 +19,12 @@ curl -fLO https://<your-autologger>/api/importer/autologger-import.mjs
 `apps/importer/autologger-import.mjs` next to the server source); the route answers 404 when it
 is missing. It is a file route like the exports, not an op.
 
+The web app points users at it: Settings › Agents › _Import from your computer_ has the download
+link, `AUTOLOGGER_URL` / `AUTOLOGGER_TOKEN` and example commands; import dialogs and the
+background jobs list link there (and to the team's YouTube sign-in, the usual fix) when an import
+fails with YouTube's bot check or a sign-in error; and the Compilations page shows a `buildLocally`
+compilation that is still queued as "Waiting for a local build" with its copyable `compile` command.
+
 ### Use
 
 ```sh

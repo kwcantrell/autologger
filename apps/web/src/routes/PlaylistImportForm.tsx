@@ -6,6 +6,7 @@ import type { PlaylistImport, Show } from '@autologger/contract';
 import { type FormEvent, useEffect, useState } from 'react';
 import { qk, useCapabilities, useOpMutation } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
+import { isYoutubeAuthError, YoutubeAuthHelp } from '@/app/YoutubeAuthHelp';
 import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
 import { Button } from '@/shared/components/ui/button';
@@ -149,6 +150,9 @@ export function PlaylistImportForm({
           <AlertDescription>
             {current ? 'The import did not start.' : 'Could not preview the playlist.'}{' '}
             {errorMessage(run.error)}
+            {isYoutubeAuthError(errorMessage(run.error)) && (
+              <YoutubeAuthHelp onNavigate={onClose} />
+            )}
           </AlertDescription>
         </Alert>
       )}
