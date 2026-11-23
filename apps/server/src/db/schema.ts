@@ -471,6 +471,7 @@ export const changes = pgTable(
         'wiki_page',
         'category',
         'session',
+        'audio_segment',
       ],
     }).notNull(),
     entityId: text('entity_id').notNull(),
@@ -492,6 +493,11 @@ export const changes = pgTable(
     index('changes_show').on(t.showId, t.at),
     index('changes_entity').on(t.entity, t.entityId, t.at),
     index('changes_group').on(t.groupId),
+    // The show's MCP clients and Companion devices (shows.get): a skip scan over this index reads
+    // one entry per distinct name instead of every change of the show.
+    index('changes_show_client')
+      .on(t.showId, t.via, t.clientName)
+      .where(sql`${t.clientName} is not null`),
   ],
 );
 

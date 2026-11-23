@@ -1,0 +1,1 @@
+CREATE INDEX "changes_show_client" ON "changes" USING btree ("show_id","via","client_name") WHERE "changes"."client_name" is not null;

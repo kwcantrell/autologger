@@ -1,12 +1,15 @@
 // One compilation on the Compilations page: status, progress or error (or, for one waiting for a
 // local build, the import helper command to run), the video, its clips and the Download / Retry /
-// Delete actions. Presentational (props in, markup out; actions are
+// Delete actions. A server build that failed on YouTube's bot check or a sign-in also offers the
+// sign-in help and "Build on my computer" (compilations.retry buildLocally). Presentational (props in, markup out; actions are
 // callbacks), so the landing page mock renders it too.
 
 import type { Compilation } from '@autologger/contract';
-import { DownloadIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react';
+import { DownloadIcon, LaptopIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { Link } from 'wouter';
 import { fmtEta } from '@/app/ShowJobs';
+import { isYoutubeAuthError } from '@/app/YoutubeAuthHelp';
 import { fmtShort } from '@/lib/timecode';
 import { CopyRow } from '@/session/tabs/CopyRow';
 import { Badge } from '@/shared/components/ui/badge';
@@ -55,6 +58,9 @@ export function CompilationCard({
   retrying,
   onCopy,
   onOpenHelper,
+  onBuildLocally,
+  switching = false,
+  authHelp,
 }: {
   c: Compilation;
   canWrite: boolean;
@@ -66,11 +72,18 @@ export function CompilationCard({
   onCopy?: (value: string) => void;
   /** Opens the import helper's setup (Settings › Agents). */
   onOpenHelper?: () => void;
+  /** Switches a failed server build to a local build with the import helper. */
+  onBuildLocally?: () => void;
+  switching?: boolean;
+  /** Shown under a YouTube sign-in error: how to fix the team's sign-in (YoutubeAuthHelp). */
+  authHelp?: ReactNode;
 }) {
   const building = c.status === 'queued' || c.status === 'running';
   // Created with buildLocally: no worker job, it waits for the import helper on someone's computer.
   const local = c.buildLocally && c.status === 'queued';
   const wait = building && !local ? fmtWait(c) : null;
+  // The server could not download the videos: YouTube wants a sign-in (bot check, private video).
+  const authFailed = c.status === 'failed' && isYoutubeAuthError(c.error);
   return (
     <li className="flex min-w-0 flex-col gap-3 rounded-ctl border border-si-line bg-si-panel p-4">
       <div className="flex min-w-0 items-start gap-3">
@@ -123,6 +136,16 @@ export function CompilationCard({
         <p role="alert" className="m-0 text-sm break-words text-si-danger">
           {c.error ?? 'The build failed.'}
         </p>
+      )}
+      {authFailed && (
+        <div className="flex min-w-0 flex-col gap-1 text-sm text-si-muted">
+          <p className="m-0">
+            YouTube wants a sign-in before this server can download the videos. Set the team’s
+            YouTube sign-in and retry, or build the video on your computer with the import helper,
+            which uses your own browser’s sign-in.
+          </p>
+          {authHelp}
+        </div>
       )}
       {c.status === 'ready' && c.url && (
         // biome-ignore lint/a11y/useMediaCaption: compilations of interview video have no caption track
@@ -177,6 +200,23 @@ export function CompilationCard({
               <Button variant="outline" onClick={onRetry} disabled={!canWrite || retrying}>
                 <RefreshCwIcon data-icon="inline-start" />
                 {retrying ? 'Retrying…' : 'Retry'}
+              </Button>
+            </span>
+          </Tooltip>
+        )}
+        {authFailed && onBuildLocally && (
+          <Tooltip
+            content="You can watch this show's compilations but not build them again."
+            disabled={canWrite}
+          >
+            <span className="inline-flex">
+              <Button
+                variant="outline"
+                onClick={onBuildLocally}
+                disabled={!canWrite || switching || retrying}
+              >
+                <LaptopIcon data-icon="inline-start" />
+                {switching ? 'Switching…' : 'Build on my computer'}
               </Button>
             </span>
           </Tooltip>

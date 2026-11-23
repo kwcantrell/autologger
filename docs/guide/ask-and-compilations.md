@@ -77,10 +77,21 @@ You need write access to the show to make videos.
 
 ## When YouTube blocks the server
 
-If the server can't download from YouTube, set the team's YouTube sign-in, or build the video on
-your own computer: a compilation made to be built locally shows **Waiting for a local build** with
-its **Build command** for the import helper. See
-[Importing from YouTube](/docs/guide/importing-from-youtube#give-the-server-a-youtube-sign-in).
+A server build fails when YouTube asks for a sign-in: its bot check ("YouTube is blocking this
+server's downloads"), or a private, members-only or age-restricted video. The failed compilation
+then shows what to do, in this order:
+
+1. **Set the team's YouTube sign-in** (Settings › Team details › YouTube access; team owners and
+   admins), then **Retry**. This is the usual fix and keeps future builds on the server. See
+   [Importing from YouTube](/docs/guide/importing-from-youtube#give-the-server-a-youtube-sign-in).
+2. **Build on my computer** switches the same compilation (same title, clips and events) to a local
+   build with the import helper, which downloads with your own browser's sign-in. The card then
+   shows **Waiting for a local build** with its **Build command**: copy it and run it where the
+   helper is set up (Settings › Agents › Import from your computer). The video appears here once it
+   is uploaded.
+
+A compilation that is still queued for the server can also be switched by an agent
+(`compilations_retry` with `buildLocally: true`); one the server is building right now cannot.
 
 ## Related
 

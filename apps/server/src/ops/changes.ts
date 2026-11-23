@@ -48,6 +48,12 @@ const TABLES: Record<
     softDelete?: boolean;
     /** Keep derived rows (an index) in step with a row an undo wrote back. */
     reindex?: (db: Ctx['db'], row: Record<string, unknown>) => Promise<void>;
+    /**
+     * Changes to this entity snapshot only these columns (updates only): undo writes back just
+     * them, and refuses when they no longer match the change's `after` (a write outside the change
+     * log, such as a worker job, moved them on).
+     */
+    fields?: string[];
   }
 > = {
   event: { table: schema.events, live: 'event' },
@@ -65,6 +71,12 @@ const TABLES: Record<
   // Here only for typing and `live`: clock changes snapshot just the clock fields and are undone
   // by undoClockChange, never through the generic path below.
   session: { table: schema.sessions, live: 'session' },
+  // transcript.import marks a recording transcribed; the worker's own status writes are not logged.
+  audio_segment: {
+    table: schema.audioSegments,
+    live: 'audio_segment',
+    fields: ['status', 'error'],
+  },
 };
 
 const isUniqueViolation = (e: unknown) =>
@@ -185,7 +197,7 @@ async function toChanges(
 defineOp({
   name: 'changes.list',
   description:
-    'The change log: who changed what, from where (web, mcp agent, companion), newest first. Filter by session, show, surface (via: one value or a list, e.g. ["web", "companion"] for operators), MCP client or Companion device (clientName, as shown on each change: the MCP client name or the device name; shows_get lists a show\'s mcpClients and companionDevices), item kind (entity) or groupId. Changes to session content carry atSec — seconds from the session start (as in transcript_text) of the event, topic or transcript segment they touched, read from the change\'s after snapshot (before for a delete); absent for other kinds and untimed events. sessionId: null lists only show-level changes — show wiki pages and event buttons (category), which belong to no session; with showId, that show\'s. Every change one op call wrote shares a groupId (a bulk call such as transcript_renameSpeaker writes one change per segment). grouped: true (needs sessionId or showId) folds each group into one row — its newest change, with groupSize (how many changes match the filter, set when the group has more than one), groupUndone (how many of those are already undone) and, when the group also reaches other sessions, groupTotal (its size everywhere); revertedAt is then set only when the whole group is undone, and limit counts rows. Undo one change with changes_revert(changeId) or a whole op call with changes_revertGroup(groupId).',
+    'The change log: who changed what, from where (web, mcp agent, companion), newest first. Filter by session, show, surface (via: one value or a list, e.g. ["web", "companion"] for operators), MCP client or Companion device (clientName, as shown on each change: the MCP client name or the device name; shows_get lists a show\'s mcpClients and companionDevices), item kind (entity) or groupId. Changes to session content carry atSec — seconds from the session start (as in transcript_text) of the event, topic or transcript segment they touched, read from the change\'s after snapshot (before for a delete); absent for other kinds and untimed events. entity audio_segment is a recording\'s transcription status (transcript_import with audioSegmentId marks it transcribed; undoing the import puts it back). sessionId: null lists only show-level changes — show wiki pages and event buttons (category), which belong to no session; with showId, that show\'s. Every change one op call wrote shares a groupId (a bulk call such as transcript_renameSpeaker writes one change per segment). grouped: true (needs sessionId or showId) folds each group into one row — its newest change, with groupSize (how many changes match the filter, set when the group has more than one), groupUndone (how many of those are already undone) and, when the group also reaches other sessions, groupTotal (its size everywhere); revertedAt is then set only when the whole group is undone, and limit counts rows. Undo one change with changes_revert(changeId) or a whole op call with changes_revertGroup(groupId).',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, showId, via, clientName, entity, groupId, grouped, limit }) {
@@ -378,7 +390,7 @@ async function requireRevertAccess(ctx: Ctx, c: ChangeRow): Promise<void> {
 /** Restore the item to `c.before`, mark `c` undone and record the undo; returns its change id. */
 async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
   if (c.entity === 'session') return undoClockChange(ctx, c);
-  const { table, live, softDelete, reindex } = TABLES[c.entity];
+  const { table, live, softDelete, reindex, fields } = TABLES[c.entity];
   const idCol = table.id;
   const [current] = (await ctx.db.select().from(table).where(eq(idCol, c.entityId))) as
     | Record<string, unknown>[]
@@ -399,6 +411,11 @@ async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
       }
     } else if (c.kind === 'update') {
       if (!visible) throw conflict('That item no longer exists.');
+      const after = c.after as Record<string, unknown>;
+      if (fields?.some((f) => current?.[f] !== after?.[f]))
+        throw conflict(
+          'The recording’s transcription status changed since (a transcription ran or is running); this change can no longer be undone.',
+        );
       [restored] = (await ctx.db
         .update(table)
         .set(revive(table, c.before as Record<string, unknown>))
@@ -435,8 +452,8 @@ async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
     summary: `Undid: ${c.summary}`,
     showId: c.showId,
     sessionId: c.sessionId,
-    before: snapshot(current as Record<string, unknown> | undefined),
-    after: snapshot(restored),
+    before: snapshot(pickFields(current as Record<string, unknown> | undefined, fields)),
+    after: snapshot(pickFields(restored, fields)),
     revertOf: c.id,
   });
   // The undo is now the latest change for the item, so undoing it again acts as redo.
@@ -444,6 +461,8 @@ async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
     ctx.publish(`session:${c.sessionId}`, { type: 'invalidate', entity: live });
   if (c.sessionId && c.entity === 'event')
     ctx.publish(`session:${c.sessionId}`, { type: 'invalidate', entity: 'session' });
+  // The session's transcriptStatus is derived from its recordings' statuses.
+  if (c.sessionId && c.entity === 'audio_segment') await publishSession(ctx, c.sessionId);
   if (c.entity === 'category')
     ctx.publish(`show:${c.showId}`, {
       type: 'show_changed',
@@ -451,6 +470,13 @@ async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
       entity: 'category',
     });
   return revertId;
+}
+
+function pickFields(
+  row: Record<string, unknown> | undefined,
+  fields: string[] | undefined,
+): Record<string, unknown> | undefined {
+  return row && fields ? Object.fromEntries(fields.map((f) => [f, row[f]])) : row;
 }
 
 /**

@@ -122,7 +122,7 @@ menu), then:
 The dialog shows how many lines were imported and replaced and which speakers it found. A file it
 can't read is refused with the line that failed, and nothing is changed. While a transcription of
 the session or that recording is running, wait for it to finish first. The whole import can be
-undone in one step from the Agents tab. Agents can do the same with the `transcript_import` tool.
+undone in one step from the Agents tab; for a recording, that also puts its status back. Agents can do the same with the `transcript_import` tool.
 You need write access to the show.
 
 | Limit         | Value                |
