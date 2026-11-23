@@ -8,6 +8,7 @@ import './topics.ts';
 import './dashboards.ts';
 import './wiki.ts';
 import './search.ts';
+import './graph.ts';
 import './changes.ts';
 import './admin.ts';
 import './media.ts';

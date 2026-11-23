@@ -1,6 +1,7 @@
 export * from './dashboard.ts';
 export * from './entities.ts';
 export * from './issues.ts';
+export * from './knowledge.ts';
 export * from './ops.ts';
 export * from './timecode.ts';
 export * from './transcriptRules.ts';
