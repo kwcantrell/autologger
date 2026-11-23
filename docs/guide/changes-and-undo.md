@@ -64,7 +64,9 @@ session, plus wiki pages and event buttons, which belong to no session. Filters:
 | Who    | **Everyone**, **Agents only**, **Operators**, or one agent or Companion device by name |
 
 The filters are part of the page address, so you can share a filtered view. Session rows link to
-the moment they changed.
+the moment they changed. New changes appear while the page is open, and an agent or Companion
+device that changes the show for the first time joins the **Who** list as soon as its change shows
+up in the list.
 
 You need write access to a show to undo its changes; with read access you can still see them.
 

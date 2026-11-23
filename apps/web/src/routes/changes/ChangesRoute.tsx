@@ -228,6 +228,20 @@ function ChangeLog({
     ...whoFilter(filters.who),
   };
   const changes = useShowChanges(showId, query);
+  // The change hint refetches the list, not the show: when a new agent or device turns up in it,
+  // refetch shows.get so the Who filter lists it.
+  const refetchShow = showQ.refetch;
+  useEffect(() => {
+    const show = showQ.data;
+    if (!show || !changes.data) return;
+    const unknown = changes.data.some(
+      (c) =>
+        c.clientName != null &&
+        ((c.via === 'mcp' && !show.mcpClients.includes(c.clientName)) ||
+          (c.via === 'companion' && !show.companionDevices.includes(c.clientName))),
+    );
+    if (unknown) void refetchShow();
+  }, [changes.data, showQ.data, refetchShow]);
   const now = useNow();
   const { confirm, confirmElement } = useConfirm();
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
