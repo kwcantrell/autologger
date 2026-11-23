@@ -716,6 +716,11 @@ export interface PlaylistImport {
     reason: 'already_imported' | 'unavailable';
     sessionId: string | null;
   }[];
+  /**
+   * Whether YouTube lets the server download the first video (a metadata read): blocked = the
+   * bot check or a sign-in wall (a real call then fails instead), skipped = not checked.
+   */
+  downloadCheck: { status: 'ok' | 'blocked' | 'skipped'; message: string };
 }
 
 /** compilations.createUpload: what the local import helper downloads, and where it PUTs the MP4. */

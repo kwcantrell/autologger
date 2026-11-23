@@ -102,11 +102,20 @@ describe('shared app pieces', () => {
         },
       ],
       skipped: [{ videoId: 'w', title: 'Ep. 111', reason: 'already_imported', sessionId: null }],
+      downloadCheck: { status: 'ok', message: 'ok' },
     };
     const out = html(<PlaylistResult data={data} onOpenSession={noop} />);
     expect(out).toContain(' · 1 new session will be created.');
     expect(out).toContain('#112');
     expect(out).toContain('Already in the show');
+    expect(out).not.toContain('importing would fail');
+    const blocked = html(
+      <PlaylistResult
+        data={{ ...data, downloadCheck: { status: 'blocked', message: 'Bot check.' } }}
+        onOpenSession={noop}
+      />,
+    );
+    expect(blocked).toContain('importing would fail. Bot check.');
   });
 
   it('CompilationCard shows a build in progress', () => {

@@ -30,6 +30,12 @@ export function PlaylistResult({
             : ' · nothing new to import.'
           : ` · ${n} session${n === 1 ? '' : 's'} created. Each session’s Audio menu shows its download and transcription.`}
       </p>
+      {data.dryRun && data.downloadCheck.status === 'blocked' && (
+        <p role="alert" className="m-0 text-sm text-si-danger">
+          YouTube won’t let the server download these videos, so importing would fail.{' '}
+          {data.downloadCheck.message}
+        </p>
+      )}
       {n > 0 && (
         <ResultList label={data.dryRun ? 'Will be created' : 'Created'}>
           {data.created.map((c) => (
