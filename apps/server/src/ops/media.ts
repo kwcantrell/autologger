@@ -1,10 +1,19 @@
 // Media: audio segments (recorded / uploaded / YouTube), playback URLs, transcription jobs.
 //
-// Upload flow: media.createUpload (row status 'uploading' + presigned PUT) → browser PUTs the
-// bytes straight to S3 → media.completeUpload (verifies the object, status 'ready', enqueues
-// `transcribe`). The worker (src/worker) does the Deepgram and yt-dlp work.
+// Upload flow: media.createUpload (row status 'uploading' + presigned PUT, or part PUTs of a
+// multipart upload above 32 MiB) → the client PUTs the bytes straight to S3 →
+// media.completeUpload (assembles the parts / verifies the object, status 'ready', enqueues
+// `transcribe`). media.importFiles does the first step for many local files at once, one new
+// session each. The worker (src/worker) does the Deepgram and yt-dlp work.
 
-import type { AudioSegment, Job, PlaylistImport, YoutubeAccess } from '@autologger/contract';
+import type {
+  AudioSegment,
+  FileImport,
+  Job,
+  PlaylistImport,
+  UploadsCompleted,
+  YoutubeAccess,
+} from '@autologger/contract';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { requireSession, requireShow, requireTeamRole } from '../core/authz.ts';
 import { type BusMessage, changeMessage, subscribeAll, type Topic } from '../core/bus.ts';
@@ -16,13 +25,14 @@ import { env, storageConfigured, transcriptionConfigured } from '../env.ts';
 import { PermanentError } from '../media/deepgram.ts';
 import { enqueueJob, type JobRow, jobTopic, toJob, withJobEstimates } from '../media/jobs.ts';
 import {
+  abortUploads,
   deleteObject,
   extForMime,
-  headObject,
+  finishUpload,
   objectKeyFor,
   PLAYBACK_URL_TTL_SEC,
   presignPlayback,
-  presignUpload,
+  presignUploadTarget,
   requireStorage,
 } from '../media/s3.ts';
 import { activeTranscribeJob, lockSession, nextSegmentSlot, STORED } from '../media/segments.ts';
@@ -45,7 +55,7 @@ import {
   youtubeCookiesForShow,
 } from '../media/youtubeCookies.ts';
 import { toAudioSegment } from './map.ts';
-import { publishSession, reserveEpisodes } from './sessions.ts';
+import { insertSession, publishSession, reserveEpisodes } from './sessions.ts';
 
 const { audioSegments, compilations, jobs, sessions, teamYoutubeCookies } = schema;
 
@@ -142,7 +152,7 @@ defineOp({
 defineOp({
   name: 'media.createUpload',
   description:
-    'Start uploading one audio segment of a session (sessionId from sessions_list; needs write access). Returns {segment, uploadUrl, headers}: a presigned PUT URL valid for 15 minutes; PUT the bytes with exactly those headers, then call media_completeUpload with segment.id (that queues transcription and the waveform, as for any upload). mimeType must be audio/* or video/*. origin "recorded" (a recording chunk) or "file" (a local file) is what the web app uses. origin "youtube" with youtube {url, title?, uploadDate?, private?} is for audio the client downloaded from YouTube itself — normally the AutoLogger import helper (autologger-import, /docs/developers/import-helper), which does all of this for you; use it when the server cannot download a video (media_importYoutube / media_importPlaylist fail with YouTube\'s bot check or a sign-in for a private, members-only or age-restricted video). url is the video\'s YouTube URL; title becomes the segment fileName; uploadDate (YYYY-MM-DD) replaces the session\'s episodeDate while it is still its default (the day the session was created); private: true marks audio the server could never download, so server-built compilations refuse it (compilations_create buildLocally builds them on the user\'s computer). A YouTube upload starts at session second 0 (startSec default) and replaces an unfinished (status "uploading") YouTube upload of the same session; once completed the session keeps the video as its source (sourceKind "youtube", sourceUrl). Media writes are not in the change log.',
+    'Start uploading one audio segment of a session (sessionId from sessions_list; needs write access). Returns {segment, uploadUrl, headers, expiresAt} or, for a file over 32 MiB (pass sizeBytes = the exact file size in bytes), {segment, parts, headers, expiresAt}. uploadUrl: one presigned PUT valid for 15 minutes; send the whole file with exactly those headers. parts: [{partNumber, offset, sizeBytes, url}], URLs valid 12 hours; PUT bytes [offset, offset + sizeBytes) of the file to each url (no headers needed; any order, in parallel is fine; retry a failed part on its own). Without sizeBytes you get one PUT, which fails for files over about 100 MB (the storage proxy rejects larger requests). Then call media_completeUpload with segment.id (that assembles the parts and queues transcription and the waveform, as for any upload). For many local files at once, media_importFiles creates the sessions and uploads in one call. mimeType must be audio/* or video/*. origin "recorded" (a recording chunk) or "file" (a local file) is what the web app uses. origin "youtube" with youtube {url, title?, uploadDate?, private?} is for audio the client downloaded from YouTube itself — normally the AutoLogger import helper (autologger-import, /docs/developers/import-helper), which does all of this for you; use it when the server cannot download a video (media_importYoutube / media_importPlaylist fail with YouTube\'s bot check or a sign-in for a private, members-only or age-restricted video). url is the video\'s YouTube URL; title becomes the segment fileName; uploadDate (YYYY-MM-DD) replaces the session\'s episodeDate while it is still its default (the day the session was created); private: true marks audio the server could never download, so server-built compilations refuse it (compilations_create buildLocally builds them on the user\'s computer). A YouTube upload starts at session second 0 (startSec default) and replaces an unfinished (status "uploading") YouTube upload of the same session; once completed the session keeps the video as its source (sourceKind "youtube", sourceUrl). Media writes are not in the change log.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, mimeType, origin, fileName, startSec, sizeBytes, youtube }) {
@@ -183,10 +193,10 @@ defineOp({
         createdBy: ctx.actor.user.id,
       })
       .returning();
-    const uploadUrl = await presignUpload(objectKey, mimeType);
+    const target = await presignUploadTarget(objectKey, mimeType, sizeBytes);
     const segment = toAudioSegment(row!);
     publishSegment(ctx, segment);
-    return { segment, uploadUrl, headers: { 'Content-Type': mimeType } };
+    return { segment, ...target };
   },
 });
 
@@ -209,7 +219,10 @@ async function dropUnfinishedYoutubeUploads(ctx: Ctx, sessionId: string): Promis
     ctx.publish(`session:${sessionId}`, changeMessage('audio_segment', 'delete', r.id));
   if (stale.length && storageConfigured)
     ctx.afterCommit(async () => {
-      for (const r of stale) await deleteObject(r.objectKey).catch(() => {});
+      for (const r of stale) {
+        await abortUploads(r.objectKey).catch(() => {});
+        await deleteObject(r.objectKey).catch(() => {});
+      }
     });
 }
 
@@ -228,10 +241,71 @@ async function applyUploadDate(
     .where(eq(sessions.id, session.id));
 }
 
+/**
+ * Settle an uploading segment whose bytes are in storage (assembling a multipart upload): status
+ * ready, queue transcription (when `transcribe` and Deepgram is configured) and the waveform.
+ * Returns the segment, or why it cannot be completed yet (nothing changed then).
+ */
+async function completeSegment(
+  ctx: Ctx,
+  row: SegmentRow,
+  session: { id: string; sourceKind: string | null },
+  { durationSec, transcribe }: { durationSec?: number; transcribe: boolean },
+): Promise<AudioSegment | { pending: string; missingParts?: number[] }> {
+  const stored = await finishUpload(row.objectKey, row.sizeBytes);
+  if (stored && 'missing' in stored)
+    return {
+      pending: `${stored.missing.length} part(s) of the upload have not arrived: PUT parts ${summarizeParts(stored.missing)}, then complete it again.`,
+      missingParts: stored.missing,
+    };
+  if (!stored || stored.size === 0)
+    return { pending: 'The upload has not arrived in storage yet. PUT the file first.' };
+  const [after] = await ctx.db
+    .update(audioSegments)
+    .set({
+      status: 'ready',
+      sizeBytes: stored.size,
+      error: null,
+      ...(durationSec !== undefined ? { durationSec } : {}),
+    })
+    .where(eq(audioSegments.id, row.id))
+    .returning();
+  if (row.origin === 'youtube' && row.sourceUrl) {
+    // As the worker's import: the latest YouTube audio is the session's source.
+    await ctx.db
+      .update(sessions)
+      .set({ sourceKind: 'youtube', sourceUrl: row.sourceUrl, updatedAt: new Date() })
+      .where(eq(sessions.id, session.id));
+  } else if (!session.sourceKind) {
+    await ctx.db
+      .update(sessions)
+      .set({ sourceKind: row.origin, updatedAt: new Date() })
+      .where(eq(sessions.id, session.id));
+  }
+  if (transcriptionConfigured && transcribe) await enqueueTranscribe(ctx, after!);
+  await enqueueWaveform(ctx, after!);
+  const out = toAudioSegment(after!);
+  publishSegment(ctx, out);
+  await publishSession(ctx, session.id);
+  return out;
+}
+
+/** "3, 7, 9–12" for a sorted list of part numbers (at most 20 runs). */
+function summarizeParts(nums: number[]): string {
+  const runs: string[] = [];
+  for (let i = 0; i < nums.length; ) {
+    let j = i;
+    while (j + 1 < nums.length && nums[j + 1] === nums[j]! + 1) j++;
+    runs.push(j > i ? `${nums[i]}–${nums[j]}` : String(nums[i]));
+    i = j + 1;
+  }
+  return runs.length > 20 ? `${runs.slice(0, 20).join(', ')}, …` : runs.join(', ');
+}
+
 defineOp({
   name: 'media.completeUpload',
   description:
-    'Finish an upload started with media_createUpload once the PUT succeeded (segmentId = segment.id from media_createUpload; durationSec = the audio length in seconds, when known). Marks the segment ready and queues its transcription (when Deepgram is configured) and waveform; wait for the transcript with jobs_list (kinds ["transcribe"]). transcribe: false (default true) only stores the audio and draws its waveform, without transcribing it (transcribe later with media_retranscribe), like media_importYoutube transcribe: false. A YouTube upload (origin "youtube") also makes the video the session\'s source (sourceKind "youtube", sourceUrl), so it can be compiled. Fails with conflict when the bytes have not arrived in storage (PUT first). Calling it again for a finished segment changes nothing (it only fills in a missing durationSec).',
+    'Finish an upload started with media_createUpload once its PUT (or all its part PUTs) succeeded (segmentId = segment.id from media_createUpload; durationSec = the audio length in seconds, when known — leave it out otherwise: the server measures it when it draws the waveform). Marks the segment ready and queues its transcription (when Deepgram is configured) and waveform; wait for the transcript with jobs_list (kinds ["transcribe"]). transcribe: false (default true) only stores the audio and draws its waveform, without transcribing it (transcribe later with media_retranscribe), like media_importYoutube transcribe: false. A YouTube upload (origin "youtube") also makes the video the session\'s source (sourceKind "youtube", sourceUrl), so it can be compiled. Fails with conflict when the bytes have not arrived in storage (PUT first) or, for a multipart upload, when parts are missing (the message lists them; PUT those and call again). Calling it again for a finished segment changes nothing (it only fills in a missing durationSec). media_completeUploads finishes many segments in one call.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { segmentId, durationSec, transcribe }) {
@@ -248,36 +322,159 @@ defineOp({
       }
       return toAudioSegment(row);
     }
-    const head = await headObject(row.objectKey);
-    if (!head || head.size === 0)
-      throw conflict('The upload has not arrived in storage yet. PUT the file first.');
-    const [after] = await ctx.db
-      .update(audioSegments)
-      .set({
-        status: 'ready',
-        sizeBytes: head.size,
-        error: null,
-        ...(durationSec !== undefined ? { durationSec } : {}),
-      })
-      .where(eq(audioSegments.id, segmentId))
-      .returning();
-    if (row.origin === 'youtube' && row.sourceUrl) {
-      // As the worker's import: the latest YouTube audio is the session's source.
-      await ctx.db
-        .update(sessions)
-        .set({ sourceKind: 'youtube', sourceUrl: row.sourceUrl, updatedAt: new Date() })
-        .where(eq(sessions.id, session.id));
-    } else if (!session.sourceKind) {
-      await ctx.db
-        .update(sessions)
-        .set({ sourceKind: row.origin, updatedAt: new Date() })
-        .where(eq(sessions.id, session.id));
+    const done = await completeSegment(ctx, row, session, { durationSec, transcribe });
+    if ('pending' in done) throw conflict(done.pending);
+    return done;
+  },
+});
+
+defineOp({
+  name: 'media.completeUploads',
+  description:
+    'Finish many uploads in one call (segmentIds: up to 200 segment ids from media_importFiles or media_createUpload, once their PUTs succeeded) — the batch form of media_completeUpload, for bulk imports. Each one whose bytes are all in storage is marked ready, with its transcription (unless transcribe: false; default true) and waveform queued; the server measures each duration when it draws the waveform. Returns {completed: [segment], pending: [{segmentId, message, missingParts?}]}: pending ones are not changed (upload not arrived, or missingParts of a multipart upload still to PUT) — PUT what is missing and call again with those ids. Segments already finished are returned in completed unchanged. Unknown ids or ones without write access fail the whole call with not_found.',
+  kind: 'write',
+  surfaces: ['web', 'mcp'],
+  async run(ctx, { segmentIds, transcribe }): Promise<UploadsCompleted> {
+    requireStorage();
+    const out: UploadsCompleted = { completed: [], pending: [] };
+    for (const segmentId of [...new Set(segmentIds)]) {
+      const { row, session } = await loadSegment(ctx, segmentId, 'write');
+      if (row.status !== 'uploading') {
+        out.completed.push(toAudioSegment(row));
+        continue;
+      }
+      const done = await completeSegment(ctx, row, session, { transcribe });
+      if ('pending' in done)
+        out.pending.push({
+          segmentId,
+          message: done.pending,
+          ...(done.missingParts ? { missingParts: done.missingParts } : {}),
+        });
+      else out.completed.push(done);
     }
-    if (transcriptionConfigured && transcribe) await enqueueTranscribe(ctx, after!);
-    await enqueueWaveform(ctx, after!);
-    const out = toAudioSegment(after!);
-    publishSegment(ctx, out);
-    await publishSession(ctx, session.id);
+    return out;
+  },
+});
+
+defineOp({
+  name: 'media.importFiles',
+  description:
+    'Bulk-import local audio/video files into a show in one call: one new session per file, each with an upload ready to PUT — instead of sessions_create + media_createUpload per file. showId from shows_list (needs write access). files: up to 100 entries {fileName (with extension), sizeBytes (exact size in bytes), mimeType (audio/* or video/*, e.g. audio/mpeg, audio/flac, audio/wav), title?, episode?, episodeDate? (YYYY-MM-DD), notes?, keyTerms?}; the session title defaults to the file name without its extension, episode to the show\'s next number (as sessions_create), episodeDate to today. A file is recognized on re-runs by fileName + sizeBytes within the show, so calling again with the same list never creates duplicate sessions: files already uploaded come back as status "skipped", files whose earlier upload never completed as "resumed" (same session, a fresh upload; parts already stored are marked uploaded). Returns {dryRun, files: [{fileName, status ("created" | "resumed" | "skipped"), sessionId, segmentId, title, episode, upload?}]} in input order; upload is as media_createUpload: {uploadUrl, headers} (one PUT, files up to 32 MiB) or {parts: [{partNumber, offset, sizeBytes, url?, uploaded?}]} (PUT bytes [offset, offset + sizeBytes) of the file to each url; skip uploaded ones). Then finish them all with media_completeUploads {segmentIds} (transcribe: false to only store the audio); durations are measured on the server. The URLs are long: for more than a handful of files, prefer the AutoLogger import helper, which does all of this from a folder or CSV manifest without passing URLs through you (`autologger-import files <folder|manifest.csv> --show <showId>`, /docs/developers/import-helper). Agents cannot delete sessions, so try dryRun: true first (nothing written; sessionId, segmentId and upload absent for new files, episode null where it would be numbered). Media writes are not in the change log.',
+  kind: 'write',
+  surfaces: ['web', 'mcp'],
+  async run(ctx, { showId, files, dryRun }): Promise<FileImport> {
+    requireStorage();
+    for (const f of files) {
+      const base = f.mimeType.split(';')[0]!.trim().toLowerCase();
+      if (!base.startsWith('audio/') && !base.startsWith('video/'))
+        throw badRequest(`${f.fileName}: only audio or video files can be uploaded.`);
+    }
+    const ident = (f: { fileName: string | null; sizeBytes: number | null }) =>
+      `${f.sizeBytes}:${f.fileName}`;
+    const dup = files.find((f, i) => files.findIndex((g) => ident(g) === ident(f)) !== i);
+    if (dup) throw badRequest(`${dup.fileName} is listed twice.`);
+    const { show } = await requireShow(ctx, showId, 'write');
+    // Serialize imports into one show, so concurrent calls cannot both create a file's session.
+    await ctx.db.execute(sql`select pg_advisory_xact_lock(hashtext(${show.id}))`);
+    const existing = await ctx.db
+      .select({
+        seg: audioSegments,
+        title: sessions.title,
+        episode: sessions.episode,
+      })
+      .from(audioSegments)
+      .innerJoin(sessions, eq(sessions.id, audioSegments.sessionId))
+      .where(
+        and(
+          eq(sessions.showId, show.id),
+          eq(audioSegments.origin, 'file'),
+          inArray(
+            audioSegments.fileName,
+            files.map((f) => f.fileName),
+          ),
+        ),
+      )
+      .orderBy(asc(audioSegments.createdAt));
+    const known = new Map(existing.map((e) => [ident(e.seg), e]));
+    const out: FileImport = { dryRun, files: [] };
+    let createdAny = false;
+    for (const f of files) {
+      const prior = known.get(ident(f));
+      if (prior) {
+        const { seg } = prior;
+        const resumed = seg.status === 'uploading';
+        out.files.push({
+          fileName: f.fileName,
+          status: resumed ? 'resumed' : 'skipped',
+          sessionId: seg.sessionId,
+          segmentId: seg.id,
+          title: prior.title,
+          episode: prior.episode,
+          ...(resumed && !dryRun
+            ? {
+                upload: await presignUploadTarget(seg.objectKey, seg.mimeType, f.sizeBytes, true),
+              }
+            : {}),
+        });
+        continue;
+      }
+      const title = f.title || f.fileName.replace(/\.[^.]{1,8}$/, '') || f.fileName;
+      if (dryRun) {
+        out.files.push({
+          fileName: f.fileName,
+          status: 'created',
+          sessionId: null,
+          segmentId: null,
+          title: title.slice(0, 200),
+          episode: f.episode ?? null,
+        });
+        continue;
+      }
+      const { fileName, sizeBytes, mimeType, ...meta } = f;
+      const sessionId = await insertSession(ctx, show, {
+        ...meta,
+        title: title.slice(0, 200),
+      });
+      const id = newId('aud');
+      const objectKey = objectKeyFor(sessionId, id, extForMime(mimeType, fileName));
+      const [row] = await ctx.db
+        .insert(audioSegments)
+        .values({
+          id,
+          sessionId,
+          ordinal: 1,
+          startSec: 0,
+          mimeType,
+          origin: 'file',
+          fileName,
+          objectKey,
+          sizeBytes,
+          status: 'uploading',
+          createdBy: ctx.actor.user.id,
+        })
+        .returning();
+      const [s] = await ctx.db
+        .select({ title: sessions.title, episode: sessions.episode })
+        .from(sessions)
+        .where(eq(sessions.id, sessionId));
+      createdAny = true;
+      out.files.push({
+        fileName,
+        status: 'created',
+        sessionId,
+        segmentId: id,
+        title: s!.title,
+        episode: s!.episode,
+        upload: await presignUploadTarget(objectKey, mimeType, sizeBytes),
+      });
+      publishSegment(ctx, toAudioSegment(row!));
+    }
+    if (createdAny)
+      ctx.publish(`show:${show.id}`, {
+        type: 'show_changed',
+        showId: show.id,
+        entity: 'show',
+      });
     return out;
   },
 });
@@ -366,7 +563,9 @@ const MAX_VIDEO_PROBES = 4;
 const VIDEO_PROBE_TIMEOUT_MS = 15_000;
 let videoProbes = 0;
 
-type VideoCheck = PlaylistImport['downloadCheck'] & { durationSec: number | null };
+type VideoCheck = PlaylistImport['downloadCheck'] & {
+  durationSec: number | null;
+};
 
 /**
  * Read a video's length (seconds; null when unknown) with the same yt-dlp format selection and
@@ -445,7 +644,12 @@ type ImportList = {
 
 /** The client's own video list (local import helper) as an import list; no yt-dlp here. */
 function clientList(
-  videos: { url: string; title: string; durationSec?: number | null; uploadDate?: string }[],
+  videos: {
+    url: string;
+    title: string;
+    durationSec?: number | null;
+    uploadDate?: string;
+  }[],
 ): ImportList {
   requireStorage();
   const entries = videos.map((v, i) => {
@@ -758,6 +962,7 @@ defineOp({
       .where(and(segmentJobs, eq(jobs.status, 'failed'), isNull(jobs.dismissedAt)));
     if (storageConfigured) {
       ctx.afterCommit(async () => {
+        if (row.status === 'uploading') await abortUploads(row.objectKey).catch(() => {});
         for (const key of [row.objectKey, row.peaksKey]) {
           if (!key) continue;
           try {

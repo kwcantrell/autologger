@@ -1,7 +1,9 @@
 // Media sweep: storage the normal paths leave behind.
 //
 // - Uploads stuck in `uploading` (media.createUpload without media.completeUpload): the row and
-//   any partial object.
+//   any partial object or multipart upload.
+// - Multipart uploads (files over 32 MiB, media/s3.ts) started longer ago than the upload age and
+//   never completed or aborted: their parts are not objects, so nothing else would remove them.
 // - `sessions/<id>/` prefixes whose session no longer exists, and `shows/<id>/` objects whose show
 //   or compilation no longer exists. Deletes remove these after commit, best effort (#124); a
 //   crash, an S3 outage or a job still uploading for a deleted session leaves them behind.
@@ -21,7 +23,14 @@ import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import { changeMessage, publish } from '../core/bus.ts';
 import { db, schema } from '../db/client.ts';
 import { env } from '../env.ts';
-import { deleteObject, deletePrefix, listChildPrefixes, listObjects } from '../media/s3.ts';
+import {
+  abortStaleUploads,
+  abortUploads,
+  deleteObject,
+  deletePrefix,
+  listChildPrefixes,
+  listObjects,
+} from '../media/s3.ts';
 
 const { audioSegments, compilations, sessions, shows } = schema;
 
@@ -51,6 +60,8 @@ export interface SweepResult {
   dryRun: boolean;
   /** Audio segment ids removed (or that would be, in a dry run). */
   uploads: string[];
+  /** Keys of abandoned multipart uploads aborted (or that would be). */
+  multipartUploads: string[];
   /** Whole prefixes removed: `sessions/<id>/` and `shows/<id>/` of deleted sessions and shows. */
   prefixes: string[];
   /** Single objects removed: compilation MP4s of deleted compilations under a live show. */
@@ -87,6 +98,7 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
     ran: false,
     dryRun,
     uploads: [],
+    multipartUploads: [],
     prefixes: [],
     objects: [],
     liveSessionsChecked: 0,
@@ -123,6 +135,7 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
     for (const seg of stuck) {
       if (!dryRun) {
         try {
+          await abortUploads(seg.objectKey);
           await deleteObject(seg.objectKey);
         } catch (e) {
           console.warn(`media sweep: could not delete ${seg.objectKey}: ${(e as Error).message}`);
@@ -258,6 +271,19 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
         }
       }
     }
+
+    // 4. Multipart uploads nobody completed or aborted (their segment or compilation may live on).
+    const before = new Date(now.getTime() - uploadAgeMs);
+    for (const prefix of ['sessions/', 'shows/']) {
+      try {
+        for (const key of await abortStaleUploads(prefix, before, dryRun)) {
+          result.multipartUploads.push(key);
+          console.log(`${tag} unfinished multipart upload of ${key}`);
+        }
+      } catch (e) {
+        console.warn(`media sweep: could not list multipart uploads: ${(e as Error).message}`);
+      }
+    }
   });
 
   if (result.ran) lastLiveCursor = result.liveCursor;
@@ -278,6 +304,15 @@ export function summaryLine(r: SweepResult, elapsedMs: number): string {
   const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
   return `${head}: ${[
     n(r.uploads.length, 'stuck upload', 'stuck uploads'),
+    ...(r.multipartUploads.length
+      ? [
+          n(
+            r.multipartUploads.length,
+            'unfinished multipart upload',
+            'unfinished multipart uploads',
+          ),
+        ]
+      : []),
     n(r.prefixes.length, 'orphan prefix', 'orphan prefixes'),
     n(r.objects.length, 'compilation object', 'compilation objects'),
     n(

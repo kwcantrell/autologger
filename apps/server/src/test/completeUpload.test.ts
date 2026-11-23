@@ -16,8 +16,12 @@ vi.mock('../env.ts', async (importOriginal) => ({
 }));
 vi.mock('../media/s3.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../media/s3.ts')>()),
-  presignUpload: async () => 'http://upload.invalid/put',
-  headObject: async () => ({ size: 1234, contentType: 'audio/wav' }),
+  presignUploadTarget: async (_key: string, contentType: string) => ({
+    uploadUrl: 'http://upload.invalid/put',
+    headers: { 'Content-Type': contentType },
+    expiresAt: new Date().toISOString(),
+  }),
+  finishUpload: async () => ({ size: 1234 }),
   deleteObject: async () => {},
 }));
 
@@ -48,7 +52,9 @@ describe('media.completeUpload transcribe', () => {
         .map((j) => j.kind)
         .sort();
 
-    const a = await call(agent, 'media.completeUpload', { segmentId: await upload() });
+    const a = await call(agent, 'media.completeUpload', {
+      segmentId: await upload(),
+    });
     expect(await kinds(a.id)).toEqual(['transcribe', 'waveform']);
 
     const b = await call(agent, 'media.completeUpload', {
@@ -61,7 +67,10 @@ describe('media.completeUpload transcribe', () => {
     // Someone without access to the session cannot finish its upload.
     const outsider = await makeUser('outsider@example.com');
     await failsWith(
-      call(outsider, 'media.completeUpload', { segmentId: await upload(), transcribe: false }),
+      call(outsider, 'media.completeUpload', {
+        segmentId: await upload(),
+        transcribe: false,
+      }),
       'not_found',
     );
   });

@@ -1,5 +1,6 @@
 import {
   formatFrames,
+  type OpInput,
   parseTimecode,
   type Session,
   type SessionDetail,
@@ -242,47 +243,62 @@ defineOp({
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
     const { show } = await requireShow(ctx, input.showId, 'write');
-    const frameRate = input.frameRate ?? show.defaultFrameRate;
-    let startOffsetFrames = 0;
-    if (input.startTimecode) {
-      const f = parseTimecode(input.startTimecode, frameRate);
-      if (f === null) throw badRequest('Start timecode is not valid for this frame rate.');
-      startOffsetFrames = f;
-    }
-    const date = input.episodeDate ?? new Date().toISOString().slice(0, 10);
-    // Advance the show's counter atomically in this transaction: the row lock serializes parallel
-    // creates, so each default number is handed out once.
-    let episode = input.episode;
-    if (!episode) {
-      const [row] = await ctx.db
-        .update(shows)
-        .set({ nextEpisode: sql`${shows.nextEpisode} + 1` })
-        .where(eq(shows.id, show.id))
-        .returning({ next: shows.nextEpisode });
-      episode = String(row!.next - 1);
-    } else if (/^\d{1,9}$/.test(episode)) {
-      await ctx.db
-        .update(shows)
-        .set({ nextEpisode: sql`greatest(${shows.nextEpisode}, ${Number(episode) + 1})` })
-        .where(eq(shows.id, show.id));
-    }
-    const id = newId('ses');
-    await ctx.db.insert(sessions).values({
-      id,
-      showId: show.id,
-      title: input.title || defaultTitle(show, episode, date),
-      episode,
-      episodeDate: date,
-      notes: input.notes ?? '',
-      keyTerms: [...new Set(input.keyTerms ?? [])],
-      frameRate,
-      startOffsetFrames,
-      createdBy: ctx.actor.user.id,
-    });
+    const id = await insertSession(ctx, show, input);
     ctx.publish(`show:${show.id}`, { type: 'show_changed', showId: show.id, entity: 'show' });
     return getSession(ctx, id);
   },
 });
+
+/**
+ * Insert a session as sessions.create does (default title, episode from the show counter);
+ * returns its id. The caller authorized write access to the show and publishes show_changed.
+ */
+export async function insertSession(
+  ctx: Ctx,
+  show: typeof shows.$inferSelect,
+  input: Omit<OpInput<'sessions.create'>, 'showId'>,
+): Promise<string> {
+  const frameRate = input.frameRate ?? show.defaultFrameRate;
+  let startOffsetFrames = 0;
+  if (input.startTimecode) {
+    const f = parseTimecode(input.startTimecode, frameRate);
+    if (f === null) throw badRequest('Start timecode is not valid for this frame rate.');
+    startOffsetFrames = f;
+  }
+  const date = input.episodeDate ?? new Date().toISOString().slice(0, 10);
+  // Advance the show's counter atomically in this transaction: the row lock serializes parallel
+  // creates, so each default number is handed out once.
+  let episode = input.episode;
+  if (!episode) {
+    const [row] = await ctx.db
+      .update(shows)
+      .set({ nextEpisode: sql`${shows.nextEpisode} + 1` })
+      .where(eq(shows.id, show.id))
+      .returning({ next: shows.nextEpisode });
+    episode = String(row!.next - 1);
+  } else if (/^\d{1,9}$/.test(episode)) {
+    await ctx.db
+      .update(shows)
+      .set({
+        nextEpisode: sql`greatest(${shows.nextEpisode}, ${Number(episode) + 1})`,
+      })
+      .where(eq(shows.id, show.id));
+  }
+  const id = newId('ses');
+  await ctx.db.insert(sessions).values({
+    id,
+    showId: show.id,
+    title: input.title || defaultTitle(show, episode, date),
+    episode,
+    episodeDate: date,
+    notes: input.notes ?? '',
+    keyTerms: [...new Set(input.keyTerms ?? [])],
+    frameRate,
+    startOffsetFrames,
+    createdBy: ctx.actor.user.id,
+  });
+  return id;
+}
 
 /** The session clock as the change log stores it; undo restores exactly these fields. */
 export const clockOf = (s: {

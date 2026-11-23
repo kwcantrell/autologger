@@ -5,16 +5,23 @@
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import type { Readable } from 'node:stream';
+import type { UploadPart, UploadTarget } from '@autologger/contract';
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
   CreateBucketCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
+  ListMultipartUploadsCommand,
   ListObjectsV2Command,
+  ListPartsCommand,
   PutObjectCommand,
   S3Client,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { unavailable } from '../core/errors.ts';
@@ -22,6 +29,14 @@ import { env, storageConfigured } from '../env.ts';
 
 export const UPLOAD_URL_TTL_SEC = 15 * 60;
 export const PLAYBACK_URL_TTL_SEC = 60 * 60;
+/**
+ * Files larger than this go up as a multipart upload in parts of this size (the last one smaller).
+ * Storage may sit behind a proxy such as Cloudflare, which rejects request bodies over 100 MB
+ * and times out slow ones (#357), so every PUT stays well under that.
+ */
+export const UPLOAD_PART_BYTES = 32 * 1024 ** 2;
+/** Part URLs last longer than a single PUT's: a large file on a slow link takes hours. */
+export const UPLOAD_PART_URL_TTL_SEC = 12 * 60 * 60;
 
 function makeClient(endpoint: string | undefined): S3Client {
   return new S3Client({
@@ -144,6 +159,220 @@ export async function presignUpload(key: string, contentType: string): Promise<s
       expiresIn: UPLOAD_URL_TTL_SEC,
     },
   );
+}
+
+/**
+ * Where a client PUTs a file of `sizeBytes` (unknown: one PUT): one presigned PUT up to
+ * UPLOAD_PART_BYTES, else presigned part PUTs of a multipart upload. With `resume`, an unfinished
+ * multipart upload of the same key and size is continued: its parts already stored come back
+ * with `uploaded: true` and no URL (other unfinished uploads of the key are aborted). finishUpload
+ * assembles the parts.
+ */
+export async function presignUploadTarget(
+  key: string,
+  contentType: string,
+  sizeBytes?: number | null,
+  resume = false,
+): Promise<UploadTarget> {
+  if (!sizeBytes || sizeBytes <= UPLOAD_PART_BYTES) {
+    return {
+      uploadUrl: await presignUpload(key, contentType),
+      headers: { 'Content-Type': contentType },
+      expiresAt: new Date(Date.now() + UPLOAD_URL_TTL_SEC * 1000).toISOString(),
+    };
+  }
+  await ensureBucket();
+  const plan = partPlan(sizeBytes);
+  let uploadId: string | null = null;
+  let stored = new Map<number, StoredPart>();
+  for (const id of resume ? await multipartUploadsOf(key) : []) {
+    const parts = await listParts(key, id);
+    // Planned for another size (a different file), or an older attempt: drop it, don't mix parts.
+    const fits = [...parts].every(([n, p]) => plan[n - 1]?.sizeBytes === p.size);
+    if (!uploadId && fits) {
+      uploadId = id;
+      stored = parts;
+    } else await abortMultipart(key, id);
+  }
+  uploadId ??= (
+    await server().send(
+      new CreateMultipartUploadCommand({
+        Bucket: bucket(),
+        Key: key,
+        ContentType: contentType,
+      }),
+    )
+  ).UploadId!;
+  const parts: UploadPart[] = await Promise.all(
+    plan.map(async (p) =>
+      stored.has(p.partNumber)
+        ? { ...p, uploaded: true }
+        : {
+            ...p,
+            url: await getSignedUrl(
+              browser(),
+              new UploadPartCommand({
+                Bucket: bucket(),
+                Key: key,
+                UploadId: uploadId,
+                PartNumber: p.partNumber,
+              }),
+              { expiresIn: UPLOAD_PART_URL_TTL_SEC },
+            ),
+          },
+    ),
+  );
+  return {
+    headers: {},
+    parts,
+    expiresAt: new Date(Date.now() + UPLOAD_PART_URL_TTL_SEC * 1000).toISOString(),
+  };
+}
+
+/** Parts of UPLOAD_PART_BYTES (the last one the rest), numbered from 1. */
+export function partPlan(
+  sizeBytes: number,
+): { partNumber: number; offset: number; sizeBytes: number }[] {
+  const out = [];
+  for (let offset = 0, n = 1; offset < sizeBytes; offset += UPLOAD_PART_BYTES, n++)
+    out.push({
+      partNumber: n,
+      offset,
+      sizeBytes: Math.min(UPLOAD_PART_BYTES, sizeBytes - offset),
+    });
+  return out;
+}
+
+/**
+ * Settle an upload from presignUploadTarget: the stored object's size once the file is complete
+ * (assembling a multipart upload whose parts all arrived), `missing` part numbers when some
+ * have not, or null when nothing arrived. `sizeBytes`: the size the upload was planned for, so
+ * missing trailing parts are noticed (without it the parts must at least be contiguous).
+ */
+export async function finishUpload(
+  key: string,
+  sizeBytes?: number | null,
+): Promise<{ size: number } | { missing: number[] } | null> {
+  const [uploadId, ...older] = await multipartUploadsOf(key);
+  if (!uploadId) {
+    const head = await headObject(key);
+    return head && head.size > 0 ? { size: head.size } : null;
+  }
+  const parts = await listParts(key, uploadId);
+  const numbers = sizeBytes
+    ? partPlan(sizeBytes).map((p) => p.partNumber)
+    : Array.from({ length: Math.max(1, ...parts.keys()) }, (_, i) => i + 1);
+  const missing = numbers.filter((n) => !parts.has(n));
+  if (missing.length) return { missing };
+  await server().send(
+    new CompleteMultipartUploadCommand({
+      Bucket: bucket(),
+      Key: key,
+      UploadId: uploadId,
+      MultipartUpload: {
+        Parts: numbers.map((n) => ({
+          PartNumber: n,
+          ETag: parts.get(n)!.etag,
+        })),
+      },
+    }),
+  );
+  for (const id of older) await abortMultipart(key, id).catch(() => {});
+  const head = await headObject(key);
+  return head ? { size: head.size } : null;
+}
+
+/** In-progress multipart uploads of exactly this key, newest first. */
+async function multipartUploadsOf(key: string): Promise<string[]> {
+  const out: { id: string; at: number }[] = [];
+  let keyMarker: string | undefined;
+  let idMarker: string | undefined;
+  do {
+    const page = await server().send(
+      new ListMultipartUploadsCommand({
+        Bucket: bucket(),
+        Prefix: key,
+        KeyMarker: keyMarker,
+        UploadIdMarker: idMarker,
+      }),
+    );
+    for (const u of page.Uploads ?? [])
+      if (u.Key === key && u.UploadId)
+        out.push({ id: u.UploadId, at: u.Initiated?.getTime() ?? 0 });
+    keyMarker = page.IsTruncated ? page.NextKeyMarker : undefined;
+    idMarker = page.IsTruncated ? page.NextUploadIdMarker : undefined;
+  } while (keyMarker);
+  return out.sort((a, b) => b.at - a.at).map((u) => u.id);
+}
+
+type StoredPart = { size: number; etag: string };
+
+/** Stored parts of a multipart upload by part number. */
+async function listParts(key: string, uploadId: string): Promise<Map<number, StoredPart>> {
+  const out = new Map<number, StoredPart>();
+  let marker: string | undefined;
+  do {
+    const page = await server().send(
+      new ListPartsCommand({
+        Bucket: bucket(),
+        Key: key,
+        UploadId: uploadId,
+        PartNumberMarker: marker,
+      }),
+    );
+    for (const p of page.Parts ?? [])
+      if (p.PartNumber && p.ETag) out.set(p.PartNumber, { size: p.Size ?? 0, etag: p.ETag });
+    marker = page.IsTruncated ? page.NextPartNumberMarker : undefined;
+  } while (marker);
+  return out;
+}
+
+async function abortMultipart(key: string, uploadId: string): Promise<void> {
+  await server().send(
+    new AbortMultipartUploadCommand({
+      Bucket: bucket(),
+      Key: key,
+      UploadId: uploadId,
+    }),
+  );
+}
+
+/** Abort every unfinished multipart upload of a key (its parts are not objects: deleteObject misses them). */
+export async function abortUploads(key: string): Promise<void> {
+  for (const id of await multipartUploadsOf(key)) await abortMultipart(key, id);
+}
+
+/**
+ * Abort unfinished multipart uploads under a prefix started before `before` (the media sweep):
+ * abandoned uploads otherwise keep their parts in storage forever. Returns their keys (with
+ * `dryRun`, the keys it would abort).
+ */
+export async function abortStaleUploads(
+  prefix: string,
+  before: Date,
+  dryRun = false,
+): Promise<string[]> {
+  const out: string[] = [];
+  let keyMarker: string | undefined;
+  let idMarker: string | undefined;
+  do {
+    const page = await server().send(
+      new ListMultipartUploadsCommand({
+        Bucket: bucket(),
+        Prefix: prefix,
+        KeyMarker: keyMarker,
+        UploadIdMarker: idMarker,
+      }),
+    );
+    for (const u of page.Uploads ?? [])
+      if (u.Key && u.UploadId && u.Initiated && u.Initiated < before) {
+        if (!dryRun) await abortMultipart(u.Key, u.UploadId);
+        out.push(u.Key);
+      }
+    keyMarker = page.IsTruncated ? page.NextKeyMarker : undefined;
+    idMarker = page.IsTruncated ? page.NextUploadIdMarker : undefined;
+  } while (keyMarker);
+  return out;
 }
 
 /** `downloadName`: answer with Content-Disposition attachment under that file name. */

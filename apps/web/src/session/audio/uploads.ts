@@ -1,7 +1,9 @@
-// Audio uploads: media.createUpload → PUT to the presigned URL → media.completeUpload.
+// Audio uploads: media.createUpload → PUT to the presigned URL (or, over 32 MiB, each part URL)
+// → media.completeUpload.
 // A small in-memory queue retries failed segments with backoff; the UI subscribes to it to show
 // pending/failed counts and to warn before the tab closes with unsent audio.
 
+import type { UploadTarget } from '@autologger/contract';
 import { RpcError, rpc } from '@/api/rpc';
 import { createStore } from '@/lib/store';
 
@@ -19,8 +21,9 @@ export interface PendingUpload {
   error: string | null;
   /** Server segment id once createUpload succeeded (so a retry re-PUTs the same slot). */
   segmentId?: string;
-  uploadUrl?: string;
-  headers?: Record<string, string>;
+  target?: UploadTarget;
+  /** Parts of a multipart target already PUT (a retry sends only the rest). */
+  partsDone?: number[];
   progress: number;
 }
 
@@ -65,10 +68,33 @@ function put(
   });
 }
 
+/**
+ * PUT the blob to its target: one PUT, or its parts in order (each under the storage proxy's
+ * request size limit), skipping parts already sent.
+ */
+async function send(u: PendingUpload, target: UploadTarget): Promise<void> {
+  const progress = (f: number) => patch(u.key, { progress: f });
+  if (!target.parts) return put(target.uploadUrl!, u.blob, target.headers, progress);
+  const done = new Set(u.partsDone);
+  const total = u.blob.size;
+  let sent = target.parts
+    .filter((p) => done.has(p.partNumber))
+    .reduce((n, p) => n + p.sizeBytes, 0);
+  for (const p of target.parts) {
+    if (done.has(p.partNumber) || p.uploaded || !p.url) continue;
+    await put(p.url, u.blob.slice(p.offset, p.offset + p.sizeBytes), {}, (f) =>
+      progress((sent + f * p.sizeBytes) / total),
+    );
+    sent += p.sizeBytes;
+    done.add(p.partNumber);
+    patch(u.key, { partsDone: [...done] });
+  }
+}
+
 async function uploadOne(u: PendingUpload): Promise<void> {
   patch(u.key, { state: 'uploading', error: null, attempts: u.attempts + 1 });
-  let { segmentId, uploadUrl, headers } = u;
-  if (!segmentId || !uploadUrl) {
+  let { segmentId, target } = u;
+  if (!segmentId || !target) {
     const created = await rpc('media.createUpload', {
       sessionId: u.sessionId,
       mimeType: u.mimeType,
@@ -77,12 +103,12 @@ async function uploadOne(u: PendingUpload): Promise<void> {
       startSec: u.startSec,
       sizeBytes: u.blob.size || undefined,
     });
-    segmentId = created.segment.id;
-    uploadUrl = created.uploadUrl;
-    headers = created.headers;
-    patch(u.key, { segmentId, uploadUrl, headers });
+    const { segment, ...rest } = created;
+    segmentId = segment.id;
+    target = rest;
+    patch(u.key, { segmentId, target, partsDone: [] });
   }
-  await put(uploadUrl, u.blob, headers ?? {}, (f) => patch(u.key, { progress: f }));
+  await send({ ...u, ...uploadQueue.get().find((x) => x.key === u.key) }, target);
   await rpc('media.completeUpload', {
     segmentId,
     durationSec:

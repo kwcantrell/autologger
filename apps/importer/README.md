@@ -6,7 +6,8 @@ compilation video) to AutoLogger. Use it when:
 
 - the playlist or video is **private** (or members-only), which the AutoLogger server can never read;
 - an import fails with **"YouTube is blocking this server's downloads (bot check)"**;
-- a compilation of such sessions has to be **built on your computer**.
+- a compilation of such sessions has to be **built on your computer**;
+- you have an archive of **local audio files** to bring in, one session each (`files`).
 
 Your YouTube cookies never leave your machine; AutoLogger only sees a personal access token.
 
@@ -46,6 +47,11 @@ node autologger-import.mjs video 'https://youtu.be/…' --session <sessionId>
 
 # Build a compilation created with buildLocally (the web app / your agent tells you the id).
 node autologger-import.mjs compile <compilationId> --cookies-from-browser chrome
+
+# Local audio files: one new session per file of a folder, or per row of a CSV manifest
+# (columns file,title,episode,episodeDate,notes,keyTerms; file paths relative to the CSV).
+node autologger-import.mjs files ~/Archive/Season1 --show <showId>
+node autologger-import.mjs files manifest.csv --show <showId> --parallel 4
 ```
 
 | Option                               | Meaning                                                                                                               |
@@ -53,16 +59,22 @@ node autologger-import.mjs compile <compilationId> --cookies-from-browser chrome
 | `--cookies-from-browser <browser>`   | yt-dlp reads your YouTube sign-in from this browser (`chrome`, `firefox`, `edge`, `safari`, `brave`, … `[:profile]`). |
 | `--cookies <file>`                   | A Netscape `cookies.txt` instead.                                                                                     |
 | `--dry-run`                          | Show what would be created, uploaded or built; change nothing.                                                        |
-| `--no-transcribe`                    | `playlist` / `video`: upload the audio (and draw its waveform) without transcribing it; transcribe later if needed.   |
+| `--no-transcribe`                    | `playlist` / `video` / `files`: upload the audio (and draw its waveform) without transcribing it.                     |
+| `--parallel <n>`                     | `files`: how many files upload at a time (default 3).                                                                 |
 | `--order playlist\|reverse`          | playlist: episode numbers follow the playlist; reverse when it lists newest first.                                    |
 | `--title-template <t>`               | Session titles, with `{title}` and `{episode}` (default `{title}`).                                                   |
 | `--work-dir <dir>`                   | Where downloads and clips go (default `~/.cache/autologger-import`).                                                  |
 | `--keep`                             | Keep the downloaded files after a successful upload.                                                                  |
 | `--yt-dlp <path>`, `--ffmpeg <path>` | The tools, if not on `PATH` (also `YTDLP_PATH`, `FFMPEG_PATH`).                                                       |
 
-**Resuming.** Run the same command again after an interruption: videos whose audio is already in
-AutoLogger are skipped, partial downloads continue, and compilation clips already encoded are
-reused. Sessions are never created twice for the same video in a show.
+**Resuming.** Run the same command again after an interruption: videos and files whose audio is
+already in AutoLogger are skipped, partial downloads continue, compilation clips already encoded
+are reused, and a large file's upload continues with the parts it is missing. Sessions are never
+created twice for the same video (or the same file name and size) in a show.
+
+**Large files** (over 32 MiB) are uploaded in 32 MiB parts, so they get through proxies such as
+Cloudflare that refuse requests over 100 MB; a part that fails with a timeout or server error is
+retried on its own.
 
 **Sessions** get the same titles, episode numbers and dates as a server-side playlist import. Their
 audio is transcribed (unless `--no-transcribe`) and drawn as a waveform like any upload. Videos the server cannot download

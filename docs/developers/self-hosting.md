@@ -186,8 +186,15 @@ In production: `node src/worker/main.ts` with the same environment as the app (c
 
 - **Upload** (recording chunks and local files): `media.createUpload` creates an `audio_segments`
   row (`uploading`; `startSec` defaults to the end of the previous segments) and returns a 15-minute
-  presigned PUT plus the headers to send. After the PUT, `media.completeUpload` checks the object
-  exists, marks the segment `ready`, sets the session's source kind and enqueues `transcribe` and `waveform`.
+  presigned PUT plus the headers to send. A file over 32 MiB (`sizeBytes`) gets an S3 multipart
+  upload instead: one presigned PUT per 32 MiB part, valid 12 hours, so no request comes near the
+  100 MB body limit of a proxy such as Cloudflare in front of storage (`src/media/s3.ts`). After the
+  PUT(s), `media.completeUpload` lists the stored parts and assembles them (or reports the missing
+  ones), checks the object exists, marks the segment `ready`, sets the session's source kind and
+  enqueues `transcribe` and `waveform`; the waveform job also fills in `durationSec` when the client
+  did not send it. `media.importFiles` / `media.completeUploads` do the same for many local files,
+  one new session each. The media sweep aborts multipart uploads left unfinished for longer than
+  `MEDIA_SWEEP_UPLOAD_AGE_HOURS`.
 - **Jobs** live in the `jobs` table. Ops enqueue with `enqueueJob(tx, …)` (`src/media/jobs.ts`)
   inside their transaction, which also sends `NOTIFY autologger_jobs` to wake workers. Workers claim
   with `FOR UPDATE SKIP LOCKED` (skipping kinds whose `WORKER_CONCURRENCY_<KIND>` slots are full in

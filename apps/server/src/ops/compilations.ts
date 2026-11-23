@@ -19,10 +19,10 @@ import { enqueueJob, toJob, withJobEstimates } from '../media/jobs.ts';
 import {
   compilationKeyFor,
   deleteObject,
-  headObject,
+  finishUpload,
   PLAYBACK_URL_TTL_SEC,
   presignPlayback,
-  presignUpload,
+  presignUploadTarget,
   requireStorage,
 } from '../media/s3.ts';
 import { deleteEvent, insertEvent, publishEvents } from './events.ts';
@@ -469,10 +469,10 @@ async function loadLocalBuild(ctx: Ctx, compilationId: string) {
 defineOp({
   name: 'compilations.createUpload',
   description:
-    'For a compilation created with buildLocally: true (compilationId from compilations_create or compilations_list): what to build and where to upload it. Normally the AutoLogger import helper calls this (`autologger-import compile <compilationId>`, /docs/developers/import-helper); agents rarely need it. Returns {compilation, sources, uploadUrl, headers}: sources has one entry per clip in play order, {sessionId, url (the YouTube video), fromSec, toSec} in VIDEO seconds (session seconds minus where the video starts in the session); uploadUrl is a presigned PUT for the MP4 (send exactly headers), valid 15 minutes — call this again for a fresh one after a long build. Writes nothing. Fails with bad_request when a clip cannot be built any more (session deleted or re-imported), conflict for a server-built or already ready compilation. Needs write access to the show.',
+    "For a compilation created with buildLocally: true (compilationId from compilations_create or compilations_list): what to build and where to upload it. Normally the AutoLogger import helper calls this (`autologger-import compile <compilationId>`, /docs/developers/import-helper); agents rarely need it. Returns {compilation, sources, uploadUrl or parts, headers, expiresAt}: sources has one entry per clip in play order, {sessionId, url (the YouTube video), fromSec, toSec} in VIDEO seconds (session seconds minus where the video starts in the session); uploadUrl is a presigned PUT for the MP4 (send exactly headers), valid 15 minutes — call this again for a fresh one after a long build. Pass sizeBytes (the MP4's exact size) once it is built: over 32 MiB you get parts instead, [{partNumber, offset, sizeBytes, url}] valid 12 hours — PUT bytes [offset, offset + sizeBytes) of the file to each url (one PUT over about 100 MB is rejected by the storage proxy); calling again with the same sizeBytes resumes, marking parts already stored uploaded: true. Writes nothing. Fails with bad_request when a clip cannot be built any more (session deleted or re-imported), conflict for a server-built or already ready compilation. Needs write access to the show.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { compilationId }) {
+  async run(ctx, { compilationId, sizeBytes }) {
     const row = await loadLocalBuild(ctx, compilationId);
     if (row.status === 'ready') throw conflict('This compilation is already ready.');
     const sources = await requireCompilable(ctx, row.clips, row.showId, true);
@@ -486,8 +486,7 @@ defineOp({
         fromSec: s.fromSec,
         toSec: s.toSec,
       })),
-      uploadUrl: await presignUpload(key, 'video/mp4'),
-      headers: { 'Content-Type': 'video/mp4' },
+      ...(await presignUploadTarget(key, 'video/mp4', sizeBytes, true)),
     };
   },
 });
@@ -495,14 +494,18 @@ defineOp({
 defineOp({
   name: 'compilations.completeUpload',
   description:
-    'Finish a local build (buildLocally) once the MP4 was PUT to the uploadUrl of compilations_createUpload: checks the video arrived in storage and marks the compilation "ready" (url then plays or downloads it, as for server-built ones). durationSec: the video\'s measured length in seconds (default: the sum of the clip lengths). Calling it again for a ready compilation returns it unchanged. Fails with conflict when nothing was uploaded yet. Normally called by the import helper (`autologger-import compile`). Needs write access to the show.',
+    'Finish a local build (buildLocally) once the MP4 was PUT to the uploadUrl of compilations_createUpload: checks the video arrived in storage and marks the compilation "ready" (url then plays or downloads it, as for server-built ones). durationSec: the video\'s measured length in seconds (default: the sum of the clip lengths). Calling it again for a ready compilation returns it unchanged. Fails with conflict when nothing was uploaded yet, or when parts of a multipart upload are missing (the message lists them). Normally called by the import helper (`autologger-import compile`). Needs write access to the show.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { compilationId, durationSec }) {
     const found = await loadLocalBuild(ctx, compilationId);
     if (found.status === 'ready') return (await toEntities(ctx, [found]))[0]!;
     const key = compilationKeyFor(found.showId, found.id);
-    const head = await headObject(key);
+    const head = await finishUpload(key);
+    if (head && 'missing' in head)
+      throw conflict(
+        `Parts ${head.missing.slice(0, 20).join(', ')}${head.missing.length > 20 ? ', …' : ''} of the video have not arrived. PUT them, then complete it again.`,
+      );
     if (!head || head.size === 0)
       throw conflict('The video has not arrived in storage yet. PUT the MP4 first.');
     const [row] = await ctx.db

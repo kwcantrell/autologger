@@ -481,6 +481,34 @@ export const opInputs = {
     /** false: store the audio and draw its waveform, no transcription. */
     transcribe: z.boolean().default(true),
   }),
+  'media.completeUploads': z.object({
+    segmentIds: z.array(id).min(1).max(200),
+    transcribe: z.boolean().default(true),
+  }),
+  'media.importFiles': z.object({
+    showId: id,
+    files: z
+      .array(
+        z.object({
+          /** The file's name (with extension); with sizeBytes it identifies the file on re-runs. */
+          fileName: z.string().trim().min(1).max(300),
+          sizeBytes: z
+            .number()
+            .int()
+            .positive()
+            .max(5 * 1024 ** 3),
+          mimeType: z.string().min(3).max(100),
+          title: z.string().trim().max(200).optional(),
+          episode: z.string().trim().max(40).optional(),
+          episodeDate: z.iso.date().optional(),
+          notes: z.string().max(10000).optional(),
+          keyTerms: keyTermList.optional(),
+        }),
+      )
+      .min(1)
+      .max(100),
+    dryRun: z.boolean().default(false),
+  }),
   'media.playbackUrl': z.object({ segmentId: id }),
   'media.waveform': z.object({ sessionId: id }),
   'media.importYoutube': z.object({
@@ -586,7 +614,16 @@ export const opInputs = {
   'compilations.list': z.object({ showId: id }),
   'compilations.delete': z.object({ compilationId: id }),
   'compilations.retry': z.object({ compilationId: id, buildLocally: z.boolean().default(false) }),
-  'compilations.createUpload': z.object({ compilationId: id }),
+  'compilations.createUpload': z.object({
+    compilationId: id,
+    /** The MP4's size: over 32 MiB it is uploaded in parts. */
+    sizeBytes: z
+      .number()
+      .int()
+      .positive()
+      .max(5 * 1024 ** 3)
+      .optional(),
+  }),
   'compilations.completeUpload': z.object({ compilationId: id, durationSec: sec.optional() }),
 
   // ── search ────────────────────────────────────────────────
@@ -742,14 +779,57 @@ export interface PlaylistImport {
   downloadCheck: { status: 'ok' | 'blocked' | 'skipped'; message: string };
 }
 
+/** One part of a multipart upload: PUT bytes [offset, offset + sizeBytes) of the file to url. */
+export interface UploadPart {
+  partNumber: number;
+  offset: number;
+  sizeBytes: number;
+  /** Presigned PUT; absent when the part is already stored (`uploaded`). */
+  url?: string;
+  /** Stored by an earlier attempt: skip it. */
+  uploaded?: true;
+}
+
+/**
+ * Where to PUT a file: `uploadUrl` (one PUT with exactly `headers`) for files up to 32 MiB or of
+ * unknown size, else `parts` (one PUT per part, no headers needed). The server assembles the
+ * parts when the upload is completed.
+ */
+export interface UploadTarget {
+  uploadUrl?: string;
+  headers: Record<string, string>;
+  parts?: UploadPart[];
+  /** When the URLs stop working (ISO time). */
+  expiresAt: string;
+}
+
 /** compilations.createUpload: what the local import helper downloads, and where it PUTs the MP4. */
-export interface CompilationUpload {
+export interface CompilationUpload extends UploadTarget {
   compilation: Compilation;
   /** One per clip, in play order: the YouTube video and the range in VIDEO seconds to cut. */
   sources: { sessionId: string; url: string; fromSec: number; toSec: number }[];
-  /** Presigned PUT for the MP4 (Content-Type video/mp4), valid 15 minutes. */
-  uploadUrl: string;
-  headers: Record<string, string>;
+}
+
+/** media.importFiles: one entry per file, in input order. */
+export interface FileImport {
+  dryRun: boolean;
+  files: {
+    fileName: string;
+    /** created: new session; resumed: its earlier upload never finished; skipped: already uploaded. */
+    status: 'created' | 'resumed' | 'skipped';
+    sessionId: string | null;
+    segmentId: string | null;
+    title: string;
+    episode: string | null;
+    /** created / resumed (not in a dry run): where to PUT the file. */
+    upload?: UploadTarget;
+  }[];
+}
+
+/** media.completeUploads: the segments completed, and those whose bytes are not all stored yet. */
+export interface UploadsCompleted {
+  completed: AudioSegment[];
+  pending: { segmentId: string; message: string; missingParts?: number[] }[];
 }
 
 export interface OpOutputs {
@@ -859,12 +939,10 @@ export interface OpOutputs {
   'wiki.restore': WikiPage;
   'wiki.lint': WikiLint;
   'media.list': AudioSegment[];
-  'media.createUpload': {
-    segment: AudioSegment;
-    uploadUrl: string;
-    headers: Record<string, string>;
-  };
+  'media.createUpload': UploadTarget & { segment: AudioSegment };
   'media.completeUpload': AudioSegment;
+  'media.completeUploads': UploadsCompleted;
+  'media.importFiles': FileImport;
   'media.playbackUrl': { url: string; expiresAt: string };
   'media.waveform': SegmentWaveform[];
   'media.importYoutube': Job;

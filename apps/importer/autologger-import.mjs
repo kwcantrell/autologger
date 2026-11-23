@@ -15,15 +15,18 @@ import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const VERSION = '1.1.0';
+export const VERSION = '1.2.0';
 
-const USAGE = `autologger-import ${VERSION} — import YouTube videos into AutoLogger from your computer
+const USAGE = `autologger-import ${VERSION} — import YouTube videos and local audio into AutoLogger from your computer
 
 Usage:
   autologger-import playlist <playlist-url> --show <showId> [--order playlist|reverse]
                              [--title-template "{episode}: {title}"]
   autologger-import video <video-url> (--show <showId> | --session <sessionId>)
   autologger-import compile <compilationId>
+  autologger-import files <folder | manifest.csv> --show <showId> [--parallel 3]
+                             one new session per local audio/video file (a folder's files, or the
+                             CSV's rows: file,title,episode,episodeDate,notes,keyTerms)
   autologger-import youtube-login (--team <teamId> | --show <showId>) (--cookies-from-browser <browser> | --cookies <file>)
                              give the AutoLogger server this YouTube sign-in for the team (of the
                              show), so it imports and compiles all its shows' videos by itself
@@ -34,7 +37,8 @@ Options:
                                     (chrome, firefox, edge, safari, brave, …[:profile])
   --cookies <file>                  yt-dlp cookies.txt (Netscape format) instead
   --dry-run                         show what would happen; create and upload nothing
-  --no-transcribe                   playlist/video: upload the audio without transcribing it
+  --no-transcribe                   playlist/video/files: upload the audio without transcribing it
+  --parallel <n>                    files: uploads at a time (default 3)
   --keep                            keep downloaded files after uploading
   --work-dir <dir>                  where downloads go (default ~/.cache/autologger-import)
   --yt-dlp <path>                   yt-dlp binary (default: YTDLP_PATH or yt-dlp on PATH)
@@ -45,7 +49,8 @@ Environment:
   AUTOLOGGER_URL    your AutoLogger address, e.g. https://autologger.example.com
   AUTOLOGGER_TOKEN  a personal access token (Settings › Agents › Personal access tokens)
 
-Re-running a command resumes: videos already uploaded and clips already encoded are skipped.`;
+Re-running a command resumes: videos and files already uploaded and clips already encoded are
+skipped, and an interrupted large upload continues with the parts it is missing.`;
 
 /** Same format choices as the server (apps/server/src/media/youtube.ts). */
 const AUDIO_FORMAT = 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio';
@@ -66,6 +71,25 @@ const MIME_BY_EXT = {
   aac: 'audio/aac',
 };
 
+/** Local files the files command picks up from a folder, and their upload type. */
+/** @type {Record<string, string>} */
+const FILE_MIME_BY_EXT = {
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  aac: 'audio/aac',
+  wav: 'audio/wav',
+  flac: 'audio/flac',
+  ogg: 'audio/ogg',
+  opus: 'audio/ogg',
+  webm: 'audio/webm',
+  aif: 'audio/aiff',
+  aiff: 'audio/aiff',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+};
+/** media.importFiles takes at most this many files per call. */
+const FILES_PER_CALL = 100;
+
 /** yt-dlp availability values the AutoLogger server can never download. */
 const PRIVATE_AVAILABILITY = new Set(['private', 'needs_auth', 'subscriber_only', 'premium_only']);
 
@@ -80,7 +104,7 @@ export class CliError extends Error {}
  *   session?: string;
  *   order: 'playlist' | 'reverse'; titleTemplate?: string; cookiesFromBrowser?: string;
  *   cookies?: string; dryRun: boolean; keep: boolean; transcribe: boolean; workDir?: string;
- *   ytDlp?: string; ffmpeg?: string; help: boolean;
+ *   ytDlp?: string; ffmpeg?: string; help: boolean; parallel: number;
  * }} Args
  */
 
@@ -95,6 +119,7 @@ export function parseArgs(argv) {
     keep: false,
     transcribe: true,
     help: false,
+    parallel: 3,
   };
   /** @type {Record<string, (v: string) => void>} */
   const withValue = {
@@ -107,6 +132,12 @@ export function parseArgs(argv) {
     '--work-dir': (v) => (a.workDir = v),
     '--yt-dlp': (v) => (a.ytDlp = v),
     '--ffmpeg': (v) => (a.ffmpeg = v),
+    '--parallel': (v) => {
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 1 || n > 16)
+        throw new CliError('--parallel is a whole number from 1 to 16.');
+      a.parallel = n;
+    },
     '--order': (v) => {
       if (v !== 'playlist' && v !== 'reverse')
         throw new CliError('--order is playlist or reverse.');
@@ -199,13 +230,14 @@ const errorText = (e) => {
 };
 
 /**
- * PUT a file to a presigned URL with the given headers, reporting progress.
+ * PUT a file (or `range` of it) to a presigned URL with the given headers, reporting progress.
  * @param {string} url @param {Record<string, string>} headers @param {string} file
  * @param {(sent: number, total: number) => void} [onProgress]
+ * @param {{ offset: number; sizeBytes: number }} [range]
  * @returns {Promise<void>}
  */
-export async function putFile(url, headers, file, onProgress) {
-  const total = (await stat(file)).size;
+export async function putFile(url, headers, file, onProgress, range) {
+  const total = range ? range.sizeBytes : (await stat(file)).size;
   const u = new URL(url);
   const mod = u.protocol === 'https:' ? https : http;
   await new Promise((resolvePut, reject) => {
@@ -229,7 +261,10 @@ export async function putFile(url, headers, file, onProgress) {
     );
     req.on('error', (e) => reject(new CliError(`Upload failed: ${errorText(e)}`)));
     let sent = 0;
-    const stream = createReadStream(file);
+    const stream = createReadStream(
+      file,
+      range ? { start: range.offset, end: range.offset + range.sizeBytes - 1 } : {},
+    );
     stream.on('data', (chunk) => {
       sent += chunk.length;
       onProgress?.(sent, total);
@@ -237,6 +272,57 @@ export async function putFile(url, headers, file, onProgress) {
     stream.on('error', reject);
     stream.pipe(req);
   });
+}
+
+/**
+ * @typedef {{ partNumber: number; offset: number; sizeBytes: number; url?: string; uploaded?: boolean }} UploadPart
+ * @typedef {{ uploadUrl?: string; headers: Record<string, string>; parts?: UploadPart[] }} UploadTarget
+ */
+
+/** Storage answers worth retrying: proxy timeouts (Cloudflare 524), 5xx, dropped connections. */
+const TRANSIENT_UPLOAD = /HTTP (?:5\d\d|408|429)|ECONNRESET|EPIPE|ETIMEDOUT|socket hang up/;
+
+/**
+ * PUT a file to an upload target of media.createUpload / media.importFiles /
+ * compilations.createUpload: one PUT, or its parts in order (each well under the 100 MB a proxy
+ * such as Cloudflare accepts), skipping parts already stored. Each PUT is retried a few times
+ * when storage or the network fails transiently.
+ * @param {UploadTarget} target @param {string} file
+ * @param {(sent: number, total: number) => void} [onProgress]
+ */
+export async function uploadTo(target, file, onProgress) {
+  const total = (await stat(file)).size;
+  /** @param {() => Promise<void>} put */
+  const retrying = async (put) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await put();
+      } catch (e) {
+        if (attempt >= 4 || !TRANSIENT_UPLOAD.test(errorText(e))) throw e;
+        await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
+      }
+    }
+  };
+  if (!target.parts) {
+    const url = target.uploadUrl;
+    if (!url) throw new CliError('The server returned no upload URL.');
+    return retrying(() => putFile(url, target.headers, file, onProgress));
+  }
+  let sent = 0;
+  for (const p of target.parts) {
+    if (p.uploaded || !p.url) {
+      sent += p.sizeBytes;
+      continue;
+    }
+    const url = p.url;
+    await retrying(() =>
+      putFile(url, {}, file, (n) => onProgress?.(sent + n, total), {
+        offset: p.offset,
+        sizeBytes: p.sizeBytes,
+      }),
+    );
+    sent += p.sizeBytes;
+  }
 }
 
 // ── tools ──────────────────────────────────────────────────────
@@ -490,7 +576,7 @@ async function importInto(ctx, sessionId, url, label) {
     `video-${new URL(url).searchParams.get('v') ?? sessionId}`,
   );
   const size = (await stat(dl.file)).size;
-  const { segment, uploadUrl, headers } = await ctx.rpc('media.createUpload', {
+  const { segment, ...target } = await ctx.rpc('media.createUpload', {
     sessionId,
     mimeType: dl.mimeType,
     origin: 'youtube',
@@ -504,7 +590,7 @@ async function importInto(ctx, sessionId, url, label) {
     },
   });
   let shown = -1;
-  await putFile(uploadUrl, headers, dl.file, (sent, total) => {
+  await uploadTo(target, dl.file, (sent, total) => {
     const pct = Math.floor((sent / total) * 100);
     if (process.stdout.isTTY && pct !== shown && pct % 10 === 0) {
       shown = pct;
@@ -688,7 +774,7 @@ async function videoCommand(ctx, args) {
 /**
  * @typedef {{ sessionId: string; url: string; fromSec: number; toSec: number }} Source
  * @typedef {{ compilation: { id: string; title: string; status: string; clips: { label?: string }[] };
- *   sources: Source[]; uploadUrl: string; headers: Record<string, string> }} Plan
+ *   sources: Source[] } & UploadTarget} Plan
  */
 
 /** @param {Ctx} ctx @param {Args} args */
@@ -753,15 +839,236 @@ async function compileCommand(ctx, args) {
   const size = (await stat(out)).size;
   // A fresh upload URL: the first one may have expired during the build.
   /** @type {Plan} */
-  const upload = await ctx.rpc('compilations.createUpload', { compilationId });
+  const upload = await ctx.rpc('compilations.createUpload', { compilationId, sizeBytes: size });
   say(`Uploading ${mb(size)}…`);
-  await putFile(upload.uploadUrl, upload.headers, out);
+  await uploadTo(upload, out);
   const ready = await ctx.rpc('compilations.completeUpload', {
     compilationId,
     ...(durationSec ? { durationSec } : {}),
   });
   if (!ctx.keep) await rm(dir, { recursive: true, force: true });
   say(`Ready: "${ready.title}" (${clock(ready.durationSec)}) is on the Compilations page.`);
+}
+
+/**
+ * @typedef {{ path: string; fileName: string; sizeBytes: number; mimeType: string; title?: string;
+ *   episode?: string; episodeDate?: string; notes?: string; keyTerms?: string[] }} LocalFile
+ * @typedef {{ fileName: string; status: 'created' | 'resumed' | 'skipped'; sessionId: string | null;
+ *   segmentId: string | null; title: string; episode: string | null; upload?: UploadTarget }} FilePlan
+ */
+
+/**
+ * Parse CSV (RFC 4180: quoted fields with "" escapes and line breaks) into rows of cells.
+ * @param {string} text @returns {string[][]}
+ */
+export function parseCsv(text) {
+  /** @type {string[][]} */
+  const rows = [];
+  /** @type {string[]} */
+  let row = [];
+  let cell = '';
+  let quoted = false;
+  const endCell = () => {
+    row.push(cell);
+    cell = '';
+  };
+  const endRow = () => {
+    endCell();
+    rows.push(row);
+    row = [];
+  };
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else if (c === '"') quoted = false;
+      else cell += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') endCell();
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      endRow();
+    } else cell += c;
+  }
+  if (cell !== '' || row.length) endRow();
+  return rows.filter((r) => r.some((v) => v.trim() !== ''));
+}
+
+/** @param {string} name */
+const mimeForFile = (name) => FILE_MIME_BY_EXT[name.split('.').at(-1)?.toLowerCase() ?? ''];
+
+/**
+ * The files to import: a folder's audio/video files (by extension, sorted by name), or the rows
+ * of a CSV manifest (header row; columns file, title, episode, episodeDate, notes, keyTerms with
+ * terms separated by ";"; file paths relative to the manifest).
+ * @param {string} target @returns {Promise<LocalFile[]>}
+ */
+export async function localFiles(target) {
+  const at = resolve(target);
+  const info = await stat(at).catch(() => null);
+  if (!info) throw new CliError(`${target} does not exist.`);
+  /** @param {string} path @param {Partial<LocalFile>} [meta] @returns {Promise<LocalFile>} */
+  const describe = async (path, meta = {}) => {
+    const fileName = path.split(/[\\/]/).at(-1) ?? path;
+    const mimeType = mimeForFile(fileName);
+    if (!mimeType)
+      throw new CliError(
+        `${fileName}: not an audio or video file this helper knows (${Object.keys(FILE_MIME_BY_EXT).join(', ')}).`,
+      );
+    const s = await stat(path).catch(() => null);
+    if (!s?.isFile()) throw new CliError(`${path} is not a file.`);
+    if (s.size === 0) throw new CliError(`${fileName} is empty.`);
+    return { ...meta, path, fileName, sizeBytes: s.size, mimeType };
+  };
+  if (info.isDirectory()) {
+    const names = (await readdir(at, { withFileTypes: true }))
+      .filter((d) => d.isFile() && mimeForFile(d.name))
+      .map((d) => d.name)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    return Promise.all(names.map((n) => describe(join(at, n))));
+  }
+  const [header, ...rows] = parseCsv(await readFile(at, 'utf8'));
+  const col = (/** @type {string[]} */ ...names) =>
+    (header ?? []).findIndex((h) =>
+      names.includes(
+        h
+          .trim()
+          .toLowerCase()
+          .replace(/[\s_-]/g, ''),
+      ),
+    );
+  const c = {
+    file: col('file', 'path', 'filename'),
+    title: col('title'),
+    episode: col('episode'),
+    date: col('episodedate', 'date'),
+    notes: col('notes'),
+    keyTerms: col('keyterms'),
+  };
+  if (c.file < 0)
+    throw new CliError(
+      `${target}: the first row must name the columns, with a "file" column (and optionally title, episode, episodeDate, notes, keyTerms).`,
+    );
+  const base = resolve(at, '..');
+  return Promise.all(
+    rows.map((r, i) => {
+      const get = (/** @type {number} */ k) => (k >= 0 ? (r[k] ?? '').trim() : '');
+      const file = get(c.file);
+      if (!file) throw new CliError(`${target} row ${i + 2}: no file.`);
+      const date = get(c.date);
+      if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date))
+        throw new CliError(`${target} row ${i + 2}: episodeDate must be YYYY-MM-DD.`);
+      const terms = get(c.keyTerms)
+        .split(';')
+        .map((t) => t.trim())
+        .filter(Boolean);
+      return describe(resolve(base, file), {
+        ...(get(c.title) ? { title: get(c.title) } : {}),
+        ...(get(c.episode) ? { episode: get(c.episode) } : {}),
+        ...(date ? { episodeDate: date } : {}),
+        ...(get(c.notes) ? { notes: get(c.notes) } : {}),
+        ...(terms.length ? { keyTerms: terms } : {}),
+      });
+    }),
+  );
+}
+
+/**
+ * Run `fn` over `items`, at most `limit` at a time.
+ * @template T @param {T[]} items @param {number} limit @param {(item: T) => Promise<void>} fn
+ */
+async function eachLimited(items, limit, fn) {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await fn(/** @type {T} */ (items[next++]));
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
+/**
+ * Import local audio/video files into a show: one new session per file (media.importFiles, up to
+ * 100 per call), the uploads in parallel, then media.completeUploads. Re-running skips files
+ * already uploaded and resumes unfinished ones (the server recognizes a file by name and size).
+ * @param {Ctx} ctx @param {Args} args
+ */
+async function filesCommand(ctx, args) {
+  if (!args.target || !args.show)
+    throw new CliError(
+      'Usage: autologger-import files <folder | manifest.csv> --show <showId> (shows_list or the show URL in the web app)',
+    );
+  const files = await localFiles(args.target);
+  if (!files.length) throw new CliError(`No audio or video files in ${args.target}.`);
+  const seen = new Map();
+  for (const f of files) {
+    const id = `${f.sizeBytes}:${f.fileName}`;
+    if (seen.has(id))
+      throw new CliError(`${f.path} and ${seen.get(id)} look like the same file (name and size).`);
+    seen.set(id, f.path);
+  }
+  say(
+    `${files.length} file${files.length === 1 ? '' : 's'}, ${mb(files.reduce((n, f) => n + f.sizeBytes, 0))}.`,
+  );
+  const counts = { created: 0, resumed: 0, skipped: 0, uploaded: 0 };
+  /** @type {string[]} */
+  const failed = [];
+  for (let i = 0; i < files.length; i += FILES_PER_CALL) {
+    const batch = files.slice(i, i + FILES_PER_CALL);
+    /** @type {{ files: FilePlan[] }} */
+    const plan = await ctx.rpc('media.importFiles', {
+      showId: args.show,
+      files: batch.map(({ path: _, ...f }) => f),
+      dryRun: ctx.dryRun,
+    });
+    const jobs = plan.files.map((f, k) => ({ f, file: /** @type {LocalFile} */ (batch[k]) }));
+    for (const { f, file } of jobs) {
+      counts[f.status]++;
+      const what = { created: 'new    ', resumed: 'resume ', skipped: 'exists ' }[f.status];
+      say(
+        `  ${what} ${f.episode ? `#${f.episode} ` : ''}${f.title} ← ${file.fileName} (${mb(file.sizeBytes)})`,
+      );
+    }
+    if (ctx.dryRun) continue;
+    /** @type {string[]} */
+    const uploaded = [];
+    await eachLimited(
+      jobs.filter((j) => j.f.upload && j.f.segmentId),
+      args.parallel,
+      async ({ f, file }) => {
+        try {
+          await uploadTo(/** @type {UploadTarget} */ (f.upload), file.path);
+          uploaded.push(/** @type {string} */ (f.segmentId));
+          say(`  uploaded ${file.fileName}`);
+        } catch (e) {
+          failed.push(`${file.fileName}: ${errorText(e)}`);
+          say(`  FAILED   ${file.fileName}: ${errorText(e)}`);
+        }
+      },
+    );
+    if (!uploaded.length) continue;
+    /** @type {{ completed: { id: string }[]; pending: { segmentId: string; message: string }[] }} */
+    const done = await ctx.rpc('media.completeUploads', {
+      segmentIds: uploaded,
+      ...(ctx.transcribe ? {} : { transcribe: false }),
+    });
+    counts.uploaded += done.completed.length;
+    const names = new Map(jobs.map((j) => [j.f.segmentId, j.file.fileName]));
+    for (const p of done.pending) failed.push(`${names.get(p.segmentId)}: ${p.message}`);
+  }
+  if (ctx.dryRun) {
+    say(
+      `Dry run: ${counts.created} new session(s), ${counts.resumed} to resume, ${counts.skipped} already uploaded. Nothing was changed.`,
+    );
+    return;
+  }
+  say(
+    `Done: ${counts.uploaded} uploaded (${counts.created} new, ${counts.resumed} resumed), ${counts.skipped} already there; ${ctx.transcribe ? 'transcription queued' : 'not transcribed (--no-transcribe)'}.`,
+  );
+  if (failed.length)
+    throw new CliError(
+      `${failed.length} file(s) did not finish:\n  ${failed.join('\n  ')}\nRun the same command again to resume them.`,
+    );
 }
 
 /** @param {string} p */
@@ -1038,12 +1345,13 @@ export async function main(argv, env = process.env) {
     playlist: playlistCommand,
     video: videoCommand,
     compile: compileCommand,
+    files: filesCommand,
     'youtube-login': youtubeLoginCommand,
   };
   const command = commands[/** @type {keyof typeof commands} */ (args.command)];
   if (!command) {
     process.stderr.write(
-      `Unknown command ${args.command}. Commands: playlist, video, compile, youtube-login. See --help.\n`,
+      `Unknown command ${args.command}. Commands: playlist, video, compile, files, youtube-login. See --help.\n`,
     );
     return 2;
   }
