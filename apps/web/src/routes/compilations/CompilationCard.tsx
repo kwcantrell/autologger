@@ -99,7 +99,7 @@ export function CompilationCard({
             <p className="m-0 text-xs text-si-dim">
               {c.clips.length} clip{c.clips.length === 1 ? '' : 's'} · {fmtShort(c.durationSec)}
               {c.sizeBytes ? ` · ${fmtSize(c.sizeBytes)}` : ''} ·{' '}
-              {new Date(c.createdAt).toLocaleDateString()}
+              {new Date(c.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}
               {c.createdBy ? ` by ${c.createdBy.name}` : ''}
             </p>
           </div>

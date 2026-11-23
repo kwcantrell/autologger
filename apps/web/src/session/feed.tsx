@@ -2,7 +2,7 @@
 // a table (the shared Table parts) with sticky label-type headers, cell faces, and the leading
 // jump-to-time button.
 
-import { Check, Clock, Download, Filter, Pencil, Play, Plus, X } from 'lucide-react';
+import { Check, Clock, Download, Filter, Pencil, Play, Plus, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '@/shared/components/ui/button';
 import {
@@ -78,7 +78,7 @@ const ICON = { className: 'block size-[18px]', 'aria-hidden': true } as const;
 export const IconPlus = () => <Plus {...ICON} />;
 export const IconPencil = () => <Pencil {...ICON} />;
 export const IconCheck = () => <Check {...ICON} />;
-export const IconX = () => <X {...ICON} />;
+export const IconTrash = () => <Trash2 {...ICON} />;
 export const IconClock = () => <Clock {...ICON} />;
 export const IconFilter = () => <Filter {...ICON} />;
 export const IconDownload = () => <Download {...ICON} />;
