@@ -1,9 +1,10 @@
-// Outbound links shared by the landing page's header menus, developer cards and footer.
+// Links shared by the landing page's header menus, developer cards and footer, and by the docs
+// pages' header and footer (the same chrome).
 
-const REPO = 'https://github.com/kwcantrell/autologger';
-const BLOB = `${REPO}/blob/main`;
-/** Upstream docs folder; a server's DOCS_URL (capabilities.docsUrl) replaces it. */
-const UPSTREAM_DOCS = `${BLOB}/docs`;
+import { DOC_PAGES, docsHref } from '@/lib/docsLinks';
+
+export const REPO_URL = 'https://github.com/kwcantrell/autologger';
+const REPO = REPO_URL;
 const MARKETPLACE = 'https://github.com/kwcantrell/autologger-marketplace';
 
 export type NavLink = { label: string; href: string; hint: string };
@@ -23,34 +24,60 @@ export const PRODUCT_LINKS: NavLink[] = [
 
 export type LandingLinks = {
   navGroups: NavGroup[];
-  mcpDocsHref: string;
+  /** The docs home ("Read the docs"). */
+  docsHomeHref: string;
+  /** "Connect an agent". */
+  connectAgentHref: string;
+  /** "Companion setup". */
   companionDocsHref: string;
+  /** The developer cards. */
+  mcpServer: NavLink;
+  marketplace: NavLink;
+  companionModule: NavLink;
+  github: NavLink;
 };
 
 /**
- * Links to files in docs/ (the Docs menu, the MCP server card, "Connect an agent", "Read the docs",
- * "Companion setup") resolve against `docsUrl`, the server's DOCS_URL, when set: it replaces the
- * upstream `blob/main/docs` folder and the file names stay the same (`<docsUrl>/mcp.md`). Links
- * to the upstream repos (Resources, Contributing, GitHub) never change.
+ * Documentation links go to the built-in docs at /docs (same origin), or to
+ * `<docsUrl>/<section>/<slug>` when the server sets DOCS_URL. The plugin marketplace, the Companion
+ * module's source and the repository itself live on GitHub and never change.
  */
 export function landingLinks(docsUrl?: string | null): LandingLinks {
-  const docs = (file: string) => `${docsUrl ?? UPSTREAM_DOCS}/${file}`;
-  const mcpDocsHref = docs('mcp.md');
-  const companionDocsHref = docs('companion.md');
+  const docs = (page: string) => docsHref(page, docsUrl);
+  const docsHomeHref = docs(DOC_PAGES.home);
+  const connectAgentHref = docs(DOC_PAGES.connectingAgents);
+  const companionDocsHref = docs(DOC_PAGES.companion);
+  const mcpServer: NavLink = {
+    label: 'MCP server',
+    href: docs(DOC_PAGES.mcpServer),
+    hint: 'Tools generated from the ops registry',
+  };
+  const marketplace: NavLink = {
+    label: 'Plugin marketplace',
+    href: MARKETPLACE,
+    hint: 'Ready-made skills for Claude',
+  };
+  const companionModule: NavLink = {
+    label: 'Companion module',
+    href: `${REPO}/tree/main/apps/companion`,
+    hint: 'Source of the hardware module',
+  };
+  const github: NavLink = { label: 'GitHub', href: REPO, hint: 'Source, issues and pull requests' };
   const navGroups: NavGroup[] = [
     {
       id: 'docs',
       label: 'Docs',
       links: [
+        { label: 'Documentation', href: docsHomeHref, hint: 'Guides, agents and developers' },
         {
-          label: 'Connecting agents (MCP)',
-          href: mcpDocsHref,
-          hint: 'Claude Code, claude.ai, tokens',
+          label: 'Getting started',
+          href: docs(DOC_PAGES.gettingStarted),
+          hint: 'Your first show and session',
         },
         {
-          label: 'Media & transcription',
-          href: docs('media.md'),
-          hint: 'Storage, worker, YouTube',
+          label: 'Connecting agents',
+          href: connectAgentHref,
+          hint: 'Claude Code, claude.ai, tokens',
         },
         { label: 'Bitfocus Companion', href: companionDocsHref, hint: 'Stream Deck setup' },
       ],
@@ -59,34 +86,41 @@ export function landingLinks(docsUrl?: string | null): LandingLinks {
       id: 'resources',
       label: 'Resources',
       links: [
-        { label: 'Plugin marketplace', href: MARKETPLACE, hint: 'Ready-made skills for Claude' },
-        {
-          label: 'Companion module',
-          href: `${REPO}/tree/main/apps/companion`,
-          hint: 'Hardware control',
-        },
-        { label: 'Architecture', href: `${BLOB}/ARCHITECTURE.md`, hint: 'How it fits together' },
+        marketplace,
+        { label: 'Agent plugins', href: docs(DOC_PAGES.plugins), hint: 'What each skill does' },
+        companionModule,
+        { label: 'Architecture', href: docs(DOC_PAGES.architecture), hint: 'How it fits together' },
       ],
     },
     {
       id: 'developers',
       label: 'Developers',
       links: [
+        mcpServer,
         {
-          label: 'MCP server',
-          href: mcpDocsHref,
-          hint: 'Tools generated from the ops registry',
+          label: 'Self-hosting',
+          href: docs(DOC_PAGES.selfHosting),
+          hint: 'Deploy, storage, worker, YouTube',
         },
         {
           label: 'Contributing',
-          href: `${MARKETPLACE}/tree/main/plugins/autologger-contribute`,
-          hint: 'The autologger-contribute plugin',
+          href: docs(DOC_PAGES.contributing),
+          hint: 'Dev stack, tests, pull requests',
         },
-        { label: 'GitHub', href: REPO, hint: 'Source, issues and pull requests' },
+        github,
       ],
     },
   ];
-  return { navGroups, mcpDocsHref, companionDocsHref };
+  return {
+    navGroups,
+    docsHomeHref,
+    connectAgentHref,
+    companionDocsHref,
+    mcpServer,
+    marketplace,
+    companionModule,
+    github,
+  };
 }
 
 export const SIGN_IN_HREF = `/login?return=${encodeURIComponent('/')}`;

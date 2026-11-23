@@ -40,7 +40,7 @@ function fmtWait(c: Compilation): string | null {
   return parts.length ? parts.join(' · ') : null;
 }
 
-/** The import helper command that builds a buildLocally compilation (docs/importer.md). */
+/** The import helper command that builds a buildLocally compilation (docs/developers/import-helper.md). */
 export const localBuildCommand = (id: string) => `node autologger-import.mjs compile ${id}`;
 
 const clipHref = (sessionId: string, startSec: number) =>

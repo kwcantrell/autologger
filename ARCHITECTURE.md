@@ -123,7 +123,7 @@ while stopped), `take`, `frame_rate`, `start_offset_frames`. Current timecode =
 5. Playback: `media.playbackUrl` returns a presigned GET.
 6. Video compilations (`compilations.*`): ranges of YouTube-imported sessions; the worker's
    `compile` job downloads just those sections with yt-dlp, re-encodes and joins them with ffmpeg
-   into one MP4 under `shows/<showId>/compilations/` (see docs/media.md).
+   into one MP4 under `shows/<showId>/compilations/` (see docs/developers/self-hosting.md).
 7. Queue order (`claimJob`): `run_after`, transcriptions first, `created_at`, `id`. An import's
    transcription gets `run_after` = the import's `created_at`, so it runs before later imports.
 

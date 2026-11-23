@@ -1,4 +1,9 @@
-# Connecting agents (MCP)
+---
+title: MCP server
+section: developers
+order: 10
+description: The MCP endpoint, how Claude Code and claude.ai connect, tokens, and the OAuth endpoints for client authors.
+---
 
 AutoLogger never calls an LLM itself. Agents — Claude Code, claude.ai, Claude Desktop or any
 MCP client — connect to the MCP endpoint and act **as the user who authorised them**, with that
@@ -12,9 +17,12 @@ change log, and can be undone from the session's **Agents** tab.
   named with `_` instead of `.` (`events.create` → `events_create`). The server also sends
   usage instructions and three prompts: `generate_topics`, `build_dashboard`, `update_show_wiki`.
 
+For a user's walk-through, see [Connecting agents](/docs/agents/connecting-agents). How ops become
+tools is in [Architecture](/docs/developers/architecture#the-ops-registry-the-core-idea).
+
 ## Claude Code (personal access token)
 
-1. In AutoLogger open **Settings → Agent access** and create a personal access token. Copy it —
+1. In AutoLogger open **Settings › Agents** and create a personal access token. Copy it —
    it is shown once.
 2. Add the server:
 
@@ -36,13 +44,13 @@ then `/mcp` → **Authenticate**; a browser window opens on the AutoLogger conse
 2. Name it “AutoLogger” and enter `https://autologger.example.com/mcp`. Leave the OAuth client
    fields empty — the client registers itself (dynamic client registration).
 3. Click **Connect**. You are sent to AutoLogger; sign in if needed and choose **Allow** on the
-   consent screen. The connector then appears under **Settings → Agent access** as a connected app.
+   consent screen. The connector then appears under **Settings › Agents** as a connected app.
 
 Accounts waiting for administrator approval cannot authorise agents.
 
 ## Token management
 
-**Settings → Agent access** lists personal access tokens and connected OAuth apps (one row per
+**Settings › Agents** lists personal access tokens and connected OAuth apps (one row per
 app authorisation) with when they were created and last used. Revoking a token stops it at once;
 disconnecting an OAuth app revokes all of its access and refresh tokens.
 

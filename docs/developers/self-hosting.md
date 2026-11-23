@@ -1,3 +1,49 @@
+---
+title: Self-hosting
+section: developers
+order: 20
+description: Run your own AutoLogger with Docker Compose — environment, storage, the worker, transcription, YouTube downloads and the media sweep.
+---
+
+## Deploy
+
+One host, Docker Compose: `app` (API, WebSockets, MCP and the web app), `worker`, `postgres`,
+`s3` (SeaweedFS) and `caddy` (HTTPS).
+
+```bash
+cat > .env <<EOF
+PUBLIC_URL=https://autologger.example.com
+SITE_ADDRESS=autologger.example.com
+POSTGRES_PASSWORD=$(openssl rand -hex 16)
+S3_PASSWORD=$(openssl rand -hex 16)
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+SUPERADMIN_EMAILS=you@example.com
+DEEPGRAM_API_KEY=...
+EOF
+docker compose up -d --build
+```
+
+Google OAuth redirect URI: `$PUBLIC_URL/auth/google/callback`. The first account to sign in
+becomes the instance admin; later accounts wait for approval unless they were invited to a team or
+are listed in `SUPERADMIN_EMAILS`.
+
+### App settings
+
+| Variable                                   | Purpose                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PUBLIC_URL`                               | Origin users and agents reach the app at (OAuth redirects, the MCP resource id).                                                                                                                                                                                                          |
+| `DATABASE_URL`                             | Postgres connection string (set by compose).                                                                                                                                                                                                                                              |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google sign-in for people.                                                                                                                                                                                                                                                                |
+| `SUPERADMIN_EMAILS`                        | Comma-separated emails that become active instance admins on first sign-in.                                                                                                                                                                                                               |
+| `DEV_LOGIN`                                | `1` enables an email-only sign-in for local development. Never in production (ignored when `NODE_ENV=production`).                                                                                                                                                                        |
+| `LANDING_PAGE`                             | `1` (default) shows signed-out visitors at `/` the public landing page; `0` sends them straight to sign-in, e.g. for a private instance. Read at startup.                                                                                                                                 |
+| `DOCS_URL`                                 | Base URL of your own copy of these docs. Unset (default), doc links in the app go to the built-in pages at `/docs`. Set, they go to `<DOCS_URL>/<section>/<slug>` (the home page to `DOCS_URL` itself), e.g. `https://docs.example.com/autologger/developers/self-hosting`. http(s) only. |
+| `IMPORTER_FILE`                            | Where the server reads the [import helper](/docs/developers/import-helper) it serves (default: `apps/importer/autologger-import.mjs`).                                                                                                                                                    |
+
+The documentation at `/docs` is built into the web app from the repo's `docs/` folder and needs no
+sign-in, whatever `LANDING_PAGE` says.
+
 ## Media & worker
 
 Audio lives in S3-compatible object storage; the browser uploads and plays it through presigned
@@ -47,7 +93,7 @@ it. It is one per team, not per show, on purpose: every copy of a Google session
 YouTube invalidates copies that fall behind its cookie rotation.
 
 - **From the command line, one step:** `autologger-import youtube-login --team <teamId>
-  --cookies-from-browser firefox` (see [importer.md](importer.md)) reads the browser's YouTube
+  --cookies-from-browser firefox` (see [Import helper](/docs/developers/import-helper)) reads the browser's YouTube
   cookies with yt-dlp and stores them on the server (`media.setYoutubeCookies`).
 - **In the web app:** Settings › Team details › YouTube access: paste or upload a cookies.txt
   (e.g. from the "Get cookies.txt LOCALLY" extension on youtube.com) or a JSON cookie export.
@@ -103,7 +149,7 @@ sign-in, every probe is recorded on it (`media.youtubeAccess` `lastOkAt` / `last
 
 When cookies or a proxy are not an option, or the video or playlist is private, users can run the
 **local import helper** on their own computer instead: it downloads with their browser cookies
-and uploads only the audio (or a compilation MP4). See [importer.md](importer.md). The bot-check
+and uploads only the audio (or a compilation MP4). See [Import helper](/docs/developers/import-helper). The bot-check
 and sign-in errors above point at it.
 
 ### Local S3 for development
@@ -189,7 +235,7 @@ In production: `node src/worker/main.ts` with the same environment as the app (c
   socket → the web Compilations page; `compilations.get` waitSec). Needs ffmpeg (and ffprobe for
   the measured length) and yt-dlp; a worker without ffmpeg does not claim compile jobs.
   A compilation created with `buildLocally` gets no compile job: the local import helper builds
-  it with the same yt-dlp and ffmpeg settings and uploads the MP4 ([importer.md](importer.md)).
+  it with the same yt-dlp and ffmpeg settings and uploads the MP4 ([Import helper](/docs/developers/import-helper)).
   Clips of audio uploaded from a private video (`source_private`) are refused for server builds.
 - **Media sweep** (`src/worker/sweep.ts`, every `MEDIA_SWEEP_INTERVAL_MIN`): removes uploads
   stuck in `uploading` past `MEDIA_SWEEP_UPLOAD_AGE_HOURS` (object, then row; an `audio_segment`

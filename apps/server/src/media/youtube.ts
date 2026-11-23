@@ -95,7 +95,7 @@ const BOT_CHECK =
 
 /** Where to turn when the server cannot download a video: yt-dlp on the user's own computer. */
 export const HELPER_HINT =
-  'Or use the AutoLogger import helper on your own computer (yt-dlp with your browser cookies; it imports videos and builds compilations; see docs/importer.md).';
+  'Or use the AutoLogger import helper on your own computer (yt-dlp with your browser cookies; it imports videos and builds compilations; see /docs/developers/import-helper).';
 
 /**
  * Cookies for one yt-dlp run: a show's stored YouTube sign-in (media/youtubeCookies.ts). Without
@@ -138,15 +138,15 @@ export function youtubeAuthError(stderr: string, cookies: CookieSource): Youtube
         ? `YouTube requires a signed-in account for this video (private, members-only or age-restricted), and the account in ${TEAM_SETTING} cannot watch it (or its cookies have expired).${detail}`
         : cookies === 'server'
           ? `YouTube requires a signed-in account for this video (private, members-only or age-restricted), and the account in YTDLP_COOKIES_FILE cannot watch it (or its cookies have expired). Set ${TEAM_SETTING} with an account that can.${detail}`
-          : `YouTube requires a signed-in account for this video (private, members-only or age-restricted). Set ${TEAM_SETTING} with an account that can watch it; see docs/media.md.${detail}`,
+          : `YouTube requires a signed-in account for this video (private, members-only or age-restricted). Set ${TEAM_SETTING} with an account that can watch it; see /docs/developers/self-hosting#youtube-bot-check.${detail}`,
     );
   return new YoutubeAuthError(
     'bot_check',
     cookies === 'show'
-      ? `YouTube is blocking this server's downloads (bot check) even with ${TEAM_SETTING}: the cookies have probably expired or been signed out. Set fresh ones; see docs/media.md.${detail}`
+      ? `YouTube is blocking this server's downloads (bot check) even with ${TEAM_SETTING}: the cookies have probably expired or been signed out. Set fresh ones; see /docs/developers/self-hosting#youtube-bot-check.${detail}`
       : cookies === 'server'
-        ? `YouTube is blocking this server's downloads (bot check) even with the cookies in YTDLP_COOKIES_FILE: they have probably expired or been signed out. Set ${TEAM_SETTING}, or export fresh server cookies; see docs/media.md.${detail}`
-        : `YouTube is blocking this server's downloads (bot check). Set ${TEAM_SETTING} (or YTDLP_COOKIES_FILE / YTDLP_PROXY on the server and worker); see docs/media.md.${detail}`,
+        ? `YouTube is blocking this server's downloads (bot check) even with the cookies in YTDLP_COOKIES_FILE: they have probably expired or been signed out. Set ${TEAM_SETTING}, or export fresh server cookies; see /docs/developers/self-hosting#youtube-bot-check.${detail}`
+        : `YouTube is blocking this server's downloads (bot check). Set ${TEAM_SETTING} (or YTDLP_COOKIES_FILE / YTDLP_PROXY on the server and worker); see /docs/developers/self-hosting#youtube-bot-check.${detail}`,
   );
 }
 
