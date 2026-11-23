@@ -27,7 +27,7 @@ const badgeVariants = cva(
       // tab's "agent" mark).
       size: {
         default: 'px-[0.45rem] py-[0.2rem] text-[0.7rem]',
-        sm: 'px-1 py-0 text-[0.6rem]',
+        sm: 'px-1 py-0 text-[0.6875rem]',
       },
     },
     defaultVariants: {

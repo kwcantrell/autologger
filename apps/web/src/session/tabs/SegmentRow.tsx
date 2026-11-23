@@ -6,6 +6,7 @@ import { PencilIcon } from 'lucide-react';
 import { memo, useEffect, useRef, useState } from 'react';
 import { fmtSec } from '@/lib/timecode';
 import { Button } from '@/shared/components/ui/button';
+import { TableCell, TableRow } from '@/shared/components/ui/table';
 import { Textarea } from '@/shared/components/ui/textarea';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 import { Tooltip } from '@/shared/ui/Tooltip';
@@ -74,7 +75,7 @@ export const SegmentRow = memo(function SegmentRow({
   };
 
   return (
-    <tr
+    <TableRow
       ref={rowRef}
       className={cn(
         FEED_ROW,
@@ -83,18 +84,18 @@ export const SegmentRow = memo(function SegmentRow({
         active && 'bg-(--sel-bg)',
       )}
     >
-      <td className={cn(FEED_CELL, 'align-top pt-1 @max-md/feed:pt-[0.1rem]')}>
+      <TableCell className={cn(FEED_CELL, 'align-top pt-1 @max-md/feed:pt-[0.1rem]')}>
         <JumpButton
           sec={s.startSec}
           label={fmtSec(s.startSec)}
           onJump={onSeek}
           unavailable={rolling ? 'Playback is off while timecode rolls.' : null}
         />
-      </td>
-      <td className={cn(FEED_CELL, FEED_TC, 'align-top pt-1.5 @max-md/feed:pt-[0.1rem]')}>
+      </TableCell>
+      <TableCell className={cn(FEED_CELL, FEED_TC, 'align-top pt-1.5 @max-md/feed:pt-[0.1rem]')}>
         {fmtSec(s.startSec)}
-      </td>
-      <td
+      </TableCell>
+      <TableCell
         className={cn(
           FEED_CELL,
           FEED_CELL_LABEL,
@@ -115,8 +116,8 @@ export const SegmentRow = memo(function SegmentRow({
         ) : (
           s.speaker || 'Unknown'
         )}
-      </td>
-      <td
+      </TableCell>
+      <TableCell
         className={cn(
           FEED_CELL,
           FEED_CELL_TEXT,
@@ -196,7 +197,7 @@ export const SegmentRow = memo(function SegmentRow({
             )}
           </span>
         )}
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 });

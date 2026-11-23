@@ -8,6 +8,8 @@ import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { Input } from '@/shared/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/shared/components/ui/native-select';
+import { TableCell, TableRow } from '@/shared/components/ui/table';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 import { Tooltip } from '@/shared/ui/Tooltip';
 import { formatWallUtcYmdHms } from '@/shared/utils/timecode';
@@ -27,7 +29,7 @@ import { ChangedElsewhere, useServerDraft } from '../serverDraft';
 
 export type TimeMode = 'session' | 'world';
 
-const SOURCE_BADGE = 'shrink-0 px-1 py-px align-[0.1em] text-[0.6rem]';
+const SOURCE_BADGE = 'shrink-0 px-1 py-px align-[0.1em] text-[0.6875rem]';
 
 /** The category's colour on its own channel (DESIGN.md: a 2px swatch, never the label). */
 function CategorySwatch({ color }: { color: string }) {
@@ -106,7 +108,7 @@ export function EventRow({
   ) : null;
 
   return (
-    <tr
+    <TableRow
       ref={rowRef}
       className={cn(
         FEED_ROW,
@@ -115,16 +117,16 @@ export function EventRow({
       )}
       data-event-id={e.id}
     >
-      <td className={cn(FEED_CELL, 'align-middle')}>
+      <TableCell className={cn(FEED_CELL, 'align-middle')}>
         <JumpButton
           sec={sec}
           label={timeText}
           onJump={onJump}
           unavailable={session.isRolling ? 'Playback is off while timecode rolls.' : null}
         />
-      </td>
+      </TableCell>
       {/* Stacked: the time and the event label share the meta line. */}
-      <td
+      <TableCell
         className={cn(
           FEED_CELL,
           FEED_TC,
@@ -166,8 +168,8 @@ export function EventRow({
           <CategorySwatch color={e.color} />
           {e.category}
         </span>
-      </td>
-      <td
+      </TableCell>
+      <TableCell
         className={cn(
           FEED_CELL,
           FEED_CELL_LABEL,
@@ -177,7 +179,8 @@ export function EventRow({
         {editable ? (
           <span className="flex items-center gap-1.5">
             <CategorySwatch color={e.color} />
-            <select
+            <NativeSelect
+              variant="unstyled"
               className={cn(FEED_INLINE_INPUT, 'min-w-0 flex-1 bg-si-panel')}
               aria-label="Category"
               value={e.categoryId ?? ''}
@@ -189,13 +192,13 @@ export function EventRow({
                 }).catch(() => {})
               }
             >
-              {!e.categoryId && <option value="">{e.category}</option>}
+              {!e.categoryId && <NativeSelectOption value="">{e.category}</NativeSelectOption>}
               {categories.map((c) => (
-                <option key={c.id} value={c.id}>
+                <NativeSelectOption key={c.id} value={c.id}>
                   {c.name}
-                </option>
+                </NativeSelectOption>
               ))}
-            </select>
+            </NativeSelect>
           </span>
         ) : (
           <span className="flex items-center gap-1.5">
@@ -203,8 +206,8 @@ export function EventRow({
             {e.category}
           </span>
         )}
-      </td>
-      <td
+      </TableCell>
+      <TableCell
         className={cn(
           FEED_CELL,
           FEED_CELL_TEXT,
@@ -251,8 +254,8 @@ export function EventRow({
           )}
           {editable && sourceBadge}
         </span>
-      </td>
-      <td
+      </TableCell>
+      <TableCell
         className={cn(FEED_CELL, 'align-middle @max-md/feed:col-start-3 @max-md/feed:row-start-1')}
       >
         {canWrite && (
@@ -270,7 +273,7 @@ export function EventRow({
             </Button>
           </Tooltip>
         )}
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }

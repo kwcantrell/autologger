@@ -16,6 +16,7 @@ import {
 } from '@/session/feed';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
+import { TableCell, TableRow } from '@/shared/components/ui/table';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 import { Tooltip } from '@/shared/ui/Tooltip';
 
@@ -85,7 +86,7 @@ export function ChangeRow({
   const client = c.via === 'mcp' || c.via === 'companion' ? c.clientName : null;
   return (
     // Stacked: time, change kind and undo on the meta line, then who, then the summary.
-    <tr
+    <TableRow
       className={cn(
         FEED_ROW,
         FEED_STACK_ROW.wide,
@@ -93,15 +94,15 @@ export function ChangeRow({
         c.revertedAt && 'opacity-60',
       )}
     >
-      <td
+      <TableCell
         className={cn(
           FEED_CELL,
           'w-8 @max-3xl/feed:col-start-1 @max-3xl/feed:row-span-3 @max-3xl/feed:row-start-1 @max-3xl/feed:self-start',
         )}
       >
         <JumpButton sec={sec} label={c.summary} onJump={onJump} />
-      </td>
-      <td
+      </TableCell>
+      <TableCell
         className={cn(
           FEED_CELL,
           'whitespace-nowrap text-si-muted tabular-nums @max-3xl/feed:col-start-2 @max-3xl/feed:row-start-1',
@@ -110,8 +111,8 @@ export function ChangeRow({
         <time dateTime={c.at} title={c.at}>
           {fmtRelative(c.at, now)}
         </time>
-      </td>
-      <td
+      </TableCell>
+      <TableCell
         className={cn(
           FEED_CELL,
           FEED_CELL_TEXT,
@@ -135,8 +136,8 @@ export function ChangeRow({
             </span>
           )}
         </div>
-      </td>
-      <td
+      </TableCell>
+      <TableCell
         className={cn(
           FEED_CELL,
           'whitespace-nowrap text-si-muted @max-3xl/feed:col-start-3 @max-3xl/feed:row-start-1 @max-3xl/feed:whitespace-normal',
@@ -144,8 +145,8 @@ export function ChangeRow({
       >
         <span className="font-semibold text-si-fg">{c.kind}</span>{' '}
         {ENTITY_LABEL[c.entity] ?? c.entity}
-      </td>
-      <td
+      </TableCell>
+      <TableCell
         className={cn(
           FEED_CELL,
           FEED_CELL_TEXT,
@@ -181,8 +182,8 @@ export function ChangeRow({
             {error}
           </p>
         )}
-      </td>
-      <td
+      </TableCell>
+      <TableCell
         className={cn(
           FEED_CELL,
           'whitespace-nowrap text-right @max-3xl/feed:col-start-4 @max-3xl/feed:row-start-1',
@@ -216,7 +217,7 @@ export function ChangeRow({
             </Tooltip>
           </span>
         )}
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }
