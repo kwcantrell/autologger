@@ -17,6 +17,6 @@
     "entrypoint": "../dist/main.js"
   },
   "manufacturer": "AutoLogger",
-  "products": ["AutoLogger"],
+  "products": ["Live Session Logging"],
   "keywords": ["logging", "production", "timecode"]
 }
