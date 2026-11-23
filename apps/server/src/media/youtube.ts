@@ -164,6 +164,7 @@ async function run(
   const pre: string[] = [];
   let cookieDir: string | null = null;
   let copy = '';
+  let secrets: string[] = [];
   const source: CookieSource = cookies ? 'show' : env.ytDlpCookiesFile ? 'server' : null;
   if (source) {
     // yt-dlp saves cookies back on exit: give each run a private copy, so a read-only mount
@@ -180,11 +181,12 @@ async function run(
       await rm(cookieDir, { recursive: true, force: true });
       throw new PermanentError(
         cookies
-          ? `Cannot write the show's YouTube cookies to a temp file: ${(e as Error).message}.`
+          ? `Cannot write the team's YouTube cookies to a temp file: ${(e as NodeJS.ErrnoException).code ?? 'error'}.`
           : `Cannot read YTDLP_COOKIES_FILE (${env.ytDlpCookiesFile}): ${(e as NodeJS.ErrnoException).code ?? (e as Error).message}.`,
       );
     }
     pre.push('--cookies', copy);
+    secrets = cookieValues(await readFile(copy, 'utf8').catch(() => ''));
   }
   if (env.ytDlpProxy) pre.push('--proxy', env.ytDlpProxy);
   if (env.ytDlpJsRuntime) pre.push('--js-runtimes', env.ytDlpJsRuntime);
@@ -196,6 +198,9 @@ async function run(
     ok = true;
     return out;
   } catch (e) {
+    // yt-dlp quotes cookie-file lines it cannot parse: never let a value reach a job error, an
+    // op error, lastError or a log.
+    redactError(e, secrets);
     if (e instanceof YoutubeAuthError) authError = e;
     throw e;
   } finally {
@@ -203,10 +208,36 @@ async function run(
       const after = await readFile(copy, 'utf8').catch(() => null);
       await cookies
         .report({ ok, authError, refreshed: after && after !== cookies.text ? after : null })
-        .catch((e) => console.warn(`saving the show's YouTube cookies: ${(e as Error).message}`));
+        .catch((e) => console.warn(redact((e as Error).message, secrets)));
     }
     if (cookieDir) await rm(cookieDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/** The values (and long names) of a cookies.txt, to scrub from anything yt-dlp says. */
+export function cookieValues(text: string): string[] {
+  const out = new Set<string>();
+  for (const line of text.split(/\r?\n/)) {
+    const f = line.replace(/^#HttpOnly_/, '').split('\t');
+    if (f.length < 7 || line.startsWith('# ')) continue;
+    const value = f.slice(6).join('\t').trim();
+    if (value.length >= 4) out.add(value);
+  }
+  // Longest first, so a value that contains another is replaced whole.
+  return [...out].sort((a, b) => b.length - a.length);
+}
+
+/** `text` with every secret replaced by [redacted]. */
+export function redact(text: string, secrets: string[]): string {
+  let out = text;
+  for (const s of secrets) out = out.split(s).join('[redacted]');
+  return out;
+}
+
+function redactError(e: unknown, secrets: string[]): void {
+  if (!secrets.length || !(e instanceof Error)) return;
+  e.message = redact(e.message, secrets);
+  if (e.stack) e.stack = redact(e.stack, secrets);
 }
 
 function spawnYtDlp(

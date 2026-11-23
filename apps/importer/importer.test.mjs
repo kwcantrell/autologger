@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { parseArgs } from './autologger-import.mjs';
+import { parseArgs, youtubeCookiesOnly } from './autologger-import.mjs';
 
 const CLI = fileURLToPath(new URL('./autologger-import.mjs', import.meta.url));
 const TOKEN = 'alp_test';
@@ -406,5 +406,29 @@ describe('autologger-import', () => {
     const badToken = await cli(['compile', 'cmp_1'], { AUTOLOGGER_TOKEN: 'alp_wrong' });
     expect(badToken.code).toBe(1);
     expect(badToken.stderr).toContain('Settings › Agents');
+  });
+});
+
+describe('youtube-login cookie filter', () => {
+  it('keeps only youtube.com / google.com cookies before anything is sent', () => {
+    const jar = [
+      '# Netscape HTTP Cookie File',
+      '.youtube.com\tTRUE\t/\tTRUE\t0\tSID\ts',
+      '#HttpOnly_.google.com\tTRUE\t/\tTRUE\t0\tHSID\th',
+      '.mybank.example\tTRUE\t/\tTRUE\t0\tsession\tbank',
+      'mail.example\tFALSE\t/\tTRUE\t0\tauth\tmail',
+      '.youtube.com.evil.example\tTRUE\t/\tTRUE\t0\tSID\tevil',
+    ].join('\n');
+    const r = youtubeCookiesOnly(jar);
+    expect(r).toMatchObject({ count: 2, signedIn: true });
+    expect(r.kept).not.toMatch(/bank|mail|evil/);
+    const json = youtubeCookiesOnly(
+      JSON.stringify([
+        { domain: '.youtube.com', name: 'VISITOR_INFO1_LIVE', value: 'v' },
+        { domain: '.mybank.example', name: 'session', value: 'bank' },
+      ]),
+    );
+    expect(json).toMatchObject({ count: 1, signedIn: false });
+    expect(json.kept).not.toContain('bank');
   });
 });

@@ -3,11 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loggable } from '../core/errors.ts';
 import { db, schema } from '../db/client.ts';
 import { env } from '../env.ts';
 import { PermanentError } from '../media/deepgram.ts';
-import { YoutubeAuthError, youtubeAuthError } from '../media/youtube.ts';
-import { parseYoutubeCookies } from '../media/youtubeCookies.ts';
+import { cookieValues, redact, YoutubeAuthError, youtubeAuthError } from '../media/youtube.ts';
+import { parseYoutubeCookies, youtubeCookiesForShow } from '../media/youtubeCookies.ts';
 import { handlers } from '../worker/handlers.ts';
 import { failJob } from '../worker/queue.ts';
 import { call, failsWith, makeUser, resetDb, setupDb, studio } from './harness.ts';
@@ -24,7 +25,7 @@ const BOT =
   "ERROR: [youtube] aaaaaaaaaaa: Sign in to confirm you're not a bot. This helps protect our community. Use --cookies-from-browser or --cookies for the authentication.";
 const PLAYLIST = 'https://www.youtube.com/playlist?list=PLbotcheck01';
 let dir = '';
-const setMode = (m: 'bot' | 'ok') => writeFile(join(dir, 'mode'), m);
+const setMode = (m: 'bot' | 'ok' | 'signout') => writeFile(join(dir, 'mode'), m);
 
 beforeAll(async () => {
   await setupDb();
@@ -43,11 +44,15 @@ beforeAll(async () => {
 printf '%s\\n' "$@" > '${dir}/args.txt'
 prev=''
 for a in "$@"; do
-  if [ "$prev" = --cookies ]; then cp "$a" '${dir}/seen-cookies.txt'; printf '.youtube.com\tTRUE\t/\tTRUE\t0\tROTATED\t%s\n' "$$" >> "$a"; fi
+  if [ "$prev" = --cookies ]; then
+    cp "$a" '${dir}/seen-cookies.txt'
+    if [ "$(cat '${dir}/mode')" = signout ]; then printf '.youtube.com\tTRUE\t/\tTRUE\t0\tVISITOR_INFO1_LIVE\tv\n' > "$a"
+    else printf '.youtube.com\tTRUE\t/\tTRUE\t0\tROTATED\t%s\n' "$$" >> "$a"; fi
+  fi
   if [ "$a" = --flat-playlist ]; then cat '${dir}/playlist.json'; exit 0; fi
   prev="$a"
 done
-if [ "$(cat '${dir}/mode')" = ok ]; then echo '{"duration": 600}'; exit 0; fi
+case "$(cat '${dir}/mode')" in ok|signout) echo '{"duration": 600}'; exit 0;; esac
 echo "${BOT.replace(/"/g, '\\"')}" >&2
 exit 1
 `,
@@ -240,6 +245,74 @@ describe('team YouTube sign-in', () => {
     await call(owner, 'media.setYoutubeCookies', { teamId: team.id, cookies: null });
     expect(await call(owner, 'media.youtubeAccess', { teamId: team.id })).toMatchObject({
       configured: false,
+    });
+  });
+});
+
+describe('team YouTube sign-in hardening', () => {
+  it('rebuilds every stored line from validated fields', () => {
+    // Netscape: a flag that disagrees with the leading dot is made consistent.
+    const flag = parseYoutubeCookies('youtube.com\tTRUE\t/\tTRUE\t0\tSID\tx');
+    expect(flag.text).toContain('\nyoutube.com\tFALSE\t/\tTRUE\t0\tSID\tx\n');
+    // JSON: string booleans parsed strictly; tabs/newlines in fields can't inject lines.
+    const json = parseYoutubeCookies(
+      JSON.stringify([
+        { domain: '.youtube.com', hostOnly: 'false', secure: 'false', name: 'SID', value: 'x' },
+        { domain: '.youtube.com\tTRUE\t/\tFALSE\t0\tEVIL\tv\n.example.com', name: 'A', value: 'b' },
+        { domain: '.youtube.com', path: '/\n.evil.example', name: 'B', value: 'c' },
+        { domain: '.youtube.com', name: 'NUL', value: 'a\u0000b' },
+      ]),
+    );
+    expect(json.count).toBe(1);
+    expect(json.text).toContain('.youtube.com\tTRUE\t/\tFALSE\t0\tSID\tx');
+    expect(json.text).not.toMatch(/EVIL|example|NUL/);
+    // Far-future and millisecond expiries stay valid dates (#258).
+    expect(
+      parseYoutubeCookies(
+        '.youtube.com\tTRUE\t/\tTRUE\t99999999999999999\tSID\tx',
+      ).expiresAt?.getUTCFullYear(),
+    ).toBe(9999);
+    // All expired: says so (#261).
+    expect(() => parseYoutubeCookies('.youtube.com\tTRUE\t/\tTRUE\t1000\tSID\tx')).toThrow(
+      /expired/,
+    );
+  });
+
+  it('scrubs cookie values from yt-dlp output and query errors', () => {
+    const secrets = cookieValues(SIGNED_IN);
+    expect(redact("ERROR: invalid line '.youtube.com\tTRUE\t/\tTRUE\t1\tSID\tgsid'", secrets)).toBe(
+      "ERROR: invalid line '.youtube.com\tTRUE\t/\tTRUE\t1\tSID\t[redacted]'",
+    );
+    const err = Object.assign(new Error('Failed query: insert ...\nparams: gsid'), {
+      query: 'insert into team_youtube_cookies ...',
+      params: ['gsid'],
+      cause: { code: '22021', message: 'invalid byte sequence' },
+    });
+    expect(String(loggable(err))).not.toContain('gsid');
+  });
+
+  it('treats cookies YouTube signed out as failed, and keeps a run off newer cookies', async () => {
+    const { owner, team, show } = await studio();
+    await setMode('signout');
+    const set = await call(owner, 'media.setYoutubeCookies', {
+      teamId: team.id,
+      cookies: SIGNED_IN,
+    });
+    expect(set.check).toMatchObject({
+      ok: false,
+      message: expect.stringMatching(/signed these cookies out/),
+    });
+
+    // A run that started with the old cookies doesn't record its outcome on new ones (#257).
+    await setMode('ok');
+    const run = await youtubeCookiesForShow(show.id);
+    await call(owner, 'media.setYoutubeCookies', {
+      teamId: team.id,
+      cookies: SIGNED_IN.replace('\tgsid', '\tgsid2'),
+    });
+    await run!.report!({ ok: false, refreshed: null, authError: youtubeAuthError(BOT, 'show') });
+    expect(await call(owner, 'media.youtubeAccess', { teamId: team.id })).toMatchObject({
+      lastError: null,
     });
   });
 });

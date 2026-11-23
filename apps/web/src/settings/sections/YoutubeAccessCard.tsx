@@ -14,6 +14,7 @@ import { Card, CardContent } from '@/shared/components/ui/card';
 import { FieldDescription, FieldGroup, FieldSeparator } from '@/shared/components/ui/field';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { Textarea } from '@/shared/components/ui/textarea';
+import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { SettingRow } from '../parts';
 
 const when = (iso: string | null) =>
@@ -36,6 +37,7 @@ export function YoutubeAccessCard({ team }: { team: Team }) {
   const key = [...qk.team(team.id), 'youtubeAccess'];
   const access = useOpQuery(key, 'media.youtubeAccess', { teamId: team.id });
   const set = useOpMutation('media.setYoutubeCookies', { invalidate: () => [key] });
+  const { confirm, confirmElement } = useConfirm();
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [check, setCheck] = useState<{ ok: boolean; message: string } | null>(null);
@@ -90,7 +92,7 @@ export function YoutubeAccessCard({ team }: { team: Team }) {
           {failing && (
             <Alert variant="destructive">
               <TriangleAlertIcon aria-hidden="true" />
-              <AlertDescription>
+              <AlertDescription className="break-words [overflow-wrap:anywhere]">
                 YouTube refused these cookies on {when(a!.lastFailedAt)}: set fresh ones.
                 <span className="mt-1 block text-xs">{failing}</span>
               </AlertDescription>
@@ -103,7 +105,9 @@ export function YoutubeAccessCard({ team }: { team: Team }) {
               ) : (
                 <TriangleAlertIcon aria-hidden="true" />
               )}
-              <AlertDescription>{check.message}</AlertDescription>
+              <AlertDescription className="break-words [overflow-wrap:anywhere]">
+                {check.message}
+              </AlertDescription>
             </Alert>
           )}
           <FieldSeparator />
@@ -120,7 +124,9 @@ export function YoutubeAccessCard({ team }: { team: Team }) {
           {error && (
             <Alert variant="destructive">
               <TriangleAlertIcon aria-hidden="true" />
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription className="break-words [overflow-wrap:anywhere]">
+                {error}
+              </AlertDescription>
             </Alert>
           )}
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -136,7 +142,19 @@ export function YoutubeAccessCard({ team }: { team: Team }) {
               }}
             />
             {a?.configured && (
-              <Button variant="ghost" disabled={set.isPending} onClick={() => void save(null)}>
+              <Button
+                variant="ghost"
+                disabled={set.isPending}
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: 'Remove YouTube sign-in',
+                    message: `Remove the YouTube sign-in of ${team.name}? Imports and compilations of its shows may then be blocked by YouTube until someone sets new cookies. This can't be undone.`,
+                    confirmLabel: 'Remove',
+                    danger: true,
+                  });
+                  if (ok) await save(null);
+                }}
+              >
                 Remove
               </Button>
             )}
@@ -155,6 +173,7 @@ export function YoutubeAccessCard({ team }: { team: Team }) {
           </div>
         </FieldGroup>
       </CardContent>
+      {confirmElement}
     </Card>
   );
 }

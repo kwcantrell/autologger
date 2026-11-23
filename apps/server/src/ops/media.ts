@@ -40,6 +40,8 @@ import {
 import {
   type ParsedCookies,
   parseYoutubeCookies,
+  rotatedCookies,
+  SIGNED_OUT_MESSAGE,
   youtubeCookiesForShow,
 } from '../media/youtubeCookies.ts';
 import { toAudioSegment } from './map.ts';
@@ -970,13 +972,11 @@ defineOp({
             : `Could not test the cookies: ${(e as Error).message.slice(0, 300)}`,
       };
     }
-    if (rotated) {
-      try {
-        parsed = parseYoutubeCookies(rotated);
-      } catch {
-        /* keep what the user gave */
-      }
-    }
+    // YouTube answers signed-out cookies by deleting the sign-in cookies, often without an error
+    // when it isn't bot-checking this server: then the check failed after all.
+    const after = rotated ? rotatedCookies(rotated) : null;
+    if (after === 'signedOut') check = { ok: false, message: SIGNED_OUT_MESSAGE };
+    else if (after) parsed = after;
     return { parsed, check };
   },
   async run(ctx, input, prepared) {

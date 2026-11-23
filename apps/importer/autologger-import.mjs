@@ -878,6 +878,52 @@ async function probeDuration(ctx, file) {
 
 // ── youtube-login ──────────────────────────────────────────────
 
+const YOUTUBE_DOMAIN = /^\.?(?:[a-z0-9-]+\.)*(?:youtube|google)\.com$/i;
+const SIGNED_IN_NAMES = new Set([
+  'SID',
+  '__Secure-1PSID',
+  '__Secure-3PSID',
+  'SAPISID',
+  'LOGIN_INFO',
+]);
+
+/**
+ * Only the youtube.com / google.com cookies of a Netscape cookies.txt or JSON cookie export, in
+ * the same format, plus how many there are and whether a signed-in session is among them.
+ * @param {string} text
+ * @returns {{ kept: string; count: number; signedIn: boolean }}
+ */
+export function youtubeCookiesOnly(text) {
+  const trimmed = text.trim();
+  if (trimmed.startsWith('[')) {
+    /** @type {unknown} */
+    let data;
+    try {
+      data = JSON.parse(trimmed);
+    } catch {
+      throw new CliError('The cookie file is not valid JSON.');
+    }
+    if (!Array.isArray(data)) throw new CliError('A JSON cookie export must be an array.');
+    const kept = data.filter(
+      (c) => c && typeof c.domain === 'string' && YOUTUBE_DOMAIN.test(c.domain),
+    );
+    return {
+      kept: JSON.stringify(kept),
+      count: kept.length,
+      signedIn: kept.some((c) => SIGNED_IN_NAMES.has(c.name)),
+    };
+  }
+  const lines = trimmed.split(/\r?\n/).filter((l) => {
+    const f = l.replace(/^#HttpOnly_/, '').split('\t');
+    return f.length === 7 && !l.startsWith('# ') && YOUTUBE_DOMAIN.test(f[0] ?? '');
+  });
+  return {
+    kept: `# Netscape HTTP Cookie File\n${lines.join('\n')}\n`,
+    count: lines.length,
+    signedIn: lines.some((l) => SIGNED_IN_NAMES.has(l.split('\t')[5] ?? '')),
+  };
+}
+
 /** A public video yt-dlp opens so it reads (and writes out) the browser's YouTube cookies. */
 const COOKIE_EXPORT_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
 
@@ -930,15 +976,24 @@ async function youtubeLoginCommand(ctx, args) {
     }
   }
   const target = args.team ? `team ${args.team}` : `the team of show ${args.show}`;
+  const { kept, count, signedIn } = youtubeCookiesOnly(text);
+  if (!count)
+    throw new CliError(
+      'No youtube.com cookies found. Sign in to YouTube in that browser (or export the cookies while on youtube.com, signed in) and try again.',
+    );
+  if (!signedIn)
+    throw new CliError(
+      'These YouTube cookies are not from a signed-in session (no SID or LOGIN_INFO cookie). Sign in to YouTube in that browser first.',
+    );
   if (ctx.dryRun) {
-    const n = text.split('\n').filter((l) => /(^|\.)(youtube|google)\.com\t/.test(l)).length;
-    say(`Dry run: would send ${n} youtube.com/google.com cookies to ${target}.`);
+    say(`Dry run: would send ${count} youtube.com/google.com cookies (signed in) to ${target}.`);
     return;
   }
+  // Only the YouTube and Google cookies leave this computer: never the rest of the browser's jar.
   /** @type {{ teamId: string; teamName: string; check: { ok: boolean; message: string } | null; expiresAt: string | null }} */
   const r = await ctx.rpc('media.setYoutubeCookies', {
     ...(args.team ? { teamId: args.team } : { showId: args.show }),
-    cookies: text,
+    cookies: kept,
   });
   say(
     `Saved the YouTube sign-in for team ${r.teamName || r.teamId}; all its shows download with it.`,
