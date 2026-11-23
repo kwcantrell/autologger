@@ -10,6 +10,7 @@ import {
   TRANSPORT_LABEL,
   type TransportTint,
   useStore,
+  useStoreSelect,
 } from '@/lib/store';
 import { eventSec, fmtSec, isMediaOnly } from '@/lib/timecode';
 import { Badge } from '@/shared/components/ui/badge';
@@ -19,7 +20,7 @@ import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { Tooltip } from '@/shared/ui/Tooltip';
 import { recorderSupport, type useRecorder } from './audio/useRecorder';
 import { CategoryStrip } from './CategoryStrip';
-import { usePlayheadSec, useWorkspace } from './context';
+import { indexAt, usePlayhead, useWorkspace } from './context';
 import { Timeline } from './Timeline';
 
 type Recorder = ReturnType<typeof useRecorder>;
@@ -44,6 +45,45 @@ function RecordingDuration({ startedAt }: { startedAt: number | null }) {
     return () => clearInterval(id);
   }, [startedAt]);
   return <>{startedAt ? fmtSec(Math.max(0, now - startedAt) / 1000) : '00:00:00'}</>;
+}
+
+/**
+ * The hero timecode: the clock, or for imported media the audio length / play-head. The only
+ * part of the strip that re-renders each frame.
+ */
+function ClockReadout({
+  mediaOnly,
+  playing,
+  audioSeconds,
+  rolling,
+  take,
+  label,
+}: {
+  mediaOnly: boolean;
+  playing: boolean;
+  audioSeconds: number;
+  rolling: boolean;
+  take: number;
+  label: string;
+}) {
+  const { clock } = useWorkspace();
+  const timecode = useStoreSelect(clock, (c) => c.timecode);
+  const playSec = usePlayhead((sec) => (mediaOnly && playing ? Math.floor(sec) : 0));
+  const display = mediaOnly ? fmtSec(playing ? playSec : audioSeconds) : timecode;
+  return (
+    <span
+      id="session-tc-display"
+      role="timer"
+      aria-label={
+        mediaOnly
+          ? `${label} ${display}`
+          : `Timecode ${timecode}${rolling ? ', rolling' : ''}${take > 1 ? `, take ${take}` : ''}`
+      }
+      className="font-tc text-[1.625rem] font-semibold leading-none tracking-[-0.01em] tabular-nums max-md:text-[1.5rem]"
+    >
+      {display}
+    </span>
+  );
 }
 
 function Glyph({
@@ -206,7 +246,8 @@ export function TransportStrip({
   onTransport: (a: 'start' | 'stop' | 'reset') => void;
 }) {
   const { confirm, confirmElement } = useConfirm();
-  // This strip draws the clock and the playhead, so it is what re-renders each frame.
+  // Nothing here reads the clock or playhead per frame: ClockReadout and the Timeline's leaves
+  // do, and the marker jumps re-render only when the neighbouring markers change.
   const {
     session,
     canWrite,
@@ -218,9 +259,10 @@ export function TransportStrip({
   // Move the playhead without playing (and without the rolling check of the context's `seek`).
   const { seek: playerSeek } = player;
   const onSeek = useCallback((sec: number) => void playerSeek(sec, false), [playerSeek]);
-  const clock = useStore(clockStore);
-  const playheadSec = usePlayheadSec();
   const rolling = session.isRolling;
+  const clockElapsed = useCallback(() => clockStore.get().elapsedSec, [clockStore]);
+  // Whole seconds of clock, for the timeline's length; the timeline is hidden while rolling.
+  const clockSec = useStoreSelect(clockStore, (c) => (rolling ? 0 : Math.ceil(c.elapsedSec)));
   const recording =
     recorder.state === 'recording' ||
     recorder.state === 'starting' ||
@@ -246,9 +288,17 @@ export function TransportStrip({
   );
   const audioEnd = player.segments.reduce((m, p) => Math.max(m, p.end), 0);
   const lastEventSec = markerSecs.at(-1)?.sec ?? 0;
-  const totalSec = Math.max(60, clock.elapsedSec, audioEnd, lastEventSec + 5);
-  const prev = [...markerSecs].reverse().find((m) => m.sec < playheadSec - 0.25);
-  const next = markerSecs.find((m) => m.sec > playheadSec + 0.25);
+  const totalSec = Math.max(60, clockSec, audioEnd, lastEventSec + 5);
+  const markerStarts = useMemo(() => markerSecs.map((m) => m.sec), [markerSecs]);
+  // The markers either side of the playhead (jumps are off while live).
+  const around = usePlayhead((sec) =>
+    live
+      ? ''
+      : `${indexAt(markerStarts, sec - 0.25 - 1e-6)}:${indexAt(markerStarts, sec + 0.25) + 1}`,
+  );
+  const [prevIdx, nextIdx] = around ? around.split(':').map(Number) : [-1, -1];
+  const prev = prevIdx != null && prevIdx >= 0 ? markerSecs[prevIdx] : undefined;
+  const next = nextIdx != null ? markerSecs[nextIdx] : undefined;
 
   const controls: Ctl[] = [
     player.isPlaying
@@ -336,9 +386,6 @@ export function TransportStrip({
   // playing. A clock that was rolled and reset keeps showing timecode.
   const mediaOnly = isMediaOnly(session);
   const mediaLabel = player.isPlaying ? 'Play-head' : 'Audio length';
-  const display = mediaOnly
-    ? fmtSec(player.isPlaying ? playheadSec : session.audioSeconds)
-    : clock.timecode;
 
   return (
     <section
@@ -439,18 +486,14 @@ export function TransportStrip({
                   )}
                 </span>
               </span>
-              <span
-                id="session-tc-display"
-                role="timer"
-                aria-label={
-                  mediaOnly
-                    ? `${mediaLabel} ${display}`
-                    : `Timecode ${clock.timecode}${rolling ? ', rolling' : ''}${session.take > 1 ? `, take ${session.take}` : ''}`
-                }
-                className="font-tc text-[1.625rem] font-semibold leading-none tracking-[-0.01em] tabular-nums max-md:text-[1.5rem]"
-              >
-                {display}
-              </span>
+              <ClockReadout
+                mediaOnly={mediaOnly}
+                playing={player.isPlaying}
+                audioSeconds={session.audioSeconds}
+                rolling={rolling}
+                take={session.take}
+                label={mediaLabel}
+              />
               {mediaOnly && (
                 <span
                   className="font-label text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-si-dim"
@@ -530,7 +573,7 @@ export function TransportStrip({
                   events={events}
                   enabled={rolling && canWrite}
                   disabledReason={readOnly ?? (!rolling ? 'Roll timecode to log events.' : null)}
-                  elapsedSec={() => clockStore.get().elapsedSec}
+                  elapsedSec={clockElapsed}
                 />
               )}
             </div>
@@ -540,7 +583,6 @@ export function TransportStrip({
               events={events}
               segments={player.segments}
               totalSec={totalSec}
-              playheadSec={playheadSec}
               onSeek={onSeek}
               onSelectEvent={onRevealEvent}
             />

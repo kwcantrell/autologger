@@ -3,6 +3,7 @@
 // ones --tx-wave-progress (DESIGN.md "Timeline").
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { usePlayhead } from './context';
 import { columnPeaks, type SegmentPeaks } from './waveform';
 
 /** Column width in CSS pixels (a 1px gap included). */
@@ -12,13 +13,11 @@ export function TimelineWaveform({
   peaks,
   totalSec,
   view,
-  playheadSec,
 }: {
   peaks: SegmentPeaks[];
   totalSec: number;
   /** Visible window as fractions of the track (Timeline's zoom view). */
   view: { left: number; width: number };
-  playheadSec: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bodyRef = useRef<HTMLSpanElement>(null);
@@ -47,6 +46,11 @@ export function TimelineWaveform({
     () => columnPeaks(peaks, fromSec, toSec, columns),
     [peaks, fromSec, toSec, columns],
   );
+  // Played columns: the canvas redraws when the playhead crosses into another column, not on
+  // every frame.
+  const playedCols = usePlayhead((sec) =>
+    toSec > fromSec ? Math.floor(((sec - fromSec) / (toSec - fromSec)) * columns) : 0,
+  );
 
   useEffect(() => {
     const c = canvasRef.current;
@@ -71,16 +75,15 @@ export function TimelineWaveform({
     const colW = (size.w / Math.max(1, heights.length)) * dpr;
     const barW = Math.max(1, colW - dpr);
     const mid = h / 2;
-    const playX = toSec > fromSec ? ((playheadSec - fromSec) / (toSec - fromSec)) * w : 0;
     for (let x = 0; x < heights.length; x++) {
       // sqrt: speech sits far below full scale; this keeps quiet passages visible.
       const amp = Math.sqrt(heights[x]!) * (h * 0.44);
       if (amp < 0.5) continue;
       const left = x * colW;
-      ctx.fillStyle = left + barW / 2 <= playX ? played : body;
+      ctx.fillStyle = x < playedCols ? played : body;
       ctx.fillRect(left, mid - amp, barW, amp * 2);
     }
-  }, [heights, size, playheadSec, fromSec, toSec]);
+  }, [heights, size, playedCols]);
 
   return (
     <>

@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createStore } from '@/lib/store';
+import { showToast } from '@/shared/components/Toast';
 import { enqueueUpload } from './uploads';
 
 const SEGMENT_SEC = 60;
@@ -27,7 +28,6 @@ export function recorderSupport(): string | null {
 
 export function useRecorder(sessionId: string, elapsedSec: () => number) {
   const [state, setState] = useState<RecorderState>('idle');
-  const [error, setError] = useState<string | null>(null);
   // Mic level 0..1, updated ~12 times a second while recording. A store, not state, so only
   // the meter re-renders — not the workspace and every tab under it.
   const [level] = useState(() => createStore(0));
@@ -88,10 +88,9 @@ export function useRecorder(sessionId: string, elapsedSec: () => number) {
   const start = useCallback(async () => {
     const unsupported = recorderSupport();
     if (unsupported) {
-      setError(unsupported);
+      showToast(unsupported, true);
       return false;
     }
-    setError(null);
     setState('starting');
     let stream: MediaStream;
     try {
@@ -101,12 +100,13 @@ export function useRecorder(sessionId: string, elapsedSec: () => number) {
     } catch (e) {
       setState('idle');
       const name = e instanceof DOMException ? e.name : '';
-      setError(
+      showToast(
         name === 'NotAllowedError'
           ? 'Microphone access denied. Allow the microphone for this site in the browser settings.'
           : name === 'NotFoundError'
             ? 'No microphone found.'
             : `Couldn't open the microphone (${e instanceof Error ? e.message : String(e)}).`,
+        true,
       );
       return false;
     }
@@ -146,8 +146,9 @@ export function useRecorder(sessionId: string, elapsedSec: () => number) {
     }
     // A track ending (device unplugged) stops the recording honestly.
     stream.getAudioTracks()[0]?.addEventListener('ended', () => {
-      setError(
+      showToast(
         'The microphone was disconnected. Recording stopped; the audio so far is being uploaded.',
+        true,
       );
       stoppingRef.current = true;
       if (recRef.current && recRef.current.state !== 'inactive') recRef.current.stop();
@@ -184,5 +185,5 @@ export function useRecorder(sessionId: string, elapsedSec: () => number) {
     [cleanup],
   );
 
-  return { state, error, level, startedAt, start, stop, clearError: () => setError(null) };
+  return { state, level, startedAt, start, stop };
 }
