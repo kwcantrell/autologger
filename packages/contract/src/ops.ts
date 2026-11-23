@@ -459,7 +459,12 @@ export const opInputs = {
     .refine((v) => (v.origin === 'youtube') === (v.youtube !== undefined), {
       message: 'Pass youtube {url, …} exactly when origin is "youtube".',
     }),
-  'media.completeUpload': z.object({ segmentId: id, durationSec: sec.optional() }),
+  'media.completeUpload': z.object({
+    segmentId: id,
+    durationSec: sec.optional(),
+    /** false: store the audio and draw its waveform, no transcription. */
+    transcribe: z.boolean().default(true),
+  }),
   'media.playbackUrl': z.object({ segmentId: id }),
   'media.waveform': z.object({ sessionId: id }),
   'media.importYoutube': z.object({
