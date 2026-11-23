@@ -1,5 +1,5 @@
 import type { Category, Show, ShowAccess } from '@autologger/contract';
-import { and, asc, eq, isNotNull, notInArray, type SQL, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, notInArray, type SQL, sql } from 'drizzle-orm';
 import {
   readableShowCondition,
   requireShow,
@@ -111,26 +111,29 @@ defineOp({
 defineOp({
   name: 'shows.get',
   description:
-    'One show with its event buttons (categories) and mcpClients: the distinct names of the MCP clients (agents) that changed it, for filtering changes_list by clientName.',
+    'One show with its event buttons (categories), mcpClients: the distinct names of the MCP clients (agents) that changed it, and companionDevices: the distinct names of the Companion devices that changed it — both for filtering changes_list by clientName (with via "mcp" or "companion").',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { showId }) {
     const show = await getShow(ctx, showId);
     const clients = await ctx.db
-      .selectDistinct({ name: schema.changes.clientName })
+      .selectDistinct({ via: schema.changes.via, name: schema.changes.clientName })
       .from(schema.changes)
       .where(
         and(
           eq(schema.changes.showId, showId),
-          eq(schema.changes.via, 'mcp'),
+          inArray(schema.changes.via, ['mcp', 'companion']),
           isNotNull(schema.changes.clientName),
         ),
       )
       .orderBy(schema.changes.clientName);
+    const names = (via: string) =>
+      clients.flatMap((c) => (c.via === via && c.name ? [c.name] : []));
     return {
       ...show,
       categories: await listCategories(ctx, showId),
-      mcpClients: clients.flatMap((c) => (c.name ? [c.name] : [])),
+      mcpClients: names('mcp'),
+      companionDevices: names('companion'),
     };
   },
 });

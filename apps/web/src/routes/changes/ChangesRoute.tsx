@@ -1,7 +1,7 @@
 // `/changes`: the active show's change log — every change in any of its sessions plus the
 // show-level ones no session's Agents tab lists (wiki pages, event buttons) — with the same
 // Undo / Undo all flow. Filters live in the URL (?where=show|<sessionId>&kind=<entity>&who=…, who
-// being all / mcp / operators / mcp:<clientName>), so the Wiki links here with show-level wiki
+// being all / mcp / operators / mcp:<clientName> / companion:<device name>), so the Wiki links here with show-level wiki
 // changes preselected. All filters run on the server. Session content rows jump to their moment
 // (changes.list atSec). New entries arrive as show-socket hints (liveShow.ts).
 
@@ -38,24 +38,31 @@ import { wikiHref } from '../wiki/wikiShared';
 
 const LIMIT = 300;
 
-/** `mcp:<clientName>`: one MCP client. */
-type Who = 'all' | 'mcp' | 'operators' | `mcp:${string}`;
+/** `mcp:<clientName>`: one MCP client; `companion:<name>`: one Companion device. */
+type Who = 'all' | 'mcp' | 'operators' | `mcp:${string}` | `companion:${string}`;
 const WHO_LABEL: Record<'all' | 'mcp' | 'operators', string> = {
   all: 'Everyone',
   mcp: 'Agents only',
   operators: 'Operators',
 };
 const CLIENT_PREFIX = 'mcp:';
+const DEVICE_PREFIX = 'companion:';
 const whoLabel = (who: Who) =>
   who.startsWith(CLIENT_PREFIX)
     ? `Agent: ${who.slice(CLIENT_PREFIX.length)}`
-    : WHO_LABEL[who as keyof typeof WHO_LABEL];
+    : who.startsWith(DEVICE_PREFIX)
+      ? `Device: ${who.slice(DEVICE_PREFIX.length)}`
+      : WHO_LABEL[who as keyof typeof WHO_LABEL];
+const isNamed = (who: string, prefix: string) =>
+  who.startsWith(prefix) && who.length > prefix.length;
 
 function whoFilter(who: Who): Pick<ShowChangesFilter, 'via' | 'clientName'> {
   if (who === 'mcp') return { via: 'mcp' };
   if (who === 'operators') return { via: ['web', 'companion'] };
   if (who.startsWith(CLIENT_PREFIX))
     return { via: 'mcp', clientName: who.slice(CLIENT_PREFIX.length) };
+  if (who.startsWith(DEVICE_PREFIX))
+    return { via: 'companion', clientName: who.slice(DEVICE_PREFIX.length) };
   return {};
 }
 
@@ -91,8 +98,7 @@ function readFilters(search: string): Filters {
     where: p.get('where') || 'all',
     kind: kind && kind in KIND_LABEL ? (kind as Kind) : 'all',
     who:
-      who &&
-      (who in WHO_LABEL || (who.startsWith(CLIENT_PREFIX) && who.length > CLIENT_PREFIX.length))
+      who && (who in WHO_LABEL || isNamed(who, CLIENT_PREFIX) || isNamed(who, DEVICE_PREFIX))
         ? (who as Who)
         : 'all',
   };
@@ -309,6 +315,10 @@ function ChangeLog({
   const whoOptions: [Who, string][] = [
     ...(Object.entries(WHO_LABEL) as [Who, string][]),
     ...(showQ.data?.mcpClients ?? []).map((n): [Who, string] => [`mcp:${n}`, `Agent: ${n}`]),
+    ...(showQ.data?.companionDevices ?? []).map((n): [Who, string] => [
+      `companion:${n}`,
+      `Device: ${n}`,
+    ]),
   ];
   // A client from a link may have no changes in this show (yet).
   if (!whoOptions.some(([v]) => v === filters.who))
