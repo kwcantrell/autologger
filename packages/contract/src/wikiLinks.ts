@@ -136,10 +136,8 @@ export function wikiCitationSpans(
   pageSessionId?: string | null,
 ): (WikiCitation & { start: number; end: number })[] {
   const blank = (code: string) => code.replace(/[^\n]/g, ' ');
-  const masked = bodyMd
-    .replace(FENCED_CODE, blank)
-    .replace(CODE_SPAN, blank)
-    .replace(/\\\|/g, ' |');
+  // Escaped pipes stay as written: the label pattern reads `\|` as an escape (unescaped below).
+  const masked = bodyMd.replace(FENCED_CODE, blank).replace(CODE_SPAN, blank);
   const out: (WikiCitation & { start: number; end: number })[] = [];
   for (const m of masked.matchAll(CITATION_LINK)) {
     const c = citationOf(m, pageSessionId);

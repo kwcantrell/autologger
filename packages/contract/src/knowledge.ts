@@ -55,8 +55,9 @@ const TABLE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$/;
 
 /**
  * Markdown → readable text: citations and links become their labels (a bare citation `[@…]`
- * disappears; `citations: false` drops citations entirely), [[Title|label]] becomes label, emphasis/code/heading/list/quote marks go, table
- * pipes become " · ", whitespace collapses.
+ * disappears; `citations: false` drops citations entirely), [[Title|label]] becomes label,
+ * emphasis/code/heading/list/quote marks go, table pipes become " · ", whitespace collapses.
+ * Emphasis spans are bounded (one line, a few hundred characters) so long text stays linear.
  */
 export function plainText(markdown: string, opts: { citations?: boolean } = {}): string {
   return (opts.citations === false ? withoutCitations(markdown) : markdown)
@@ -68,8 +69,8 @@ export function plainText(markdown: string, opts: { citations?: boolean } = {}):
     .replace(/^ {0,3}#{1,6}\s+/gm, '')
     .replace(/^\s*(?:[-*+]|\d{1,3}[.)])\s+/gm, '')
     .replace(/^\s*>\s?/gm, '')
-    .replace(/(\*\*|__)(.+?)\1/g, '$2')
-    .replace(/(?<![\w*])([*_])(?!\s)(.+?)(?<!\s)\1(?![\w*])/g, '$2')
+    .replace(/(\*\*|__)([^\n]{1,300}?)\1/g, '$2')
+    .replace(/(?<![\w*])([*_])(?!\s)([^\n]{1,300}?)(?<!\s)\1(?![\w*])/g, '$2')
     .replace(/`+([^`]*)`+/g, '$1')
     .replace(/\\\|/g, '|')
     .replace(/\s*\|\s*/g, ' · ')
@@ -81,43 +82,72 @@ export function plainText(markdown: string, opts: { citations?: boolean } = {}):
     .trim();
 }
 
+/** Every citation span of a block, short forms included whatever their session. */
+const allCitationSpans = (markdown: string) => wikiCitationSpans(markdown, '_');
+
 /** Markdown with every citation cut out (short forms too, whatever their session). */
 function withoutCitations(markdown: string): string {
   let out = '';
   let last = 0;
-  for (const c of wikiCitationSpans(markdown, '_')) {
+  for (const c of allCitationSpans(markdown)) {
     out += markdown.slice(last, c.start);
     last = c.end;
   }
   return out + markdown.slice(last);
 }
 
-/** Where sentences start in a block: offset 0 and after `. `, `! `, `? ` (closing marks allowed). */
-function sentenceStarts(markdown: string): number[] {
-  const starts = [0];
-  for (const m of markdown.matchAll(/[.!?;]["'\u201d\u2019)\]*_]*\s+/g))
-    starts.push(m.index! + m[0].length);
-  // A table cell also starts a claim; pipes inside [[Title|label]] links don't count.
-  const outsideLinks = markdown.replace(/\[\[[^\]\n]*\]\]/g, (l) => 'x'.repeat(l.length));
-  for (const m of outsideLinks.matchAll(/(?<!\\)\|/g)) starts.push(m.index! + 1);
-  return [...new Set(starts)].sort((a, b) => a - b);
+/** `markdown` with each span replaced by as many spaces (offsets unchanged). */
+function blankSpans(markdown: string, spans: { start: number; end: number }[]): string {
+  let out = '';
+  let last = 0;
+  for (const s of spans) {
+    out += markdown.slice(last, s.start) + ' '.repeat(s.end - s.start);
+    last = s.end;
+  }
+  return out + markdown.slice(last);
 }
 
 /**
+ * Where claims start in a block: offset 0, after a sentence end or semicolon (`.`, `!`, `?`, `;`
+ * followed by whitespace, closing marks allowed) and after a table-cell pipe. `masked` is the block
+ * with citations blanked and [[links]] filled, so labels like "Ep. 1" and [[A|b]] don't split it.
+ */
+function claimStarts(masked: string): number[] {
+  const starts = [0];
+  for (const m of masked.matchAll(/[.!?;]["'\u201d\u2019)\]*_]*\s+/g))
+    starts.push(m.index! + m[0].length);
+  for (const m of masked.matchAll(/(?<!\\)\|/g)) starts.push(m.index! + 1);
+  return [...new Set(starts)].sort((a, b) => a - b);
+}
+
+const HAS_WORD = /[\p{L}\p{N}]/u;
+
+/** Longest stretch of a sentence before its citation kept as the claim. */
+const CLAIM_MAX_CHARS = 600;
+
+/**
  * Each citation of a block with the sentence it closes: from the start of its sentence up to the
- * citation, citations removed. A citation that opens its sentence (e.g. right after the full stop)
- * takes the previous sentence.
+ * citation, citations removed. A citation with no words before it in its sentence (e.g. right
+ * after the full stop) takes the previous sentence too. Linear in the block size per citation's
+ * sentence, so blocks with hundreds of citations stay fast.
  */
 function blockClaims(markdown: string, pageSessionId: string | null | undefined): BlockCitation[] {
-  const spans = wikiCitationSpans(markdown, pageSessionId);
-  const starts = sentenceStarts(markdown);
-  return spans.map(({ start, end, ...citation }) => {
-    const before = starts.filter((b) => b <= start);
-    let piece = '';
-    for (let i = before.length - 1; i >= 0; i--) {
-      piece = markdown.slice(before[i], end);
-      if (plainText(withoutCitations(piece)).replace(/[\s.,;:!?—–-]+/g, '')) break;
+  const all = allCitationSpans(markdown);
+  const noCites = blankSpans(markdown, all);
+  const masked = noCites.replace(/\[\[[^\]\n]*\]\]/g, (l) => 'x'.repeat(l.length));
+  const starts = claimStarts(masked);
+  let k = 0;
+  return wikiCitationSpans(markdown, pageSessionId).map(({ start, end, ...citation }) => {
+    while (k + 1 < starts.length && starts[k + 1]! <= start) k++;
+    let from = starts[k]!;
+    if (!HAS_WORD.test(noCites.slice(from, start)) && k > 0) from = starts[k - 1]!;
+    // A very long sentence (e.g. hundreds of comma-separated citations): keep its last part only.
+    if (start - from > CLAIM_MAX_CHARS) {
+      const cut = start - CLAIM_MAX_CHARS;
+      const space = masked.indexOf(' ', cut);
+      from = space === -1 || space >= start ? cut : space + 1;
     }
+    const piece = markdown.slice(from, end);
     return {
       citation,
       text: plainText(piece, { citations: false }).replace(/[\s.,;:]+$/, ''),

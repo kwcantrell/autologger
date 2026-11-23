@@ -708,6 +708,8 @@ export interface MomentSearch {
   unknownEntities?: string[];
   /** True when nothing matched every word of `query`, so these match any of its words. */
   relaxedQuery?: boolean;
+  /** True when more transcript lines matched than one search considers (5000, best first): narrow by session or query. */
+  transcriptCapped?: boolean;
 }
 
 /** One page of the show wiki seen as a graph node, with its neighbourhood and where it is cited. */

@@ -139,6 +139,53 @@ describe('moments.search', () => {
     expect(strict.relaxedQuery).toBeUndefined();
   });
 
+  it('clamps early events, keeps clips within compilation limits, matches whole words', async () => {
+    const { owner, show, ep1, ep2 } = await knowledgeShow();
+    // The fixture's first session starts at 01:00:00:00; an event stored before that (older
+    // versions allowed it) has a negative time.
+    await db.insert(schema.events).values({
+      id: newId('evt'),
+      sessionId: ep1.id,
+      category: 'Note',
+      message: 'Carly early',
+      color: '#a3a3a3',
+      timecodeFrames: 24 * 3540,
+      source: 'operator',
+      createdBy: owner.user.id,
+    });
+    await call(owner, 'topics.create', {
+      sessionId: ep2.id,
+      startSec: 2000,
+      durationSec: 3000,
+      title: 'Carly marathon',
+    });
+    await db.insert(schema.transcriptSegments).values({
+      id: newId('seg'),
+      sessionId: ep2.id,
+      startSec: 5,
+      endSec: 6,
+      speaker: 'Joe',
+      text: 'Carlyle is not Carly-adjacent at all',
+      words: [],
+    });
+    const res = await call(owner, 'moments.search', {
+      showId: show.id,
+      entities: ['Carly'],
+      kinds: ['event', 'topic', 'transcript'],
+      mergeGapSec: 1,
+    });
+    expect(Math.min(...res.moments.map((m) => m.startSec))).toBe(0);
+    // "Carly-adjacent" names Carly as a whole word; "Carlyle" alone would not.
+    expect(res.moments.filter((m) => m.kind === 'transcript')).toHaveLength(1);
+    for (const c of res.clips!) {
+      expect(c.endSec - c.startSec).toBeGreaterThanOrEqual(1);
+      expect(c.endSec - c.startSec).toBeLessThanOrEqual(20 * 60);
+    }
+    expect(res.clips!.filter((c) => c.label.startsWith('Carly marathon'))).toHaveLength(3);
+    // A query of punctuation only finds nothing instead of failing.
+    expect((await call(owner, 'moments.search', { showId: show.id, query: "' '" })).total).toBe(0);
+  });
+
   it('reports unknown entities, pages, and hides other shows', async () => {
     const { owner, show } = await knowledgeShow();
     const none = await call(owner, 'moments.search', { showId: show.id, entities: ['Nobody'] });

@@ -6,6 +6,8 @@
 import {
   framesToAtSec,
   type GraphEntity,
+  MAX_CLIP_SEC,
+  MIN_CLIP_SEC,
   type Moment,
   type MomentClip,
   type MomentEntity,
@@ -20,6 +22,7 @@ import { requireShow } from '../core/authz.ts';
 import { notFound } from '../core/errors.ts';
 import { type Ctx, defineOp } from '../core/op.ts';
 import { schema } from '../db/client.ts';
+import { env } from '../env.ts';
 import { firstParagraph } from './wiki.ts';
 
 const { wikiPages: pages, sessions, topics, events, transcriptSegments: segments } = schema;
@@ -182,25 +185,38 @@ function resolveEntities(k: Knowledge, values: string[]): { ids: string[]; unkno
   return { ids: [...new Set(ids)], unknown };
 }
 
-const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Words of a text or name, lowercased: what entity names are matched on. */
+const words = (text: string) =>
+  (text.toLowerCase().match(/[\p{L}\p{N}]+(?:['\u2019][\p{L}\p{N}]+)*/gu) ?? []).map((w) =>
+    w.replace(/\u2019/g, "'"),
+  );
 
 /**
- * A matcher that finds which pages a free text (topic, event, transcript line) names, by whole-word,
- * case-insensitive match of their titles and aliases (3+ characters).
+ * A matcher that finds which pages a free text (topic, event, transcript line) names: whole-word,
+ * case-insensitive matches of their titles and aliases (3+ characters), by looking up the text's
+ * word n-grams in a map — linear in the text, whatever the number of names.
  */
 function nameMatcher(k: Knowledge): (text: string) => MomentEntity[] {
-  const entries = [...k.names.entries()].filter(([n]) => n.length >= 3);
-  if (!entries.length) return () => [];
-  entries.sort((a, b) => b[0].length - a[0].length);
-  const re = new RegExp(
-    `(?<![\\p{L}\\p{N}])(${entries.map(([n]) => escapeRe(n).replace(/ /g, '\\s+')).join('|')})(?![\\p{L}\\p{N}])`,
-    'giu',
-  );
+  const byWords = new Map<string, string>();
+  let longest = 0;
+  for (const [name, id] of k.names) {
+    const w = words(name);
+    if (name.length < 3 || !w.length) continue;
+    const key = w.join(' ');
+    if (!byWords.has(key)) byWords.set(key, id);
+    longest = Math.max(longest, w.length);
+  }
+  if (!byWords.size) return () => [];
   return (text) => {
+    const w = words(text);
     const found = new Set<string>();
-    for (const m of text.matchAll(re)) {
-      const id = k.names.get(normTitle(m[1]!));
-      if (id) found.add(id);
+    for (let i = 0; i < w.length; i++) {
+      let key = '';
+      for (let n = 0; n < longest && i + n < w.length; n++) {
+        key = n ? `${key} ${w[i + n]}` : w[i]!;
+        const id = byWords.get(key);
+        if (id) found.add(id);
+      }
     }
     return [...found].map((id) => entityOf(k.pages.get(id)!));
   };
@@ -212,17 +228,15 @@ function nameMatcher(k: Knowledge): (text: string) => MomentEntity[] {
  */
 function tsQuery(query: string, any: boolean) {
   if (!any) return sql`websearch_to_tsquery('english', ${query})`;
-  const words = query.match(/[\p{L}\p{N}']+/gu) ?? [];
-  return sql`to_tsquery('english', ${
-    words
-      .map((w) => w.replace(/'/g, ''))
-      .filter(Boolean)
-      .join(' | ') || "''"
-  })`;
+  // Letters and digits only, so the joined string is always valid to_tsquery syntax.
+  return sql`to_tsquery('english', ${queryWords(query).join(' | ')})`;
 }
 
+/** The query's words, letters and digits only. */
+const queryWords = (query: string) => query.match(/[\p{L}\p{N}]+/gu) ?? [];
+
 /** Whether `query` has more than one word, so OR-ing them can find more. */
-const severalWords = (query: string) => (query.match(/[\p{L}\p{N}']+/gu) ?? []).length > 1;
+const severalWords = (query: string) => queryWords(query).length > 1;
 
 /** ts_rank of each text against the query (0 when it doesn't match), in input order. */
 async function rankTexts(ctx: Ctx, query: string, texts: string[], any = false): Promise<number[]> {
@@ -271,7 +285,8 @@ async function eventMoments(ctx: Ctx, k: Knowledge, sessionIds: string[]): Promi
         sessionId: s.id,
         sessionTitle: s.title,
         sessionDate: s.date,
-        startSec: framesToAtSec(e.timecodeFrames!, s),
+        // Events logged before the session start are clamped to 0, as search does.
+        startSec: Math.max(0, framesToAtSec(e.timecodeFrames!, s)),
         endSec: null,
         title: e.category,
         text: [e.message, e.value].filter(Boolean).join(' — ') || e.category,
@@ -281,6 +296,9 @@ async function eventMoments(ctx: Ctx, k: Knowledge, sessionIds: string[]): Promi
     });
 }
 
+/** Most transcript lines one search considers (best matches first when there is a query). */
+const TRANSCRIPT_CAP = 5000;
+
 /** Transcript lines matching the query (full text) or naming one of `names` — never the whole transcript. */
 async function transcriptMoments(
   ctx: Ctx,
@@ -289,20 +307,32 @@ async function transcriptMoments(
   query: string | undefined,
   names: string[],
   any = false,
-): Promise<Moment[]> {
-  if (!sessionIds.length || (!query && !names.length)) return [];
-  const textMatch = query
-    ? sql`${segments.search} @@ ${tsQuery(query, any)}`
+): Promise<{ moments: Moment[]; capped: boolean }> {
+  if (!sessionIds.length || (!query && !names.length)) return { moments: [], capped: false };
+  // Names: whole words, any non-word characters between them (the same matching as nameMatcher).
+  const namePatterns = names
+    .map((n) => words(n))
+    .filter((w) => w.length)
+    .map((w) => `\\m${w.join('[^[:alnum:]]+')}\\M`);
+  if (!query && !namePatterns.length) return { moments: [], capped: false };
+  const q = query ? tsQuery(query, any) : null;
+  const textMatch = q
+    ? sql`${segments.search} @@ ${q}`
     : sql`(${sql.join(
-        names.map((n) => sql`${segments.text} ilike ${`%${n.replace(/[\\%_]/g, '\\$&')}%`}`),
+        namePatterns.map((p) => sql`${segments.text} ~* ${p}`),
         sql` or `,
       )})`;
   const rows = await ctx.db
     .select()
     .from(segments)
     .where(and(inArray(segments.sessionId, sessionIds), textMatch))
-    .limit(5000);
-  return rows.map((t) => {
+    .orderBy(
+      ...(q ? [sql`ts_rank(${segments.search}, ${q}) desc`] : []),
+      asc(segments.sessionId),
+      asc(segments.startSec),
+    )
+    .limit(TRANSCRIPT_CAP);
+  const moments = rows.map((t) => {
     const s = k.sessions.get(t.sessionId)!;
     return {
       kind: 'transcript' as const,
@@ -318,6 +348,7 @@ async function transcriptMoments(
       rank: 0,
     };
   });
+  return { moments, capped: rows.length === TRANSCRIPT_CAP };
 }
 
 const KIND_WEIGHT: Record<Moment['kind'], number> = {
@@ -330,7 +361,11 @@ const KIND_WEIGHT: Record<Moment['kind'], number> = {
 /** Moments of one session merged into ranges when they overlap or are at most `gap` apart. */
 function mergeClips(moments: Moment[], gap: number, pointSec: number): MomentClip[] {
   const bySession = new Map<string, Moment[]>();
-  for (const m of moments) bySession.set(m.sessionId, [...(bySession.get(m.sessionId) ?? []), m]);
+  for (const m of moments) {
+    const list = bySession.get(m.sessionId);
+    if (list) list.push(m);
+    else bySession.set(m.sessionId, [m]);
+  }
   type Building = MomentClip & { titles: string[] };
   const clips: Building[] = [];
   for (const list of bySession.values()) {
@@ -360,16 +395,26 @@ function mergeClips(moments: Moment[], gap: number, pointSec: number): MomentCli
     }
     if (cur) clips.push(cur);
   }
-  return clips.map(({ titles, ...c }) => ({
-    ...c,
-    label: titles.length > 1 ? `${titles[0]} (+${titles.length - 1})` : (titles[0] ?? ''),
-  }));
+  // Keep every clip within compilations' limits: at least MIN_CLIP_SEC, longer ones split.
+  return clips.flatMap(({ titles, ...c }) => {
+    const label = titles.length > 1 ? `${titles[0]} (+${titles.length - 1})` : (titles[0] ?? '');
+    const end = Math.max(c.endSec, c.startSec + MIN_CLIP_SEC);
+    const parts: MomentClip[] = [];
+    for (let from = c.startSec, i = 1; from < end; from += MAX_CLIP_SEC, i++)
+      parts.push({
+        ...c,
+        startSec: from,
+        endSec: Math.min(end, from + MAX_CLIP_SEC),
+        label: end - c.startSec > MAX_CLIP_SEC ? `${label} (part ${i})` : label,
+      });
+    return parts;
+  });
 }
 
 defineOp({
   name: 'moments.search',
   description:
-    'Find clip-ready moments of a show: time ranges in sessions, each with what happens there and the wiki pages (people, recurring bits, topics) it is about. Sources, by `kinds` (default all): "citation" — every citation on the show wiki, described by the sentence or list item that cites it and tagged with its page plus the [[pages]] linked in that block (the richest source once a wiki exists); "topic" — chapters; "event" — logged events (no end: endSec null); "transcript" — transcript lines (only those matching query or naming an entity). Filter with `query` (full text, websearch syntax: words, "phrases", -exclude, or; when nothing matches every word, moments matching any word are returned with relaxedQuery: true), `entities` (page titles, aliases or ids — a moment must be about all of them; for topics, events and transcript lines that means naming each entity\'s title or an alias in its text) or both, and `sessionId`. With a query, best matches first; without, in episode order then time. Every moment has sessionId, startSec and endSec (seconds from the session start) — pass them as clips to compilations_create, or cite them as [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>). `mergeGapSec` > 0 also returns `clips`: this page\'s moments merged per session where they overlap or are at most that many seconds apart (moments without an end count as `pointSec` long). Use graph_entity first to see an entity\'s aliases, related pages and the sessions it appears in. Paged: total, limit (default 30, max 500), offset / nextOffset.',
+    'Find clip-ready moments of a show: time ranges in sessions, each with what happens there and the wiki pages (people, recurring bits, topics) it is about. Sources, by `kinds` (default all): "citation" — every citation on the show wiki, described by the sentence or list item that cites it and tagged with its page plus the [[pages]] linked in that block (the richest source once a wiki exists); "topic" — chapters; "event" — logged events (no end: endSec null); "transcript" — transcript lines (only those matching query or naming an entity). Filter with `query` (full text, websearch syntax: words, "phrases", -exclude, or; when nothing matches every word, moments matching any word are returned with relaxedQuery: true), `entities` (page titles, aliases or ids — a moment must be about all of them; for topics, events and transcript lines that means naming each entity\'s title or an alias in its text) or both, and `sessionId`. With a query, best matches first; without, in episode order then time. Every moment has sessionId, startSec and endSec (seconds from the session start; archived sessions included) — cite them, as [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), or use them as compilation clips. `mergeGapSec` > 0 also returns `clips`: this page\'s moments merged per session where they overlap or are at most that many seconds apart (moments without an end count as `pointSec` long), each within compilations_create\'s limits (at least 1 s; ranges over 20 min split into parts) — pass them to compilations_create as they are. transcriptCapped: true means more transcript lines matched than one search considers (5000, best first): narrow it. Use graph_entity first to see an entity\'s aliases, related pages and the sessions it appears in. Paged: total, limit (default 30, max 500), offset / nextOffset.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
@@ -394,6 +439,7 @@ defineOp({
       return [p.title, ...p.aliases].filter((n) => n.trim().length >= 3);
     });
 
+    let transcriptCapped = false;
     const collect = async (any: boolean): Promise<Moment[]> => {
       let found: Moment[] = [];
       if (kinds.has('citation'))
@@ -403,17 +449,18 @@ defineOp({
       const free: Moment[] = [];
       if (kinds.has('topic')) free.push(...(await topicMoments(ctx, k, sessionIds)));
       if (kinds.has('event')) free.push(...(await eventMoments(ctx, k, sessionIds)));
-      if (kinds.has('transcript'))
-        free.push(
-          ...(await transcriptMoments(
-            ctx,
-            k,
-            sessionIds,
-            input.query,
-            input.query ? [] : entityNames,
-            any,
-          )),
+      if (kinds.has('transcript')) {
+        const lines = await transcriptMoments(
+          ctx,
+          k,
+          sessionIds,
+          input.query,
+          input.query ? [] : entityNames,
+          any,
         );
+        free.push(...lines.moments);
+        transcriptCapped = lines.capped;
+      }
       for (const m of free) m.entities = matchNames(m.text);
       found.push(...free);
       if (entityIds.length)
@@ -458,6 +505,7 @@ defineOp({
         ? { clips: mergeClips(page, input.mergeGapSec, input.pointSec) }
         : {}),
       ...(relaxed ? { relaxedQuery: true } : {}),
+      ...(transcriptCapped ? { transcriptCapped: true } : {}),
       ...(unknown.length ? { unknownEntities: unknown } : {}),
     };
   },
@@ -479,7 +527,11 @@ defineOp({
     const about = k.citations.filter((m) => m.entities.some((e) => e.pageId === pageId));
 
     const perSession = new Map<string, Moment[]>();
-    for (const m of about) perSession.set(m.sessionId, [...(perSession.get(m.sessionId) ?? []), m]);
+    for (const m of about) {
+      const list = perSession.get(m.sessionId);
+      if (list) list.push(m);
+      else perSession.set(m.sessionId, [m]);
+    }
     const sessionList = [...perSession.entries()]
       .map(([sid, list]) => {
         const s = k.sessions.get(sid)!;
@@ -651,10 +703,17 @@ const AL = 'https://autologger.app/ns#';
 
 /** One schema.org JSON-LD document; `al:` terms cover what schema.org has no word for. */
 function jsonLd(k: Knowledge, rows: Awaited<ReturnType<typeof graphRows>>) {
-  const ref = (id: string) => ({ '@id': `al:${id}` });
+  // Instances are IRIs on this server (relative to @base); `al:` is only for vocabulary terms.
+  const iri = (id: string) =>
+    id.startsWith('ses_')
+      ? `sessions/${id}`
+      : id.startsWith('wiki_')
+        ? `wiki/${id}`
+        : `shows/${encodeURIComponent(id)}`;
+  const ref = (id: string) => ({ '@id': iri(id) });
   const graph: Record<string, unknown>[] = [
     {
-      '@id': `al:${k.show.id}`,
+      '@id': iri(k.show.id),
       '@type': 'PodcastSeries',
       name: k.show.name,
       'al:code': k.show.code,
@@ -662,7 +721,7 @@ function jsonLd(k: Knowledge, rows: Awaited<ReturnType<typeof graphRows>>) {
   ];
   for (const s of [...k.sessions.values()].sort((a, b) => a.order - b.order))
     graph.push({
-      '@id': `al:${s.id}`,
+      '@id': iri(s.id),
       '@type': 'PodcastEpisode',
       name: s.title,
       ...(s.episode ? { episodeNumber: s.episode } : {}),
@@ -683,7 +742,7 @@ function jsonLd(k: Knowledge, rows: Awaited<ReturnType<typeof graphRows>>) {
       linksFrom.set(e.from as string, [...(linksFrom.get(e.from as string) ?? []), e.to as string]);
   for (const p of k.pages.values())
     graph.push({
-      '@id': `al:${p.id}`,
+      '@id': iri(p.id),
       '@type': type[p.kind],
       name: p.title,
       ...(p.aliases.length ? { alternateName: p.aliases } : {}),
@@ -695,7 +754,7 @@ function jsonLd(k: Knowledge, rows: Awaited<ReturnType<typeof graphRows>>) {
     });
   for (const m of rows.moments)
     graph.push({
-      '@id': `al:moment/${m.id}`,
+      '@id': `moments/${encodeURIComponent(m.id)}`,
       '@type': [
         'Clip',
         `al:${m.kind === 'citation' ? 'Citation' : m.kind === 'topic' ? 'Chapter' : 'LoggedEvent'}`,
@@ -711,7 +770,12 @@ function jsonLd(k: Knowledge, rows: Awaited<ReturnType<typeof graphRows>>) {
   return {
     '@context': [
       'https://schema.org/',
-      { al: AL, startOffset: { '@type': 'xsd:decimal' }, endOffset: { '@type': 'xsd:decimal' } },
+      {
+        '@base': `${env.publicUrl}/`,
+        al: AL,
+        startOffset: { '@type': 'xsd:decimal' },
+        endOffset: { '@type': 'xsd:decimal' },
+      },
     ],
     '@graph': graph,
   };

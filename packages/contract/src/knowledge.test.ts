@@ -65,6 +65,30 @@ describe('claims', () => {
   });
 });
 
+describe('claims at scale', () => {
+  it('does not split sentences inside citation labels', () => {
+    const [block] = wikiBlocks(
+      'Joe answers a letter [Ep. 1 00:01:00](@1-2). [Ep. 2 00:03:00](@3-4)',
+      's',
+    );
+    expect(block!.claims.map((c) => c.text)).toEqual([
+      'Joe answers a letter',
+      'Joe answers a letter',
+    ]);
+  });
+
+  it('stays fast on blocks with thousands of citations', () => {
+    const cites = (n: number, sep: string) =>
+      Array.from({ length: n }, (_, i) => `[${i}](@${i}-${i + 1})`).join(sep);
+    const t = Date.now();
+    expect(wikiBlocks(`Every mention: ${cites(3000, '; ')}`, 's')[0]!.claims).toHaveLength(3000);
+    wikiBlocks(cites(3000, '. '), 's');
+    wikiBlocks(`Mentions ${cites(1500, ', ')}`, 's');
+    plainText(' _a'.repeat(33000));
+    expect(Date.now() - t).toBeLessThan(2000);
+  });
+});
+
 describe('wikiSections', () => {
   it('splits at every heading and keeps the heading path', () => {
     const sections = wikiSections(page, 'ses_a');

@@ -40,20 +40,21 @@ buttons belong to the show, not a session: undo those from the show's **Changes*
 
 For producers and operators.
 
-| Skill                            | What it does                                                                                                                                         |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/autologger:import-videos`      | Imports a YouTube video or playlist into a show, one session per video, then optionally annotates each one. Also sets up the team's YouTube sign-in. |
-| `/autologger:transcript-cleanup` | Fixes systematic transcription mistakes (misheard names and terms, numbers, spoken math), names speakers and notes what changed.                     |
-| `/autologger:session-topics`     | Generates or rewrites a session's topics (chapters) from its transcript.                                                                             |
-| `/autologger:log-moments`        | Finds moments you describe (laughs, ad reads, guest intros, quotable lines) and logs them with the show's event buttons.                             |
-| `/autologger:session-dashboard`  | Designs and saves a dashboard for a session: event counts, talk time, topic timeline, custom stats.                                                  |
-| `/autologger:show-wiki`          | Writes a session recap and keeps the people, running-bit and topic pages up to date.                                                                 |
-| `/autologger:detailed-wiki`      | Builds a detailed, cited wiki for a whole show: a recap per session, then host, guest, bit, topic and hub pages.                                     |
-| `/autologger:find-moments`       | Read-only. Answers "when did we talk about X" across sessions with titles and timecodes.                                                             |
-| `/autologger:session-brief`      | Read-only. Writes an editor's or producer's brief in chat: rundown, highlights, clip candidates, problems, follow-ups.                               |
-| `/autologger:report-issue`       | Files a GitHub issue when a tool or skill got in the way, or for work left for later.                                                                |
+| Skill                            | What it does                                                                                                                                                                                                                        |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/autologger:import-videos`      | Imports a YouTube video or playlist into a show, one session per video, then optionally annotates each one. Also sets up the team's YouTube sign-in.                                                                                |
+| `/autologger:transcript-cleanup` | Fixes systematic transcription mistakes (misheard names and terms, numbers, spoken math), names speakers and notes what changed.                                                                                                    |
+| `/autologger:session-topics`     | Generates or rewrites a session's topics (chapters) from its transcript.                                                                                                                                                            |
+| `/autologger:log-moments`        | Finds moments you describe (laughs, ad reads, guest intros, quotable lines) and logs them with the show's event buttons.                                                                                                            |
+| `/autologger:session-dashboard`  | Designs and saves a dashboard for a session: event counts, talk time, topic timeline, custom stats.                                                                                                                                 |
+| `/autologger:show-wiki`          | Writes a session recap and keeps the people, running-bit and topic pages up to date.                                                                                                                                                |
+| `/autologger:detailed-wiki`      | Builds a detailed, cited wiki for a whole show: a recap per session, then host, guest, bit, topic and hub pages.                                                                                                                    |
+| `/autologger:knowledge-graph`    | Makes a whole show searchable as a [knowledge graph](/docs/agents/knowledge-graph): conventions, one read per session (cleanup, topics, events, recap), shared entity pages, then a check with `graph_entity` and `moments_search`. |
+| `/autologger:find-moments`       | Read-only. Answers "when did we talk about X" across sessions with titles and timecodes.                                                                                                                                            |
+| `/autologger:session-brief`      | Read-only. Writes an editor's or producer's brief in chat: rundown, highlights, clip candidates, problems, follow-ups.                                                                                                              |
+| `/autologger:report-issue`       | Files a GitHub issue when a tool or skill got in the way, or for work left for later.                                                                                                                                               |
 
-It also has the `session-recap` agent, which `detailed-wiki` runs on many sessions in parallel.
+It also has the `session-recap` agent, which `detailed-wiki` runs on many sessions in parallel, and the `session-document` agent, which `knowledge-graph` runs the same way.
 
 ## autologger-ask
 

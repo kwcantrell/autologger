@@ -675,7 +675,8 @@ export const opInputs = {
     format: z.enum(['jsonl', 'jsonld']).default('jsonl'),
     /** jsonl only: which rows. "chunks" are wiki sections ready for a vector index. */
     section: z.enum(['all', 'nodes', 'edges', 'moments', 'chunks']).default('all'),
-    limit: z.number().int().min(1).max(5000).default(500),
+    /** Rows per page; the file downloads take everything in one call. */
+    limit: z.number().int().min(1).max(1000000).default(500),
     offset: z.number().int().min(0).max(1000000).default(0),
   }),
 

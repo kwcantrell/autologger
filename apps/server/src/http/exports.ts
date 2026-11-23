@@ -48,7 +48,9 @@ exportRoutes.get('/api/shows/:showId/export/:format', async (c) => {
     );
   const showId = c.req.param('showId');
   const format = c.req.param('format');
-  const file = SHOW_GRAPH_FILES[format as keyof typeof SHOW_GRAPH_FILES];
+  const file = Object.hasOwn(SHOW_GRAPH_FILES, format)
+    ? SHOW_GRAPH_FILES[format as keyof typeof SHOW_GRAPH_FILES]
+    : undefined;
   if (!file)
     return c.json(
       { ok: false, error: { code: 'not_found', message: 'Unknown export format.' } },
@@ -61,23 +63,18 @@ exportRoutes.get('/api/shows/:showId/export/:format', async (c) => {
       'Content-Type': `${file.type}; charset=utf-8`,
       'Content-Disposition': `attachment; filename="${safeName(show.name)}.${format}"`,
     };
-    if (format === 'graph.jsonld') {
-      const out = await executeOp('graph.export', { showId, format: 'jsonld' }, actor, surface);
-      return c.body(JSON.stringify(out.format === 'jsonld' ? out.document : {}), 200, headers);
-    }
-    const lines: string[] = [];
-    for (let offset: number | null = 0; offset !== null; ) {
-      const out: GraphExportRows | GraphExportJsonLd = await executeOp(
-        'graph.export',
-        { showId, format: 'jsonl', section: file.section, limit: 5000, offset },
-        actor,
-        surface,
-      );
-      if (out.format !== 'jsonl') break;
-      for (const row of out.rows) lines.push(JSON.stringify(row));
-      offset = out.nextOffset;
-    }
-    return c.body(lines.join('\n'), 200, headers);
+    // One call builds the graph once, in one transaction, so the file is a consistent snapshot.
+    const out: GraphExportRows | GraphExportJsonLd = await executeOp(
+      'graph.export',
+      format === 'graph.jsonld'
+        ? { showId, format: 'jsonld' }
+        : { showId, format: 'jsonl', section: file.section, limit: 1000000 },
+      actor,
+      surface,
+    );
+    if (out.format === 'jsonld') return c.body(JSON.stringify(out.document), 200, headers);
+    const body = out.rows.map((row) => `${JSON.stringify(row)}\n`).join('');
+    return c.body(body, 200, headers);
   } catch (e) {
     const error = toRpcError(e);
     return c.json({ ok: false, error }, HTTP_STATUS[error.code]);
