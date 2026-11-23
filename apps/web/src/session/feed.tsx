@@ -4,7 +4,7 @@
 import { Check, Clock, Download, Filter, Pencil, Play, Plus, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '@/shared/components/ui/button';
-import { cn } from '@/shared/lib/utils';
+import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 
 export function feedCountLabel(count: number, noun: string) {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
@@ -201,7 +201,7 @@ export function JumpButton({
   return (
     <Button
       variant="unstyled"
-      className={JUMP_BTN}
+      className={cn(JUMP_BTN, 'relative max-md:ml-1 pointer-coarse:ml-1', TOUCH_HIT)}
       aria-label={`Jump to ${label}`}
       title={unavailable ?? `Jump to ${label}`}
       aria-disabled={unavailable ? true : undefined}

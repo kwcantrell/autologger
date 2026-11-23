@@ -6,7 +6,7 @@ import { PencilIcon } from 'lucide-react';
 import { memo, useEffect, useRef, useState } from 'react';
 import { fmtSec } from '@/lib/timecode';
 import { Button } from '@/shared/components/ui/button';
-import { cn } from '@/shared/lib/utils';
+import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 import {
   type Column,
   FEED_CELL,
@@ -19,6 +19,7 @@ import {
   JUMP_COLUMN,
   JumpButton,
 } from '../feed';
+import { ChangedElsewhere, useServerDraft } from '../serverDraft';
 
 export const SEGMENT_COLUMNS: Column[] = [
   JUMP_COLUMN,
@@ -48,21 +49,17 @@ export const SegmentRow = memo(function SegmentRow({
   onSaveText: (text: string) => Promise<unknown>;
 }) {
   const [editing, setEditing] = useState(false);
-  const [text, setText] = useState(s.text);
+  // Remote changes don't overwrite what the user is typing (#231).
+  const text = useServerDraft(s.text);
   const rowRef = useRef<HTMLTableRowElement>(null);
-  useEffect(() => setText(s.text), [s.text]);
   useEffect(() => {
     if (active) rowRef.current?.scrollIntoView({ block: 'nearest' });
   }, [active]);
 
   const save = async () => {
     setEditing(false);
-    if (text.trim() === s.text) return;
-    try {
-      await onSaveText(text.trim());
-    } catch {
-      setText(s.text);
-    }
+    if (text.value.trim() === s.text) return text.reset();
+    await text.commit(text.value.trim(), onSaveText);
   };
 
   const useWords = s.words.length > 0 && !s.edited;
@@ -116,28 +113,33 @@ export const SegmentRow = memo(function SegmentRow({
         )}
       >
         {editing ? (
-          <textarea
-            className={cn(
-              FEED_TEXTAREA,
-              'w-full rounded-[3px] border border-[color-mix(in_oklab,var(--si-accent)_55%,transparent)] bg-[color-mix(in_oklab,var(--si-accent)_8%,transparent)] px-1 py-0.5 text-inherit outline-none',
-            )}
-            // biome-ignore lint/a11y/noAutofocus: the user just chose Edit; focus moves into the field
-            autoFocus
-            aria-label="Segment text"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onBlur={() => void save()}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setText(s.text);
-                setEditing(false);
-              }
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                (e.target as HTMLTextAreaElement).blur();
-              }
-            }}
-          />
+          <>
+            <textarea
+              className={cn(
+                FEED_TEXTAREA,
+                'w-full rounded-[3px] border border-[color-mix(in_oklab,var(--si-accent)_55%,transparent)] bg-[color-mix(in_oklab,var(--si-accent)_8%,transparent)] px-1 py-0.5 text-inherit outline-none',
+              )}
+              // biome-ignore lint/a11y/noAutofocus: the user just chose Edit; focus moves into the field
+              autoFocus
+              aria-label="Segment text"
+              value={text.value}
+              onChange={(e) => text.set(e.target.value)}
+              onBlur={(e) => {
+                if (!text.keepOnWindowBlur(e.target)) void save();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  text.reset();
+                  setEditing(false);
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  (e.target as HTMLTextAreaElement).blur();
+                }
+              }}
+            />
+            {text.conflict && <ChangedElsewhere remote={text.server} onTakeTheirs={text.reset} />}
+          </>
         ) : (
           <span className="flex items-start gap-1">
             <span className="min-w-0 flex-1">
@@ -167,7 +169,10 @@ export const SegmentRow = memo(function SegmentRow({
               <Button
                 variant="ghost"
                 size="icon-xs"
-                className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100"
+                className={cn(
+                  'relative max-md:mr-1 pointer-coarse:mr-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100 pointer-coarse:opacity-100',
+                  TOUCH_HIT,
+                )}
                 aria-label="Edit segment"
                 onClick={() => setEditing(true)}
               >

@@ -3,12 +3,11 @@
 
 import type { Category, OpInput, Session, SessionEvent } from '@autologger/contract';
 import { Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
 import { eventSec, formatFrames, parseTimecode } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
-import { cn } from '@/shared/lib/utils';
+import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 import { formatWallUtcYmdHms } from '@/shared/utils/timecode';
 import {
   type Column,
@@ -22,6 +21,7 @@ import {
   JUMP_COLUMN,
   JumpButton,
 } from '../feed';
+import { ChangedElsewhere, useServerDraft } from '../serverDraft';
 
 export type TimeMode = 'session' | 'world';
 
@@ -67,19 +67,10 @@ export function EventRow({
   const tc = e.timecodeFrames != null ? formatFrames(e.timecodeFrames, session.frameRate) : '—';
   const timeText =
     timeMode === 'session' ? tc.replace(/[:;]\d{2}$/, '') : formatWallUtcYmdHms(e.wallTime);
-  const [msg, setMsg] = useState(e.message);
-  const [tcText, setTcText] = useState(tc);
-  useEffect(() => setMsg(e.message), [e.message]);
-  useEffect(() => setTcText(tc), [tc]);
-
-  const save = async (patch: OpInput<'events.update'>) => {
-    try {
-      await onSave(patch);
-    } catch {
-      setMsg(e.message);
-      setTcText(tc);
-    }
-  };
+  // Remote changes don't overwrite what the user is typing (#231).
+  const msg = useServerDraft(e.message);
+  const tcText = useServerDraft(tc);
+  const conflicts = [tcText, msg].filter((f) => f.conflict);
 
   const agent = e.source === 'agent';
   const messageText = [e.value && e.value !== e.message ? e.value : null, e.message]
@@ -116,16 +107,23 @@ export function EventRow({
           <input
             className={cn(FEED_INLINE_INPUT, 'min-w-[calc(11ch+0.6rem+2px)] tabular-nums')}
             aria-label="Timecode"
-            value={tcText}
-            onChange={(ev) => setTcText(ev.target.value)}
-            onBlur={() => {
-              if (tcText === tc) return;
-              if (parseTimecode(tcText, session.frameRate) == null) {
+            value={tcText.value}
+            onChange={(ev) => tcText.set(ev.target.value)}
+            onBlur={(ev) => {
+              if (tcText.keepOnWindowBlur(ev.target)) return;
+              if (tcText.value === tc) return tcText.reset();
+              if (parseTimecode(tcText.value, session.frameRate) == null) {
                 showToast('Enter a timecode like 00:12:03:07.', true);
-                setTcText(tc);
+                tcText.reset();
                 return;
               }
-              void save({ eventId: e.id, timecode: tcText.trim() });
+              void tcText.commit(tcText.value.trim(), (timecode) =>
+                onSave({ eventId: e.id, timecode }),
+              );
+            }}
+            onKeyDown={(ev) => {
+              if (ev.key === 'Enter') (ev.target as HTMLInputElement).blur();
+              if (ev.key === 'Escape') tcText.reset();
             }}
           />
         ) : (
@@ -157,11 +155,11 @@ export function EventRow({
             value={e.categoryId ?? ''}
             style={{ color: e.color }}
             onChange={(ev) =>
-              void save({
+              void onSave({
                 eventId: e.id,
                 categoryId: ev.target.value || null,
                 ...(ev.target.value ? {} : { category: e.category }),
-              })
+              }).catch(() => {})
             }
           >
             {!e.categoryId && <option value="">{e.category}</option>}
@@ -182,25 +180,37 @@ export function EventRow({
           'max-w-[min(28rem,38vw)] align-middle max-md:max-w-none @max-md/feed:col-[2/-1] @max-md/feed:row-start-2 @max-md/feed:max-w-none',
         )}
       >
-        <span className="flex items-center gap-1.5">
+        <span
+          className={cn('flex items-center gap-1.5', conflicts.length > 0 && 'max-md:flex-wrap')}
+        >
           {editable ? (
             <input
-              className={FEED_INLINE_INPUT}
+              className={cn(FEED_INLINE_INPUT, conflicts.length > 0 && 'max-md:basis-full')}
               aria-label="Message"
-              value={msg}
+              value={msg.value}
               placeholder={e.value ?? ''}
-              onChange={(ev) => setMsg(ev.target.value)}
-              onBlur={() => {
-                if (msg !== e.message) void save({ eventId: e.id, message: msg });
+              onChange={(ev) => msg.set(ev.target.value)}
+              onBlur={(ev) => {
+                if (msg.keepOnWindowBlur(ev.target)) return;
+                if (msg.value === e.message) return msg.reset();
+                void msg.commit(msg.value, (message) => onSave({ eventId: e.id, message }));
               }}
               onKeyDown={(ev) => {
                 if (ev.key === 'Enter') (ev.target as HTMLInputElement).blur();
-                if (ev.key === 'Escape') setMsg(e.message);
+                if (ev.key === 'Escape') msg.reset();
               }}
             />
           ) : (
             // `anywhere`, not `break-word`: only it lets a long token (a URL) shrink the cell.
             <span className="min-w-0 [overflow-wrap:anywhere]">{messageText}</span>
+          )}
+          {editable && conflicts.length > 0 && (
+            <ChangedElsewhere
+              remote={conflicts.map((f) => f.server).join(' · ')}
+              onTakeTheirs={() => {
+                for (const f of conflicts) f.reset();
+              }}
+            />
           )}
           {agent && (
             <Badge
@@ -230,7 +240,10 @@ export function EventRow({
             variant="unstyled"
             aria-label="Delete row"
             title="Delete row"
-            className="inline-flex size-6 items-center justify-center rounded-[0.35rem] text-si-dim opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover-always:bg-[color-mix(in_oklab,var(--si-danger)_12%,transparent)] hover-always:text-si-danger max-md:opacity-100"
+            className={cn(
+              'relative inline-flex size-6 max-md:mr-1 pointer-coarse:mr-1 items-center justify-center rounded-[0.35rem] text-si-dim opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover-always:bg-[color-mix(in_oklab,var(--si-danger)_12%,transparent)] hover-always:text-si-danger max-md:opacity-100 pointer-coarse:opacity-100',
+              TOUCH_HIT,
+            )}
             onClick={onDelete}
           >
             <Trash2 className="size-3" aria-hidden="true" />

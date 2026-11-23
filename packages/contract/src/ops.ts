@@ -412,6 +412,8 @@ export const opInputs = {
     bodyMd: z.string().max(100_000),
     aliases: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
     sessionId: id.optional(),
+    /** The revision the edit started from; a page that moved on since fails with conflict. */
+    baseRevision: z.number().int().min(1).optional(),
     compact,
   }),
   'wiki.patch': z.object({
@@ -421,6 +423,8 @@ export const opInputs = {
       .max(50)
       .default([]),
     append: z.string().max(100_000).optional(),
+    /** The revision the edit started from; a page that moved on since fails with conflict. */
+    baseRevision: z.number().int().min(1).optional(),
   }),
   'wiki.delete': z.object({ pageId: id }),
   'wiki.revisions': z.object({ pageId: id }),

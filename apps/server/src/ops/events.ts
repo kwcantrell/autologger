@@ -1,8 +1,15 @@
-import { parseTimecode, type SessionEvent, transportFrames } from '@autologger/contract';
+import {
+  formatFrames,
+  formatIssues,
+  opInputs,
+  parseTimecode,
+  type SessionEvent,
+  transportFrames,
+} from '@autologger/contract';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { requireSession, type SessionRow } from '../core/authz.ts';
 import { changeMessage } from '../core/bus.ts';
-import { badRequest, notFound } from '../core/errors.ts';
+import { AppError, badRequest, notFound } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
@@ -33,11 +40,22 @@ function sourceFor(ctx: Ctx): EventRow['source'] {
   return 'operator';
 }
 
+/**
+ * A timecode's frame count on the session clock, or why it cannot place an event: it must be
+ * valid at the session's frame rate and not before the start timecode (atSec >= 0).
+ */
+function timecodeFrames(session: SessionRow, timecode: string): number | string {
+  const f = parseTimecode(timecode, session.frameRate);
+  if (f === null) return `Timecode ${timecode} is not valid at ${session.frameRate} fps.`;
+  if (f < session.startOffsetFrames)
+    return `Timecode ${timecode} is before the session start timecode ${formatFrames(session.startOffsetFrames, session.frameRate)}.`;
+  return f;
+}
+
 function resolveFrames(session: SessionRow, t: { timecode?: string; atSec?: number }): number {
   if (t.timecode) {
-    const f = parseTimecode(t.timecode, session.frameRate);
-    if (f === null)
-      throw badRequest(`Timecode ${t.timecode} is not valid at ${session.frameRate} fps.`);
+    const f = timecodeFrames(session, t.timecode);
+    if (typeof f === 'string') throw badRequest(f);
     return f;
   }
   if (t.atSec !== undefined)
@@ -161,7 +179,7 @@ defineOp({
 defineOp({
   name: 'events.create',
   description:
-    'Log one event. Pick the button by categoryId or category name (unknown names become free labels). Place it with `timecode` (HH:MM:SS:FF on the session clock) or `atSec` (seconds from the start, which lines up with transcript times); without either it lands at the live transport position.',
+    'Log one event. Pick the button by categoryId or category name (unknown names become free labels). Place it with `timecode` (HH:MM:SS:FF on the session clock) or `atSec` (seconds from the start, which lines up with transcript times); without either it lands at the live transport position. A timecode before the session start timecode (sessions_get) is refused with bad_request, like a negative atSec.',
   kind: 'write',
   surfaces: ['web', 'mcp', 'companion'],
   async run(ctx, { sessionId, ...input }) {
@@ -175,17 +193,29 @@ defineOp({
 defineOp({
   name: 'events.createMany',
   description:
-    'Log up to 500 events at once (same fields as events.create). Use atSec to line events up with the transcript. Returns the created events in input order; pass `compact: true` to get only `[{ id, atSec, category }]` per event (atSec in seconds from the session start, category = resolved button name), which saves context on large batches.',
+    'Log up to 500 events at once (same fields as events.create). All-or-nothing: an invalid item (e.g. a timecode before the session start) fails the whole call with bad_request naming its index. Use atSec to line events up with the transcript. Returns the created events in input order; pass `compact: true` to get only `[{ id, atSec, category }]` per event (atSec in seconds from the session start, category = resolved button name), which saves context on large batches.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, events: list, compact }) {
     const { session } = await requireSession(ctx, sessionId, 'write', 'share');
     const rows: EventRow[] = [];
-    for (const e of list) rows.push(await insertEvent(ctx, session, e));
+    for (const [i, e] of list.entries())
+      rows.push(await atItem(i, () => insertEvent(ctx, session, e)));
     const out = await publishEvents(ctx, session, rows);
     return compact ? out.map(({ id, atSec, category }) => ({ id, atSec, category })) : out;
   },
 });
+
+/** Run one item of a bulk write; a bad_request names the item (`events[3]: …`). */
+async function atItem<T>(i: number, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof AppError && e.code === 'bad_request')
+      throw badRequest(`events[${i}]: ${e.message}`);
+    throw e;
+  }
+}
 
 async function loadEvent(ctx: Ctx, eventId: string, need: 'read' | 'write') {
   const [found] = await ctx.db.select().from(events).where(eq(events.id, eventId));
@@ -244,7 +274,8 @@ async function updateEventRow(
 
 defineOp({
   name: 'events.update',
-  description: 'Edit an event’s button, message, value or time.',
+  description:
+    'Edit an event’s button, message, value or time (`atSec` in seconds from the session start, or `timecode` on the session clock; a timecode before the session start timecode is refused with bad_request).',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { eventId, ...patch }) {
@@ -276,8 +307,8 @@ defineOp({
         `Event${missing.length > 1 ? 's' : ''} ${missing.slice(0, 10).join(', ')} in this session`,
       );
     const updated: EventRow[] = [];
-    for (const { id, ...patch } of list)
-      updated.push(await updateEventRow(ctx, session, byId.get(id)!, patch));
+    for (const [i, { id, ...patch }] of list.entries())
+      updated.push(await atItem(i, () => updateEventRow(ctx, session, byId.get(id)!, patch)));
     const out = await publishEvents(ctx, session, updated);
     return compact ? out.map(({ id, atSec, category }) => ({ id, atSec, category })) : out;
   },
@@ -314,12 +345,17 @@ defineOp({
   },
 });
 
-/** Minimal RFC 4180 CSV parser. */
-export function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
+/**
+ * Minimal RFC 4180 CSV parser. Blank rows are dropped; each row keeps the 1-based line of the
+ * file it starts on (quoted fields may span lines), for error reports.
+ */
+export function parseCsv(text: string): { line: number; cells: string[] }[] {
+  const rows: { line: number; cells: string[] }[] = [];
   let row: string[] = [];
   let field = '';
   let quoted = false;
+  let line = 1;
+  let rowLine = 1;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i]!;
     if (quoted) {
@@ -327,25 +363,34 @@ export function parseCsv(text: string): string[][] {
         field += '"';
         i++;
       } else if (ch === '"') quoted = false;
-      else field += ch;
+      else {
+        field += ch;
+        // A line break inside a quoted field (\r\n counts once).
+        if (ch === '\n' || (ch === '\r' && text[i + 1] !== '\n')) line++;
+      }
     } else if (ch === '"') quoted = true;
     else if (ch === ',') {
       row.push(field);
       field = '';
     } else if (ch === '\n' || ch === '\r') {
       if (ch === '\r' && text[i + 1] === '\n') i++;
+      line++;
       row.push(field);
-      rows.push(row);
+      rows.push({ line: rowLine, cells: row });
       row = [];
       field = '';
+      rowLine = line;
     } else field += ch;
   }
   if (field || row.length) {
     row.push(field);
-    rows.push(row);
+    rows.push({ line: rowLine, cells: row });
   }
-  return rows.filter((r) => r.some((c) => c.trim()));
+  return rows.filter((r) => r.cells.some((c) => c.trim()));
 }
+
+/** The text fields of a CSV row, with the same limits as events.create. */
+const csvRowFields = opInputs['events.create'].pick({ category: true, message: true, value: true });
 
 /** Undo the export's formula guard: `'=x` → `=x` (only before a formula-start character). */
 export const unguardCsvCell = (s: string) => (/^'[=+\-@\t\r]/.test(s) ? s.slice(1) : s);
@@ -353,7 +398,7 @@ export const unguardCsvCell = (s: string) => (/^'[=+\-@\t\r]/.test(s) ? s.slice(
 defineOp({
   name: 'events.importCsv',
   description:
-    'Import events from CSV with columns timecode, category, message and optional value (header row optional). Rows with a bad timecode are skipped and reported.',
+    'Import events from CSV with columns timecode, category, message and optional value (header row optional). Rows with a bad timecode, a timecode before the session start timecode, a missing category or text over the events.create limits (category 60, message 5000, value 200 characters) are skipped and reported with their line in the file.',
   kind: 'write',
   surfaces: ['web'],
   async run(ctx, { sessionId, csv }) {
@@ -361,7 +406,7 @@ defineOp({
     const rows = parseCsv(csv);
     let start = 0;
     let cols = { timecode: 0, category: 1, message: 2, value: 3 };
-    const header = rows[0]?.map((h) => h.trim().toLowerCase());
+    const header = rows[0]?.cells.map((h) => h.trim().toLowerCase());
     if (header?.includes('timecode') || header?.includes('category')) {
       const idx = (n: string, d: number) => (header.indexOf(n) >= 0 ? header.indexOf(n) : d);
       cols = {
@@ -375,30 +420,37 @@ defineOp({
     const skipped: { line: number; reason: string }[] = [];
     const inserted: EventRow[] = [];
     for (let i = start; i < rows.length; i++) {
-      const r = rows[i]!;
+      const { line, cells: r } = rows[i]!;
       const tc = r[cols.timecode]?.trim() ?? '';
       const category = unguardCsvCell(r[cols.category]?.trim() ?? '');
-      if (parseTimecode(tc, session.frameRate) === null) {
-        skipped.push({ line: i + 1, reason: `bad timecode “${tc}”` });
+      const frames = parseTimecode(tc, session.frameRate);
+      if (frames === null) {
+        skipped.push({ line, reason: `bad timecode “${tc}”` });
+        continue;
+      }
+      if (frames < session.startOffsetFrames) {
+        const start = formatFrames(session.startOffsetFrames, session.frameRate);
+        skipped.push({
+          line,
+          reason: `timecode “${tc}” is before the session start ${start}`,
+        });
         continue;
       }
       if (!category) {
-        skipped.push({ line: i + 1, reason: 'missing category' });
+        skipped.push({ line, reason: 'missing category' });
         continue;
       }
-      inserted.push(
-        await insertEvent(
-          ctx,
-          session,
-          {
-            timecode: tc,
-            category,
-            message: unguardCsvCell(r[cols.message] ?? ''),
-            value: unguardCsvCell(r[cols.value]?.trim() ?? '') || null,
-          },
-          'import',
-        ),
-      );
+      const fields = csvRowFields.safeParse({
+        category,
+        message: unguardCsvCell(r[cols.message] ?? ''),
+        value: unguardCsvCell(r[cols.value]?.trim() ?? '') || null,
+      });
+      if (!fields.success) {
+        const [issue] = formatIssues(fields.error.issues);
+        skipped.push({ line, reason: `${issue!.path}: ${issue!.message}` });
+        continue;
+      }
+      inserted.push(await insertEvent(ctx, session, { timecode: tc, ...fields.data }, 'import'));
     }
     ctx.publish(`session:${sessionId}`, { type: 'invalidate', entity: 'event' });
     await publishSession(ctx, sessionId);

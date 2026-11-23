@@ -16,7 +16,7 @@ import {
 } from '@/session/feed';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
-import { cn } from '@/shared/lib/utils';
+import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 
 const VIA_LABEL: Record<Via, string> = {
   web: 'web',
@@ -203,6 +203,7 @@ export function ChangeRow({
             <Button
               variant="ghost"
               size="xs"
+              className={cn('relative', TOUCH_HIT)}
               onClick={onUndo}
               disabled={!canWrite || busy}
               title={
