@@ -397,6 +397,25 @@
   --sidebar-border: color-mix(in oklab, var(--si-accent) 22%, var(--si-line));
 }
 
+/* A subtree that draws nothing from the transport tint (the session's feed panels). The tint's
+ * variables inherit, so a Start, Stop or Play on the app root otherwise restyles every element
+ * under it: ~135k with a long transcript open, ~300 ms (#330, #345). Pinned here, the panel's
+ * computed style doesn't change and the browser skips its subtree. Anything inside that needs the
+ * tint (none today; dialogs and tooltips are portaled out) would read it as unset. */
+@utility tint-isolated {
+  --tx-rail: initial;
+  --tx-bar: initial;
+  --tx-live: initial;
+  --tx-playhead: initial;
+  --tx-glow: initial;
+  --tx-playhead-glow: initial;
+  --tx-wave-progress: initial;
+  --tx-pill-bg: initial;
+  --tx-pill-fg: initial;
+  --tx-pill-line: initial;
+  --sidebar: initial;
+}
+
 /* ============================================================
  * Shell ignition (redesign-show-ignition D2; web-session-console "Transport state tints the
  * shell"). Pure CSS on the app root's `data-transport` (AppShell, from the transport-status

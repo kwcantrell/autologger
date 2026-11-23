@@ -211,7 +211,6 @@ export function TranscriptMock() {
             active={false}
             playheadSec={playhead >= s.startSec && playhead < s.endSec ? playhead : null}
             canWrite={false}
-            rolling={false}
             onSeek={noop}
             onRenameSpeaker={noop}
             onSaveText={resolved}
@@ -241,7 +240,6 @@ export function TopicsMock() {
             key={t.id}
             t={t}
             canWrite={false}
-            rolling={false}
             onJump={noop}
             onSave={resolved}
             onDelete={noop}

@@ -100,7 +100,10 @@ export const Timeline = memo(function Timeline({
     [events, session],
   );
 
-  const pct = (sec: number) => `${Math.max(0, Math.min(100, (sec / totalSec) * 100))}%`;
+  const pct = useCallback(
+    (sec: number) => `${Math.max(0, Math.min(100, (sec / totalSec) * 100))}%`,
+    [totalSec],
+  );
 
   // Current marker: the last one at or before the playhead, lit for 3 s after it. Selected
   // coarsely so the timeline re-renders when they change, not on every frame of playback.
@@ -246,7 +249,7 @@ export const Timeline = memo(function Timeline({
           data-cat={m.event.category}
           style={
             {
-              left: `${Math.max(0, Math.min(100, (m.sec / totalSec) * 100))}%`,
+              left: pct(m.sec),
               '--mcol': m.event.color,
             } as CSSProperties
           }
@@ -259,7 +262,7 @@ export const Timeline = memo(function Timeline({
           onClick={() => selectMarker(m)}
         />
       )),
-    [markers, selected, totalSec, selectMarker],
+    [markers, selected, pct, selectMarker],
   );
 
   // Zoom rail drag: the bar scrolls, the handles resize the window.

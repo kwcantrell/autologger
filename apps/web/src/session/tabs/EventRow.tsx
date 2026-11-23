@@ -69,7 +69,7 @@ export function EventRow({
   onDelete,
 }: {
   e: SessionEvent;
-  session: Pick<Session, 'frameRate' | 'startOffsetFrames' | 'isRolling'>;
+  session: Pick<Session, 'frameRate' | 'startOffsetFrames'>;
   categories: Category[];
   timeMode: TimeMode;
   editable: boolean;
@@ -118,12 +118,7 @@ export function EventRow({
       data-event-id={e.id}
     >
       <TableCell className={cn(FEED_CELL, 'align-middle')}>
-        <JumpButton
-          sec={sec}
-          label={timeText}
-          onJump={onJump}
-          unavailable={session.isRolling ? 'Playback is off while timecode rolls.' : null}
-        />
+        <JumpButton sec={sec} label={timeText} onJump={onJump} />
       </TableCell>
       {/* Stacked: the time and the event label share the meta line. */}
       <TableCell

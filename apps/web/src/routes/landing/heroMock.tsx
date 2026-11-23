@@ -219,7 +219,7 @@ export function WorkspaceMock() {
             <EventRow
               key={e.id}
               e={e}
-              session={{ frameRate: MOCK_FPS, startOffsetFrames: 0, isRolling: true }}
+              session={{ frameRate: MOCK_FPS, startOffsetFrames: 0 }}
               categories={[]}
               timeMode="session"
               editable={false}

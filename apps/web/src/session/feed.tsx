@@ -3,7 +3,8 @@
 // jump-to-time button.
 
 import { Check, Clock, Download, Filter, Pencil, Play, Plus, Trash2 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
+import { createStore, useStore } from '@/lib/store';
 import { Button } from '@/shared/components/ui/button';
 import {
   Table,
@@ -201,32 +202,60 @@ export const JUMP_COLUMN: Column = {
   srOnly: true,
 };
 
+/**
+ * Why the feed's jump buttons can't play right now ("Playback is off while timecode rolls."), or
+ * null; the session workspace sets it, and outside one (the landing mocks) jumps are available.
+ * A store, read by each button's face and tooltip text only: on Start/Stop those re-render, not
+ * the long feeds' rows or the buttons' tooltip triggers (which cost ~130 ms over a 2,700-row
+ * transcript, #330). The tooltip text is drawn by the shared host outside the workspace, so a
+ * React context wouldn't reach it.
+ */
+export const jumpUnavailable = createStore<string | null>(null);
+
+const JUMP_FACE = cn(JUMP_BTN, 'relative max-md:ml-1 pointer-coarse:ml-1', TOUCH_HIT);
+
+function JumpTip({ label }: { label: string }) {
+  return <>{useStore(jumpUnavailable) ?? `Jump to ${label}`}</>;
+}
+
+/** The button itself: the tooltip trigger renders it with its own props merged in. */
+function JumpFace({
+  sec,
+  onJump,
+  onClick,
+  ...props
+}: ComponentProps<typeof Button> & { sec: number; onJump: (sec: number) => void }) {
+  const unavailable = useStore(jumpUnavailable);
+  return (
+    <Button
+      {...props}
+      variant="unstyled"
+      className={JUMP_FACE}
+      aria-disabled={unavailable ? true : undefined}
+      onClick={(e) => {
+        onClick?.(e);
+        if (!unavailable) onJump(sec);
+      }}
+    >
+      <Play className="size-3" fill="currentColor" aria-hidden="true" />
+    </Button>
+  );
+}
+
 /** Leading play button that seeks the session audio to a row's time. */
 export function JumpButton({
   sec,
   label,
   onJump,
-  unavailable,
 }: {
   sec: number | null;
   label: string;
   onJump: (sec: number) => void;
-  unavailable?: string | null;
 }) {
   if (sec == null) return null;
   return (
-    <Tooltip shared content={unavailable ?? `Jump to ${label}`}>
-      <Button
-        variant="unstyled"
-        className={cn(JUMP_BTN, 'relative max-md:ml-1 pointer-coarse:ml-1', TOUCH_HIT)}
-        aria-label={`Jump to ${label}`}
-        aria-disabled={unavailable ? true : undefined}
-        onClick={() => {
-          if (!unavailable) onJump(sec);
-        }}
-      >
-        <Play className="size-3" fill="currentColor" aria-hidden="true" />
-      </Button>
+    <Tooltip shared content={<JumpTip label={label} />}>
+      <JumpFace sec={sec} onJump={onJump} aria-label={`Jump to ${label}`} />
     </Tooltip>
   );
 }
