@@ -678,6 +678,8 @@ export interface Moment {
   context?: string;
   /** Citations only: the page and headings the citation sits under. */
   source?: { pageId: string; pageTitle: string; pageKind: WikiKind; headings: string[] };
+  /** Citations only: other pages citing the same range (merged into this moment). */
+  alsoCitedBy?: { pageId: string; pageTitle: string }[];
   /** Pages this moment is about (source page first, then pages linked in the same block). */
   entities: MomentEntity[];
   /** Relevance to `query` (higher is better); 0 without a query. */

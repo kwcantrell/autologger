@@ -351,6 +351,49 @@ async function transcriptMoments(
   return { moments, capped: rows.length === TRANSCRIPT_CAP };
 }
 
+/**
+ * Citations of the same range (session, start, end) from several pages — a recap, a bit page and
+ * a person page citing one story — become one moment: the best-ranked one, with every entity and
+ * the other citing pages in `alsoCitedBy`. Other kinds are kept as they are.
+ */
+function mergeSameRange(moments: Moment[]): Moment[] {
+  const groups = new Map<string, Moment[]>();
+  const order: (Moment | string)[] = [];
+  for (const m of moments) {
+    if (m.kind !== 'citation') {
+      order.push(m);
+      continue;
+    }
+    const key = `${m.sessionId}\u0000${m.startSec}\u0000${m.endSec}`;
+    const group = groups.get(key);
+    if (group) group.push(m);
+    else {
+      groups.set(key, [m]);
+      order.push(key);
+    }
+  }
+  return order.map((item) => {
+    if (typeof item !== 'string') return item;
+    const group = groups.get(item)!;
+    if (group.length === 1) return group[0]!;
+    // The best-ranked copy (the first on ties) describes the moment; the rest add entities.
+    const best = group.reduce((a, b) => (b.rank > a.rank ? b : a));
+    const entities = [...best.entities];
+    for (const m of group)
+      for (const e of m.entities)
+        if (!entities.some((x) => x.pageId === e.pageId)) entities.push(e);
+    const alsoCitedBy: { pageId: string; pageTitle: string }[] = [];
+    for (const m of group)
+      if (
+        m.source &&
+        m.source.pageId !== best.source?.pageId &&
+        !alsoCitedBy.some((c) => c.pageId === m.source!.pageId)
+      )
+        alsoCitedBy.push({ pageId: m.source.pageId, pageTitle: m.source.pageTitle });
+    return { ...best, entities, ...(alsoCitedBy.length ? { alsoCitedBy } : {}) };
+  });
+}
+
 const KIND_WEIGHT: Record<Moment['kind'], number> = {
   citation: 1.3,
   topic: 1.5,
@@ -486,6 +529,7 @@ defineOp({
     // Natural phrases rarely match on every word: then take moments matching any of them.
     const relaxed = Boolean(input.query && !candidates.length && severalWords(input.query));
     if (relaxed) candidates = await collect(true);
+    candidates = mergeSameRange(candidates);
     const order = (m: Moment) => k.sessions.get(m.sessionId)!.order;
     candidates.sort(
       (a, b) =>
@@ -524,7 +568,9 @@ defineOp({
     } = resolveEntities(k, [input.entity]);
     if (!pageId) throw notFound(`No wiki page titled or aliased "${input.entity}" in this show.`);
     const page = k.pages.get(pageId)!;
-    const about = k.citations.filter((m) => m.entities.some((e) => e.pageId === pageId));
+    const about = mergeSameRange(
+      k.citations.filter((m) => m.entities.some((e) => e.pageId === pageId)),
+    );
 
     const perSession = new Map<string, Moment[]>();
     for (const m of about) {

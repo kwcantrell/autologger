@@ -71,9 +71,11 @@ the block.
   entity search on that moment.
 - **Always give a range** (`to=` / `@start-end`). Moments without an end are merged into clips as
   a fixed-length point.
-- **Aliases on every page** for every name the transcript or a person might use (nicknames,
-  misspellings, "We're Wrong" for "You're Wrong"). Aliases make topic, event and transcript matches
-  work too.
+- **Aliases on every page** for every _specific_ name the transcript or a person might use
+  (nicknames, misspellings, "We're Wrong" for "You're Wrong"). Aliases also tag topics, events and
+  transcript lines that mention them, so **no generic aliases**: no bare first names ("Tom",
+  "Shane"), no common words or phrases ("the show", "the special", "Producer", "morons"). A topic
+  page may keep topical keywords ("Airlines", "Smoking") — tagging those mentions is its job.
 - **Headings say what a section is** ("Pig Talk letters", not "Part 2"): they travel with the
   moment and with RAG chunks.
 - **Blocks stand alone**: start with the subject's name, not "he" or "this segment"; dates absolute.
@@ -83,7 +85,9 @@ the block.
 
 1. `wiki_lint` — no unresolved links, bad citations or orphans.
 2. For each recurring entity, `graph_entity`: `momentCount` > 0, the `sessions` list matches the
-   notes, `related` makes sense. An entity with 0 moments has no cited block linking it — fix the
+   notes, `related` makes sense. Then count how many topic and event moments each entity tags
+   (`graph_export {section: "moments"}`): an entity tagging a large share of them has a generic
+   alias — remove it. An entity with 0 moments has no cited block linking it — fix the
    pages, not the search.
 3. Spot-check `moments_search` with the questions users will ask (one entity, two entities, a
    phrase) and open a few `startSec`s in the transcript.

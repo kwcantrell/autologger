@@ -186,6 +186,30 @@ describe('moments.search', () => {
     expect((await call(owner, 'moments.search', { showId: show.id, query: "' '" })).total).toBe(0);
   });
 
+  it('merges citations of the same range from several pages into one moment', async () => {
+    const { owner, show, ep2 } = await knowledgeShow();
+    await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'topic',
+      title: 'Air travel',
+      bodyMd: `- [[Carly]] misses her flight [EP_02 00:20:00](/sessions/${ep2.id}?t=1200&to=1290)`,
+    });
+    const res = await call(owner, 'moments.search', {
+      showId: show.id,
+      entities: ['Carly'],
+      kinds: ['citation'],
+    });
+    const airport = res.moments.filter((m) => m.startSec === 1200);
+    expect(airport).toHaveLength(1);
+    expect(airport[0]!.alsoCitedBy?.map((c) => c.pageTitle)).toEqual(['Air travel']);
+    expect(airport[0]!.entities.map((e) => e.title).sort()).toEqual([
+      'Air travel',
+      'Carly',
+      'EP_02',
+    ]);
+    expect(res.total).toBe(3);
+  });
+
   it('reports unknown entities, pages, and hides other shows', async () => {
     const { owner, show } = await knowledgeShow();
     const none = await call(owner, 'moments.search', { showId: show.id, entities: ['Nobody'] });
