@@ -371,6 +371,7 @@ export function ImportMock() {
         sessionId: null,
       },
     ],
+    downloadCheck: { status: 'ok', message: '' },
   };
   return (
     <MockFrame title="Import · YouTube playlist">

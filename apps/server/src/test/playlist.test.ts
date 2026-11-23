@@ -79,6 +79,7 @@ describe('media.importPlaylist', () => {
     // dryRun previews the same lists and writes nothing.
     const preview = await call(agent, 'media.importPlaylist', { ...input, dryRun: true });
     expect(preview.dryRun).toBe(true);
+    expect(preview.downloadCheck.status).toBe('ok');
     expect(preview.created.map((c) => [c.title, c.sessionId, c.jobId])).toEqual([
       ['Tom Talks #2: Oldest talk', null, null],
       ['Tom Talks #3: Newest talk', null, null],

@@ -366,34 +366,59 @@ const MAX_VIDEO_PROBES = 4;
 const VIDEO_PROBE_TIMEOUT_MS = 15_000;
 let videoProbes = 0;
 
+type VideoCheck = PlaylistImport['downloadCheck'] & { durationSec: number | null };
+
 /**
  * Read a video's length (seconds; null when unknown) with the same yt-dlp format selection and
- * access settings as the worker's download, without downloading it. It doubles as a probe: when
- * YouTube demands a sign-in (bot check, private or age-restricted video) the op fails with
- * bad_request instead of queuing a job that cannot succeed. Anything else (yt-dlp missing on
- * this host, timeout, too many probes at once) never blocks the import: the length is just null.
+ * access settings as the worker's download, without downloading it. It doubles as a probe of
+ * download access: blocked when YouTube demands a sign-in (bot check, private or age-restricted
+ * video). Anything else (yt-dlp missing on this host, timeout, too many probes at once) is
+ * skipped: it never blocks an import. With a team sign-in, the outcome is recorded on it
+ * (media.youtubeAccess lastOkAt / lastFailedAt).
  */
-async function probeVideo(
-  url: string,
-  showId: string,
-  nothingDone: string,
-): Promise<number | null> {
-  if (videoProbes >= MAX_VIDEO_PROBES) return null;
+async function checkVideo(url: string, showId: string): Promise<VideoCheck> {
+  if (videoProbes >= MAX_VIDEO_PROBES)
+    return {
+      status: 'skipped',
+      message: 'Not checked: the server is busy checking other videos.',
+      durationSec: null,
+    };
   videoProbes++;
   try {
-    return await videoDuration(
+    const durationSec = await videoDuration(
       env.ytDlpPath,
       url,
       VIDEO_PROBE_TIMEOUT_MS,
       await youtubeCookiesForShow(showId),
     );
+    return {
+      status: 'ok',
+      message: `YouTube lets this server download ${url}.`,
+      durationSec,
+    };
   } catch (e) {
-    if (e instanceof YoutubeAuthError) throw badRequest(`${e.message} ${nothingDone}`);
+    if (e instanceof YoutubeAuthError)
+      return { status: 'blocked', message: e.message, durationSec: null };
     console.warn(`video length of ${url}: ${(e as Error).message}`);
-    return null;
+    return {
+      status: 'skipped',
+      message: `Not checked: ${(e as Error).message.slice(0, 300)}`,
+      durationSec: null,
+    };
   } finally {
     videoProbes--;
   }
+}
+
+/** checkVideo for an import: blocked fails the op with bad_request instead of queuing a job. */
+async function probeVideo(
+  url: string,
+  showId: string,
+  nothingDone: string,
+): Promise<number | null> {
+  const check = await checkVideo(url, showId);
+  if (check.status === 'blocked') throw badRequest(`${check.message} ${nothingDone}`);
+  return check.durationSec;
 }
 
 /** A Ctx for authorizing in `prepare`: reads only, outside the op's transaction. */
@@ -415,6 +440,7 @@ type ImportList = {
   title: string | null;
   entries: (PlaylistEntry & { uploadDate?: string })[];
   local?: boolean;
+  downloadCheck: PlaylistImport['downloadCheck'];
 };
 
 /** The client's own video list (local import helper) as an import list; no yt-dlp here. */
@@ -433,7 +459,15 @@ function clientList(
       ...(v.uploadDate ? { uploadDate: v.uploadDate } : {}),
     };
   });
-  return { title: null, entries, local: true };
+  return {
+    title: null,
+    entries,
+    local: true,
+    downloadCheck: {
+      status: 'skipped',
+      message: 'The import helper downloads the videos itself; the server downloads nothing.',
+    },
+  };
 }
 
 /** Concurrent yt-dlp playlist resolutions allowed per server process. */
@@ -450,7 +484,7 @@ export function fillTitle(template: string, vars: { title: string; episode: stri
 defineOp({
   name: 'media.importPlaylist',
   description:
-    'Import a whole YouTube playlist into a show in one call: one new session per video, each with a queued youtube_import job (download + transcription run in the background; poll jobs.list with showId, status ["queued","running"] and kinds ["youtube_import","transcribe"] until empty; waveform jobs that follow are cosmetic). showId comes from shows.list (needs write access). url is a YouTube URL with a list= parameter. Videos already in the show (a session whose sourceUrl is the same video, or one with a queued/running import of it) and private/deleted videos are skipped, so calling it again later imports only new videos. Session titles come from titleTemplate (placeholders {title} = video title, {episode} = episode number; default "{title}"); episode numbers are taken from the show counter in import order. order "playlist" (default) keeps the playlist order; "reverse" imports the last video first (use it when the playlist lists newest first, so episode 1 is the oldest). episodeDate is set to each video\'s YouTube upload date when its import job runs. Up to 200 videos per playlist. transcribe: false (default true) only downloads each video\'s audio and draws its waveform, without transcribing (transcribe later with media_retranscribe per session); it applies to server downloads (url), not to videos uploaded by the helper. Agents cannot delete sessions (deleting is web-only), so for an unfamiliar playlist call it first with dryRun: true: it returns the same created/skipped lists (dryRun true, sessionId and jobId null) without writing anything. A session whose import job fails stays in the show (and is skipped on re-runs): retry it with media.importYoutube on that sessionId. Returns {playlistTitle, dryRun, created [{sessionId, title, episode, videoId, durationSec, jobId}], skipped [{videoId, title, reason, sessionId}]}; durationSec is in seconds (null if YouTube did not say). Fails with unavailable when the server is busy reading other playlists: retry shortly. Before creating sessions (not on dryRun) it checks that the first video can be downloaded (a few seconds, no download): if YouTube demands a sign-in (its bot check on this server, or a private/members-only/age-restricted video) the call fails with bad_request explaining it and creates no sessions. Retrying will not help: the team needs a (fresh) YouTube sign-in. Check media_youtubeAccess, then ask the user to sign in to YouTube in a browser and, once they agree to send its cookies, set them with media_setYoutubeCookies (team owner/admin) and retry. Only if they decline, tell the user, who can import the playlist from their own computer instead with the AutoLogger import helper (`autologger-import playlist <url> --show <showId>`, docs/importer.md) — also the only way to import a private playlist. The helper calls this op with videos instead of url: a list it read itself, each {url (YouTube video URL), title, durationSec?, uploadDate? (YYYY-MM-DD)}, in playlist order. Then sessions are created the same way (same skipping, titles, episodes, order, dryRun; episodeDate = uploadDate, else today) but nothing is downloaded or queued (jobId null; playlistTitle null): the client uploads each video\'s audio with media_createUpload origin "youtube" and media_completeUpload.',
+    'Import a whole YouTube playlist into a show in one call: one new session per video, each with a queued youtube_import job (download + transcription run in the background; poll jobs.list with showId, status ["queued","running"] and kinds ["youtube_import","transcribe"] until empty; waveform jobs that follow are cosmetic). showId comes from shows.list (needs write access). url is a YouTube URL with a list= parameter. Videos already in the show (a session whose sourceUrl is the same video, or one with a queued/running import of it) and private/deleted videos are skipped, so calling it again later imports only new videos. Session titles come from titleTemplate (placeholders {title} = video title, {episode} = episode number; default "{title}"); episode numbers are taken from the show counter in import order. order "playlist" (default) keeps the playlist order; "reverse" imports the last video first (use it when the playlist lists newest first, so episode 1 is the oldest). episodeDate is set to each video\'s YouTube upload date when its import job runs. Up to 200 videos per playlist. transcribe: false (default true) only downloads each video\'s audio and draws its waveform, without transcribing (transcribe later with media_retranscribe per session); it applies to server downloads (url), not to videos uploaded by the helper. Agents cannot delete sessions (deleting is web-only), so for an unfamiliar playlist call it first with dryRun: true: it returns the same created/skipped lists (dryRun true, sessionId and jobId null) without writing anything. A session whose import job fails stays in the show (and is skipped on re-runs): retry it with media.importYoutube on that sessionId. Returns {playlistTitle, dryRun, created [{sessionId, title, episode, videoId, durationSec, jobId}], skipped [{videoId, title, reason, sessionId}], downloadCheck}; durationSec is in seconds (null if YouTube did not say). Fails with unavailable when the server is busy reading other playlists: retry shortly. It also checks that the first video to import can be downloaded (a few seconds, no download) and returns downloadCheck {status, message}: "ok"; "blocked" when YouTube demands a sign-in (its bot check on this server, or a private/members-only/age-restricted video); "skipped" when it could not check (busy, timeout, nothing to import, or a helper import with videos). With a team sign-in the check is recorded on it (media_youtubeAccess lastOkAt / lastFailedAt). A dryRun reports "blocked" in downloadCheck; a real call that is blocked fails with bad_request explaining it and creates no sessions. Retrying will not help: the team needs a (fresh) YouTube sign-in. Check media_youtubeAccess, then ask the user to sign in to YouTube in a browser and, once they agree to send its cookies, set them with media_setYoutubeCookies (team owner/admin) and retry. Only if they decline, tell the user, who can import the playlist from their own computer instead with the AutoLogger import helper (`autologger-import playlist <url> --show <showId>`, docs/importer.md) — also the only way to import a private playlist. The helper calls this op with videos instead of url: a list it read itself, each {url (YouTube video URL), title, durationSec?, uploadDate? (YYYY-MM-DD)}, in playlist order. Then sessions are created the same way (same skipping, titles, episodes, order, dryRun; episodeDate = uploadDate, else today) but nothing is downloaded or queued (jobId null; playlistTitle null): the client uploads each video\'s audio with media_createUpload origin "youtube" and media_completeUpload.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   // Authorize, then run yt-dlp, before the op's transaction opens.
@@ -493,14 +527,19 @@ defineOp({
       throw badRequest(`The playlist has more than ${MAX_PLAYLIST_VIDEOS} videos.`);
     if (playlist.entries.length === 0) throw badRequest('The playlist is empty or not public.');
     // Listing works without a sign-in even when downloads don't: probe the first video before
-    // creating sessions that could only fail (agents cannot delete them).
-    if (!dryRun) {
-      const first = (order === 'reverse' ? playlist.entries.toReversed() : playlist.entries).find(
-        (e) => e.available,
-      );
-      if (first) await probeVideo(watchUrl(first.videoId), showId, 'No sessions were created.');
-    }
-    return playlist;
+    // creating sessions that could only fail (agents cannot delete them); a dry run reports it.
+    const first = (order === 'reverse' ? playlist.entries.toReversed() : playlist.entries).find(
+      (e) => e.available,
+    );
+    if (!first)
+      return {
+        ...playlist,
+        downloadCheck: { status: 'skipped', message: 'Not checked: no video can be imported.' },
+      };
+    const { durationSec: _, ...downloadCheck } = await checkVideo(watchUrl(first.videoId), showId);
+    if (downloadCheck.status === 'blocked' && !dryRun)
+      throw badRequest(`${downloadCheck.message} No sessions were created.`);
+    return { ...playlist, downloadCheck };
   },
   async run(
     ctx,
@@ -614,7 +653,13 @@ defineOp({
       if (!dryRun)
         ctx.publish(`show:${show.id}`, { type: 'show_changed', showId: show.id, entity: 'show' });
     }
-    return { playlistTitle: playlist.title, dryRun, created, skipped };
+    return {
+      playlistTitle: playlist.title,
+      dryRun,
+      created,
+      skipped,
+      downloadCheck: playlist.downloadCheck,
+    };
   },
 });
 
