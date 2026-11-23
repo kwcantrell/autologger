@@ -118,7 +118,12 @@ export function TableWidget({
     const keys: string[] = [];
     for (const r of rows.slice(0, 50))
       for (const k of Object.keys(r)) if (!keys.includes(k)) keys.push(k);
-    columns = keys.slice(0, 12).map((k) => ({ key: k, label: k }));
+    // Without explicit columns, session times read as durations (12:05), not raw seconds.
+    columns = keys.slice(0, 12).map((k) => ({
+      key: k,
+      label: k,
+      format: k === 'atSec' ? ('duration' as const) : undefined,
+    }));
   }
   const shown = rows.slice(0, MAX_TABLE_ROWS);
   return (
