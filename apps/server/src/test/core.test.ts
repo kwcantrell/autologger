@@ -131,6 +131,32 @@ describe('timecode and events', () => {
     expect(e?.source).toBe('import');
   });
 
+  it('skips CSV rows over the events.create limits and reports real file lines', async () => {
+    const { owner, session } = await studio();
+    const csv = [
+      'timecode,category,message,value',
+      '',
+      `01:00:20:00,${'C'.repeat(61)},longcat,`,
+      '01:00:21:00,Note,"two',
+      'lines",',
+      '',
+      `01:00:22:00,Note,${'M'.repeat(5001)},`,
+      `01:00:23:00,Note,ok,${'V'.repeat(201)}`,
+      'BAD,Note,c',
+      '01:00:24:00,Note,fits,',
+    ].join('\r\n');
+    const res = await call(owner, 'events.importCsv', { sessionId: session.id, csv });
+    expect(res.imported).toBe(2);
+    expect(res.skipped).toEqual([
+      { line: 3, reason: expect.stringMatching(/^category: .*60/) },
+      { line: 7, reason: expect.stringMatching(/^message: .*5000/) },
+      { line: 8, reason: expect.stringMatching(/^value: .*200/) },
+      { line: 9, reason: 'bad timecode “BAD”' },
+    ]);
+    const events = await call(owner, 'events.list', { sessionId: session.id });
+    expect(events.map((e) => e.message)).toEqual(['two\r\nlines', 'fits']);
+  });
+
   it('guards formula-like CSV cells on export and restores them on import', async () => {
     expect(csvCell('=HYPERLINK("x")')).toBe(`"'=HYPERLINK(""x"")"`);
     expect(csvCell('+1')).toBe("'+1");
