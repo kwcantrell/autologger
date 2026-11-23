@@ -107,11 +107,23 @@ Every edit shows in the Agents tab and can be undone, a whole call at once.
 
 ## Import a transcript file
 
-When you already have a transcript, an agent can load it instead of transcribing the audio. The
-`transcript_import` tool takes an SRT or WebVTT subtitle file, or JSON lines with start, end,
-speaker and text. It can replace the existing transcript or add to it, and the whole import can be
-undone in one step from the Agents tab. An import onto one recording marks it transcribed; undoing
-the import puts the recording's status back too.
+When you already have a transcript, such as subtitles from an editor, load it instead of
+transcribing the audio. Choose **Import transcript…** in the Transcript tab (or in the **Audio**
+menu), then:
+
+1. **Choose file**: an SRT or WebVTT subtitle file (`.srt`, `.vtt`), or a `.json` array of lines
+   with `startSec`, `endSec`, `speaker` and `text`. The file is read in your browser.
+2. **Import into**: the whole session, where file times count from the session start, or one
+   recording, where they count from the start of that recording and it is marked transcribed.
+3. **Existing transcript**: **Replace** deletes the transcript already there (with a recording,
+   only that recording's lines) before importing, including manual corrections and speaker
+   renames. **Append** adds the file's lines and keeps the rest.
+
+The dialog shows how many lines were imported and replaced and which speakers it found. A file it
+can't read is refused with the line that failed, and nothing is changed. While a transcription of
+the session or that recording is running, wait for it to finish first. The whole import can be
+undone in one step from the Agents tab; for a recording, that also puts its status back. Agents can do the same with the `transcript_import` tool.
+You need write access to the show.
 
 | Limit         | Value                |
 | ------------- | -------------------- |

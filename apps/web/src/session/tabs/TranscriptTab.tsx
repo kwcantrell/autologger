@@ -1,13 +1,16 @@
 import type { Session } from '@autologger/contract';
-import { useMemo } from 'react';
-import { useCapabilities, useJobs, useTranscript } from '@/api/queries';
+import { FileUpIcon } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { useCapabilities, useJobs, useMedia, useTranscript } from '@/api/queries';
 import { errorMessage, rpc } from '@/api/rpc';
 import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
+import { Button } from '@/shared/components/ui/button';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { useTextPrompt } from '@/shared/ui/PromptDialog';
 import { useWorkspace } from '../context';
-import { FeedShell, FeedTable } from '../feed';
+import { FeedShell, FeedTable, ToolbarCaption } from '../feed';
+import { TranscriptImportDialog } from '../TranscriptImportDialog';
 import { SEGMENT_COLUMNS, SegmentRow } from './SegmentRow';
 
 const STATUS: Record<Session['transcriptStatus'], string> = {
@@ -29,6 +32,8 @@ export function TranscriptTab({
   const caps = useCapabilities().data;
   const q = useTranscript(session.id);
   const jobs = useJobs(session.id);
+  const media = useMedia(session.id);
+  const [importOpen, setImportOpen] = useState(false);
   const { requestText, promptElement } = useTextPrompt();
   const segs = q.data ?? [];
   const running = (jobs.data ?? []).filter(
@@ -77,6 +82,9 @@ export function TranscriptTab({
         : session.audioSeconds > 0
           ? 'No transcript yet for this audio.'
           : 'No transcript yet. Record or import audio and it is transcribed automatically.';
+  const emptyHint = canWrite
+    ? `${empty} Have a transcript already? Use Import transcript to load an SRT, VTT or JSON file.`
+    : empty;
 
   return (
     <FeedShell
@@ -94,6 +102,16 @@ export function TranscriptTab({
           </Badge>
         </span>
       }
+      toolbar={
+        canWrite && (
+          <Button variant="glass" onClick={() => setImportOpen(true)}>
+            <ToolbarCaption
+              label="Import transcript…"
+              icon={<FileUpIcon className="block size-[18px]" aria-hidden="true" />}
+            />
+          </Button>
+        )
+      }
     >
       {failed && session.transcriptStatus === 'failed' && (
         <p className="m-0 mb-2 text-[0.85rem] text-si-danger">
@@ -109,7 +127,7 @@ export function TranscriptTab({
           columns={SEGMENT_COLUMNS}
           loading={q.isPending}
           empty={segs.length === 0}
-          emptyMessage={empty}
+          emptyMessage={emptyHint}
         >
           {segs.map((s) => (
             <SegmentRow
@@ -132,6 +150,13 @@ export function TranscriptTab({
         </FeedTable>
       )}
       {promptElement}
+      {importOpen && (
+        <TranscriptImportDialog
+          session={session}
+          segments={media.data}
+          onClose={() => setImportOpen(false)}
+        />
+      )}
     </FeedShell>
   );
 }

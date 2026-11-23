@@ -5,6 +5,7 @@ import type { AudioSegment, Capabilities, Session } from '@autologger/contract';
 import {
   AudioLinesIcon,
   FileAudioIcon,
+  FileUpIcon,
   LinkIcon,
   RefreshCwIcon,
   TagsIcon,
@@ -42,6 +43,7 @@ import {
   uploadQueue,
 } from './audio/uploads';
 import { KeyTermsDialog } from './KeyTermsDialog';
+import { TranscriptImportDialog } from './TranscriptImportDialog';
 
 const STATUS_LABEL: Record<AudioSegment['status'], string> = {
   uploading: 'Uploading',
@@ -68,6 +70,7 @@ export function AudioMenu({
   const [ytOpen, setYtOpen] = useState(false);
   const [listOpen, setListOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const jobs = useJobs(session.id);
   const activeJobs = (jobs.data ?? []).filter(
     (j) => j.status === 'queued' || j.status === 'running',
@@ -132,6 +135,15 @@ export function AudioMenu({
                 {ytReason && <span className="text-xs text-muted-foreground">{ytReason}</span>}
               </span>
             </DropdownMenuItem>
+            <DropdownMenuItem disabled={!!writeReason} onClick={() => setImportOpen(true)}>
+              <FileUpIcon aria-hidden="true" />
+              <span className="flex flex-col">
+                <span>Import transcript…</span>
+                <span className="text-xs text-muted-foreground">
+                  {writeReason ?? 'An SRT, VTT or JSON file, for the session or one recording'}
+                </span>
+              </span>
+            </DropdownMenuItem>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setListOpen(true)}>
@@ -170,6 +182,13 @@ export function AudioMenu({
           segments={segments}
           jobsRunning={activeJobs.length}
           onClose={() => setTermsOpen(false)}
+        />
+      )}
+      {importOpen && (
+        <TranscriptImportDialog
+          session={session}
+          segments={segments}
+          onClose={() => setImportOpen(false)}
         />
       )}
       {ytOpen && <YoutubeDialog sessionId={session.id} onClose={() => setYtOpen(false)} />}
