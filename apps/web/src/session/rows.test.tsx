@@ -126,7 +126,7 @@ describe('shared session pieces', () => {
         onDelete={noop}
       />,
     );
-    expect(out).toContain('value="Guest: Priya"');
+    expect(out).toContain('>Guest: Priya</textarea>');
     expect(out).toMatch(/aria-label="Title" readOnly=""/);
     expect(out).not.toContain('Delete topic');
   });

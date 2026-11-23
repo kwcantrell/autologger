@@ -60,8 +60,8 @@ export function MockFrame({
 }
 
 export const noop = () => {};
-// The feed table's scroll area, minus the height cap and the scrollbars: a table wider than the
-// card is cropped at its edge, like a screenshot.
+// The feed table's scroll area, minus the height cap and the scrollbars. In a narrow card the
+// rows stack (FeedStack) as they do in the app, so nothing is cropped.
 export const MOCK_TABLE = 'overflow-hidden';
 export const resolved = () => Promise.resolve();
 

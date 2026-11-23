@@ -17,6 +17,7 @@ import {
   FEED_CELL_TEXT,
   FEED_INLINE_INPUT,
   FEED_ROW,
+  FEED_STACK_ROW,
   FEED_TC,
   JUMP_COLUMN,
   JumpButton,
@@ -86,7 +87,15 @@ export function EventRow({
     .join(' — ');
 
   return (
-    <tr ref={rowRef} className={cn(FEED_ROW, 'group')} data-event-id={e.id}>
+    <tr
+      ref={rowRef}
+      className={cn(
+        FEED_ROW,
+        FEED_STACK_ROW.narrow,
+        'group @max-md/feed:grid-cols-[auto_minmax(0,1fr)_auto]',
+      )}
+      data-event-id={e.id}
+    >
       <td className={cn(FEED_CELL, 'align-middle')}>
         <JumpButton
           sec={sec}
@@ -95,7 +104,14 @@ export function EventRow({
           unavailable={session.isRolling ? 'Playback is off while timecode rolls.' : null}
         />
       </td>
-      <td className={cn(FEED_CELL, FEED_TC, 'align-middle')}>
+      {/* Stacked: the time and the event label share the meta line. */}
+      <td
+        className={cn(
+          FEED_CELL,
+          FEED_TC,
+          'align-middle @max-md/feed:flex @max-md/feed:flex-wrap @max-md/feed:items-baseline @max-md/feed:gap-x-2',
+        )}
+      >
         {editable && timeMode === 'session' ? (
           <input
             className={cn(FEED_INLINE_INPUT, 'min-w-[calc(11ch+0.6rem+2px)] tabular-nums')}
@@ -119,12 +135,19 @@ export function EventRow({
             {timeText}
           </span>
         )}
-        <span className="block text-[0.68rem] font-semibold md:hidden" style={{ color: e.color }}>
+        <span
+          className="block whitespace-normal font-ui text-[0.68rem] font-semibold md:@min-md/feed:hidden"
+          style={{ color: e.color }}
+        >
           {e.category}
         </span>
       </td>
       <td
-        className={cn(FEED_CELL, FEED_CELL_LABEL, 'align-middle whitespace-nowrap max-md:hidden')}
+        className={cn(
+          FEED_CELL,
+          FEED_CELL_LABEL,
+          'align-middle whitespace-nowrap max-md:hidden @max-md/feed:hidden',
+        )}
         style={{ color: e.color }}
       >
         {editable ? (
@@ -156,7 +179,7 @@ export function EventRow({
         className={cn(
           FEED_CELL,
           FEED_CELL_TEXT,
-          'max-w-[min(28rem,38vw)] align-middle max-md:max-w-none',
+          'max-w-[min(28rem,38vw)] align-middle max-md:max-w-none @max-md/feed:col-[2/-1] @max-md/feed:row-start-2 @max-md/feed:max-w-none',
         )}
       >
         <span className="flex items-center gap-1.5">
@@ -176,7 +199,8 @@ export function EventRow({
               }}
             />
           ) : (
-            <span className="min-w-0 break-words">{messageText}</span>
+            // `anywhere`, not `break-word`: only it lets a long token (a URL) shrink the cell.
+            <span className="min-w-0 [overflow-wrap:anywhere]">{messageText}</span>
           )}
           {agent && (
             <Badge
@@ -198,7 +222,9 @@ export function EventRow({
           )}
         </span>
       </td>
-      <td className={cn(FEED_CELL, 'align-middle')}>
+      <td
+        className={cn(FEED_CELL, 'align-middle @max-md/feed:col-start-3 @max-md/feed:row-start-1')}
+      >
         {canWrite && (
           <Button
             variant="unstyled"

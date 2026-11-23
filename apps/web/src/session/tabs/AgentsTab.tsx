@@ -28,7 +28,7 @@ import {
   DropdownMenuTrigger,
 } from '@/shared/components/ui/dropdown-menu';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
-import { CHANGE_COLUMNS, ChangeRow } from './ChangeRow';
+import { CHANGE_COLUMNS, CHANGE_STACK, ChangeRow } from './ChangeRow';
 import { CopyRow } from './CopyRow';
 
 type Filter = 'all' | 'mcp' | 'operators';
@@ -251,6 +251,7 @@ function ChangeFeed({ session }: { session: Session }) {
       ) : (
         <FeedTable
           columns={CHANGE_COLUMNS}
+          stack={CHANGE_STACK}
           loading={changes.isPending}
           empty={rows.length === 0}
           emptyMessage={EMPTY[filter]}

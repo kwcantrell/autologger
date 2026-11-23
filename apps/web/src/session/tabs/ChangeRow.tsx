@@ -9,6 +9,8 @@ import {
   FEED_CELL,
   FEED_CELL_TEXT,
   FEED_ROW,
+  FEED_STACK_ROW,
+  type FeedStack,
   JUMP_COLUMN,
   JumpButton,
 } from '@/session/feed';
@@ -41,6 +43,8 @@ export const CHANGE_COLUMNS: Column[] = [
   { key: 'summary', label: 'Summary' },
   { key: 'undo', label: 'Undo', className: 'w-28', srOnly: true },
 ];
+/** FeedTable `stack` for ChangeRow: its meta columns need ~30rem, so it stacks below 48rem. */
+export const CHANGE_STACK: FeedStack = 'wide';
 
 const RTF = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto', style: 'short' });
 export function fmtRelative(iso: string, now: number): string {
@@ -93,21 +97,45 @@ export function ChangeRow({
 }) {
   const isAgent = c.via === 'mcp';
   return (
-    <tr className={cn(FEED_ROW, c.revertedAt && 'opacity-60')}>
-      <td className={cn(FEED_CELL, 'w-8')}>
+    // Stacked: time, change kind and undo on the meta line, then who, then the summary.
+    <tr
+      className={cn(
+        FEED_ROW,
+        FEED_STACK_ROW.wide,
+        '@max-3xl/feed:grid-cols-[2rem_auto_minmax(0,1fr)_auto]',
+        c.revertedAt && 'opacity-60',
+      )}
+    >
+      <td
+        className={cn(
+          FEED_CELL,
+          'w-8 @max-3xl/feed:col-start-1 @max-3xl/feed:row-span-3 @max-3xl/feed:row-start-1 @max-3xl/feed:self-start',
+        )}
+      >
         <JumpButton sec={sec} label={c.summary} onJump={onJump} />
       </td>
-      <td className={cn(FEED_CELL, 'whitespace-nowrap text-si-muted tabular-nums')}>
+      <td
+        className={cn(
+          FEED_CELL,
+          'whitespace-nowrap text-si-muted tabular-nums @max-3xl/feed:col-start-2 @max-3xl/feed:row-start-1',
+        )}
+      >
         <time dateTime={c.at} title={c.at}>
           {fmtRelative(c.at, now)}
         </time>
       </td>
-      <td className={cn(FEED_CELL, FEED_CELL_TEXT)}>
+      <td
+        className={cn(
+          FEED_CELL,
+          FEED_CELL_TEXT,
+          '@max-3xl/feed:col-[2/-1] @max-3xl/feed:row-start-2',
+        )}
+      >
         <div className="flex min-w-0 flex-wrap items-center gap-1">
           <span className="truncate font-semibold">{c.actor?.name ?? 'System'}</span>
           {isAgent && c.clientName && (
             <SmallBadge
-              className="border-[color-mix(in_oklab,var(--si-accent)_45%,var(--si-line))] text-(--si-accent-text)"
+              className="border-[color-mix(in_oklab,var(--si-accent)_45%,var(--si-line))] text-(--si-accent-text) @max-3xl/feed:max-w-full @max-3xl/feed:whitespace-normal @max-3xl/feed:[overflow-wrap:anywhere]"
               title={`MCP client: ${c.clientName}`}
             >
               {c.clientName}
@@ -116,11 +144,22 @@ export function ChangeRow({
           <SmallBadge>{VIA_LABEL[c.via]}</SmallBadge>
         </div>
       </td>
-      <td className={cn(FEED_CELL, 'whitespace-nowrap text-si-muted')}>
+      <td
+        className={cn(
+          FEED_CELL,
+          'whitespace-nowrap text-si-muted @max-3xl/feed:col-start-3 @max-3xl/feed:row-start-1 @max-3xl/feed:whitespace-normal',
+        )}
+      >
         <span className="font-semibold text-si-fg">{c.kind}</span>{' '}
         {ENTITY_LABEL[c.entity] ?? c.entity}
       </td>
-      <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'py-1')}>
+      <td
+        className={cn(
+          FEED_CELL,
+          FEED_CELL_TEXT,
+          'py-1 @max-3xl/feed:col-[2/-1] @max-3xl/feed:row-start-3 @max-3xl/feed:pt-0',
+        )}
+      >
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           {c.revertOf && <SmallBadge title="This change undid an earlier one">undo</SmallBadge>}
           {c.groupSize && (
@@ -145,7 +184,12 @@ export function ChangeRow({
           </p>
         )}
       </td>
-      <td className={cn(FEED_CELL, 'whitespace-nowrap text-right')}>
+      <td
+        className={cn(
+          FEED_CELL,
+          'whitespace-nowrap text-right @max-3xl/feed:col-start-4 @max-3xl/feed:row-start-1',
+        )}
+      >
         {c.revertedAt ? (
           <span className="text-[0.75rem] text-si-dim" title={c.revertedAt}>
             Undone {fmtRelative(c.revertedAt, now)}

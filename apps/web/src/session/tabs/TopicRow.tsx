@@ -14,6 +14,7 @@ import {
   FEED_CELL_TEXT,
   FEED_INLINE_INPUT,
   FEED_ROW,
+  FEED_STACK_ROW,
   FEED_TC,
   FEED_TEXTAREA,
   JUMP_COLUMN,
@@ -78,8 +79,14 @@ export function TopicRow({
 
   const ro = !canWrite;
   return (
-    <tr className={cn(FEED_ROW, 'group')}>
-      <td className={cn(FEED_CELL, 'align-top pt-1')}>
+    <tr
+      className={cn(
+        FEED_ROW,
+        FEED_STACK_ROW.narrow,
+        'group @max-md/feed:grid-cols-[auto_minmax(0,1fr)_auto]',
+      )}
+    >
+      <td className={cn(FEED_CELL, 'align-top pt-1 @max-md/feed:pt-[0.1rem]')}>
         <JumpButton
           sec={t.startSec}
           label={fmtSec(t.startSec)}
@@ -87,9 +94,19 @@ export function TopicRow({
           unavailable={rolling ? 'Playback is off while timecode rolls.' : null}
         />
       </td>
-      <td className={cn(FEED_CELL, FEED_TC, 'align-top')}>
+      {/* Stacked: start, duration and level share the meta line. */}
+      <td
+        className={cn(
+          FEED_CELL,
+          FEED_TC,
+          'align-top @max-md/feed:flex @max-md/feed:flex-wrap @max-md/feed:items-center',
+        )}
+      >
         <input
-          className={cn(FEED_INLINE_INPUT, 'tabular-nums')}
+          className={cn(
+            FEED_INLINE_INPUT,
+            'tabular-nums @max-md/feed:w-[calc(8ch+0.6rem+2px)] @max-md/feed:shrink-0',
+          )}
           aria-label="Start time"
           readOnly={ro}
           value={start}
@@ -103,11 +120,11 @@ export function TopicRow({
             if (sec !== Math.floor(t.startSec)) void save({ startSec: sec });
           }}
         />
-        <span className="block px-[0.3rem] text-[0.68rem] text-si-dim md:hidden">
+        <span className="block whitespace-normal px-[0.3rem] font-ui text-[0.68rem] text-si-dim md:@min-md/feed:hidden">
           Duration {Math.round(t.durationSec)}s · Level {t.level}
         </span>
       </td>
-      <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top max-md:hidden')}>
+      <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top max-md:hidden @max-md/feed:hidden')}>
         <input
           className={cn(FEED_INLINE_INPUT, 'tabular-nums')}
           type="number"
@@ -123,7 +140,7 @@ export function TopicRow({
           }}
         />
       </td>
-      <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top max-md:hidden')}>
+      <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top max-md:hidden @max-md/feed:hidden')}>
         <input
           className={cn(FEED_INLINE_INPUT, 'tabular-nums')}
           type="number"
@@ -140,14 +157,28 @@ export function TopicRow({
           }}
         />
       </td>
-      <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top py-0.5')}>
-        <span className="flex items-center gap-1.5">
-          <input
-            className={cn(FEED_INLINE_INPUT, 'font-semibold')}
+      <td
+        className={cn(
+          FEED_CELL,
+          FEED_CELL_TEXT,
+          'align-top py-0.5 @max-md/feed:col-[2/-1] @max-md/feed:row-start-2',
+        )}
+      >
+        <span className="flex items-start gap-1.5">
+          {/* A one-line textarea, not an input, so a long title wraps instead of being cut. */}
+          <textarea
+            className={cn(FEED_INLINE_INPUT, FEED_TEXTAREA, 'min-w-0 font-semibold')}
             aria-label="Title"
             readOnly={ro}
+            rows={1}
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => setTitle(e.target.value.replace(/\s*\n\s*/g, ' '))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+            }}
             onBlur={() => {
               if (title.trim() && title !== t.title) void save({ title: title.trim() });
               else setTitle(t.title);
@@ -156,7 +187,7 @@ export function TopicRow({
           {t.via === 'mcp' && (
             <Badge
               variant="outline"
-              className="shrink-0 px-1 py-px text-[0.6rem]"
+              className="mt-[0.2rem] shrink-0 px-1 py-px text-[0.6rem]"
               title={`Written by an agent${t.createdBy ? ` acting as ${t.createdBy.name}` : ''}`}
             >
               agent
@@ -176,7 +207,12 @@ export function TopicRow({
           }}
         />
       </td>
-      <td className={cn(FEED_CELL, 'align-top pt-1')}>
+      <td
+        className={cn(
+          FEED_CELL,
+          'align-top pt-1 @max-md/feed:col-start-3 @max-md/feed:row-start-1 @max-md/feed:pt-[0.1rem]',
+        )}
+      >
         {canWrite && (
           <Button
             variant="unstyled"
