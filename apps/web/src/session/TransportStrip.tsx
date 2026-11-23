@@ -1,19 +1,19 @@
 // The transport card (#v5-maximize-log-strip): session meta + status, the hero timecode,
 // transport/marker/keyboard controls, and the lane — timeline when stopped, log buttons live.
 
-import type { Capabilities, Category, Session, SessionEvent } from '@autologger/contract';
+import type { Category, SessionEvent } from '@autologger/contract';
 import { KeyboardIcon, RotateCcw } from 'lucide-react';
-import { useMemo } from 'react';
-import { shortcutsOpen, TRANSPORT_LABEL, type TransportTint } from '@/lib/store';
-import { eventSec, fmtSec, isMediaOnly, type TransportClock } from '@/lib/timecode';
+import { useCallback, useMemo } from 'react';
+import { shortcutsOpen, TRANSPORT_LABEL, type TransportTint, useStore } from '@/lib/store';
+import { eventSec, fmtSec, isMediaOnly } from '@/lib/timecode';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { Tooltip } from '@/shared/ui/Tooltip';
-import type { Player } from './audio/usePlayer';
 import { recorderSupport, type useRecorder } from './audio/useRecorder';
 import { CategoryStrip } from './CategoryStrip';
+import { usePlayheadSec, useWorkspace } from './context';
 import { Timeline } from './Timeline';
 
 type Recorder = ReturnType<typeof useRecorder>;
@@ -159,42 +159,39 @@ function fmtDate(iso: string) {
   return `${p(d.getMonth() + 1)}/${p(d.getDate())}/${d.getFullYear()}`;
 }
 
+/** Session, access, capabilities, player and clock come from the workspace context. */
 export function TransportStrip({
-  session,
-  clock,
   tint,
   busy,
-  canWrite,
-  caps,
   categories,
   categoriesError,
   events,
-  player,
   recorder,
-  totalSec,
-  playheadSec,
   onTransport,
-  onSeek,
-  onRevealEvent,
 }: {
-  session: Session;
-  clock: TransportClock;
   tint: TransportTint;
   busy: boolean;
-  canWrite: boolean;
-  caps: Capabilities | undefined;
   categories: Category[];
   categoriesError: string | null;
   events: SessionEvent[];
-  player: Player;
   recorder: Recorder;
-  totalSec: number;
-  playheadSec: number;
   onTransport: (a: 'start' | 'stop' | 'reset') => void;
-  onSeek: (sec: number) => void;
-  onRevealEvent: (id: string) => void;
 }) {
   const { confirm, confirmElement } = useConfirm();
+  // This strip draws the clock and the playhead, so it is what re-renders each frame.
+  const {
+    session,
+    canWrite,
+    caps,
+    player,
+    clock: clockStore,
+    revealEvent: onRevealEvent,
+  } = useWorkspace();
+  // Move the playhead without playing (and without the rolling check of the context's `seek`).
+  const { seek: playerSeek } = player;
+  const onSeek = useCallback((sec: number) => void playerSeek(sec, false), [playerSeek]);
+  const clock = useStore(clockStore);
+  const playheadSec = usePlayheadSec();
   const rolling = session.isRolling;
   const recording =
     recorder.state === 'recording' ||
@@ -219,6 +216,9 @@ export function TransportStrip({
         .sort((a, b) => a.sec - b.sec),
     [events, session],
   );
+  const audioEnd = player.segments.reduce((m, p) => Math.max(m, p.end), 0);
+  const lastEventSec = markerSecs.at(-1)?.sec ?? 0;
+  const totalSec = Math.max(60, clock.elapsedSec, audioEnd, lastEventSec + 5);
   const prev = [...markerSecs].reverse().find((m) => m.sec < playheadSec - 0.25);
   const next = markerSecs.find((m) => m.sec > playheadSec + 0.25);
 
@@ -506,7 +506,7 @@ export function TransportStrip({
                   events={events}
                   enabled={rolling && canWrite}
                   disabledReason={readOnly ?? (!rolling ? 'Roll timecode to log events.' : null)}
-                  elapsedSec={() => clock.elapsedSec}
+                  elapsedSec={() => clockStore.get().elapsedSec}
                 />
               )}
             </div>

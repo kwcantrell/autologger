@@ -18,6 +18,7 @@ import { type QueryClient, type QueryKey, useQueryClient } from '@tanstack/react
 import { useEffect, useState } from 'react';
 import { setServerTime } from '@/lib/timecode';
 import { qk } from './queries';
+import { RpcError, rpc } from './rpc';
 
 export type LiveStatus =
   | { state: 'connecting' }
@@ -27,7 +28,8 @@ export type LiveStatus =
 
 type WithId = { id: string };
 
-function upsertList<T extends WithId>(
+/** Keyed upsert into a cached list (a no-op while the list isn't loaded). */
+export function upsertList<T extends WithId>(
   list: T[] | undefined,
   item: T,
   sort?: (a: T, b: T) => number,
@@ -47,6 +49,40 @@ export const byEventTime = (a: SessionEvent, b: SessionEvent) =>
 const byStart = (a: { startSec: number }, b: { startSec: number }) => a.startSec - b.startSec;
 const byOrdinal = (a: AudioSegment, b: AudioSegment) => a.ordinal - b.ordinal;
 const byNewest = (a: Job, b: Job) => b.createdAt.localeCompare(a.createdAt);
+
+const queuedRefetch = new WeakMap<QueryClient, Set<string>>();
+
+/**
+ * Refetch `key` so that no response read before now has the last word. A fetch in flight may have
+ * been read before a push it would then overwrite: join it (not cancel it — cancelling on every
+ * push could starve a slow list under a busy log) and fetch once more when it lands.
+ */
+function refetchAfterInFlight(qc: QueryClient, key: QueryKey) {
+  if (qc.getQueryState(key)?.fetchStatus !== 'fetching') {
+    void qc.invalidateQueries({ queryKey: key, exact: true });
+    return;
+  }
+  const queued = queuedRefetch.get(qc) ?? new Set<string>();
+  queuedRefetch.set(qc, queued);
+  const hash = JSON.stringify(key);
+  if (queued.has(hash)) return;
+  queued.add(hash);
+  void qc.refetchQueries({ queryKey: key, exact: true }, { cancelRefetch: false }).finally(() => {
+    queued.delete(hash);
+    void qc.invalidateQueries({ queryKey: key, exact: true });
+  });
+}
+
+/** The session's lists (and the session itself), refreshed when the socket (re)opens. */
+const sessionKeys = (sessionId: string): QueryKey[] => [
+  qk.session(sessionId),
+  qk.events(sessionId),
+  qk.topics(sessionId),
+  qk.transcript(sessionId),
+  qk.media(sessionId),
+  qk.jobs(sessionId),
+  qk.dashboards(sessionId),
+];
 
 /** Session entity → the list key it lives in. */
 function listKey(entity: LiveEntity, sessionId: string): QueryKey | null {
@@ -86,8 +122,11 @@ function invalidateDerived(qc: QueryClient, entity: LiveEntity, sessionId: strin
     void qc.invalidateQueries({ queryKey: qk.sessionsAll });
 }
 
-/** Pushed sessions are plain `Session`s: keep the cached sessions.get `transcriptJob`. */
-function setSession(qc: QueryClient, sessionId: string, s: Session) {
+/**
+ * Pushed sessions (and transport op results) are plain `Session`s: keep the cached sessions.get
+ * `transcriptJob`.
+ */
+export function setSession(qc: QueryClient, sessionId: string, s: Session) {
   qc.setQueryData<SessionDetail>(qk.session(sessionId), (old) => ({
     ...s,
     transcriptJob: old?.transcriptJob ?? null,
@@ -111,9 +150,25 @@ export function applySessionMessage(qc: QueryClient, sessionId: string, m: Sessi
       const { entity, op, id } = m;
       const data = m.data as WithId | undefined;
       const set = <T extends WithId>(key: QueryKey, sort?: (a: T, b: T) => number) => {
-        if (op === 'delete') qc.setQueryData<T[]>(key, (l) => removeFromList(l, id));
-        else if (data) qc.setQueryData<T[]>(key, (l) => upsertList(l, data as T, sort));
-        else void qc.invalidateQueries({ queryKey: key });
+        if (op !== 'delete' && !data) {
+          void qc.invalidateQueries({ queryKey: key });
+          return;
+        }
+        // Upserts and deletes by id are idempotent, so the same patch can be applied twice.
+        const patch = () => {
+          if (qc.getQueryData(key) === undefined) return;
+          if (op === 'delete') qc.setQueryData<T[]>(key, (l) => removeFromList(l, id));
+          else qc.setQueryData<T[]>(key, (l) => upsertList(l, data as T, sort));
+        };
+        patch();
+        // A fetch in flight may have read the list before this change and would overwrite the
+        // patch when it lands: re-apply it on the fetched data instead of refetching again (a
+        // refetch per push would chain under a busy log). Not loaded and not fetching: the
+        // first fetch will be current.
+        if (qc.getQueryState(key)?.fetchStatus === 'fetching')
+          void qc
+            .refetchQueries({ queryKey: key, exact: true }, { cancelRefetch: false })
+            .then(patch, () => {});
       };
       switch (entity) {
         case 'session':
@@ -169,6 +224,29 @@ export function useLiveSession(sessionId: string | undefined): LiveStatus {
     let pingTimer: ReturnType<typeof setInterval> | undefined;
     let terminal = false;
 
+    // A session deleted or unshared while we were offline is refused at the upgrade with an HTTP
+    // status, which the browser reports as a plain 1006 close. After repeated failures, ask
+    // sessions.get: once it says the session is gone (SessionRoute then shows why) or we are signed
+    // out, stop reconnecting.
+    const checkSession = async () => {
+      // Probe directly rather than refetching the observed query: a failed refetch (server still
+      // down) would put it in an error state and unmount the workspace for a transient outage.
+      let code: string | undefined;
+      try {
+        await rpc('sessions.get', { sessionId });
+        return;
+      } catch (err) {
+        code = err instanceof RpcError ? err.code : undefined;
+      }
+      if (disposed || terminal || !code) return;
+      if (!['not_found', 'forbidden', 'unauthenticated'].includes(code)) return;
+      terminal = true;
+      clearTimeout(retryTimer);
+      if (code === 'unauthenticated') setStatus({ state: 'closed', reason: 'unauthenticated' });
+      // Confirmed gone (the server answered): refetch so SessionRoute shows why.
+      else void qc.refetchQueries({ queryKey: qk.session(sessionId), exact: true });
+    };
+
     const connect = () => {
       if (disposed) return;
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -182,20 +260,13 @@ export function useLiveSession(sessionId: string | undefined): LiveStatus {
         }
         if (m.type === 'hello') {
           setServerTime(m.serverTime);
-          if (attempt > 0) {
-            // Catch up on anything missed while disconnected.
-            for (const key of [
-              qk.session(sessionId),
-              qk.events(sessionId),
-              qk.topics(sessionId),
-              qk.transcript(sessionId),
-              qk.media(sessionId),
-              qk.jobs(sessionId),
-              qk.dashboards(sessionId),
-              qk.changesAll(sessionId),
-            ])
-              void qc.invalidateQueries({ queryKey: key });
-          }
+          // Pushes reach us only from now on: whatever was read before (on first connect, the
+          // lists loaded while the socket opened; after a reconnect, everything) may be missing
+          // changes. Refetch what is loaded or loading; lists never fetched just go stale.
+          for (const key of sessionKeys(sessionId))
+            if (qc.getQueryState(key)) refetchAfterInFlight(qc, key);
+          // Change lists are keyed per view under a common prefix.
+          void qc.invalidateQueries({ queryKey: qk.changesAll(sessionId) });
           attempt = 0;
           setStatus({ state: 'open' });
           return;
@@ -225,6 +296,7 @@ export function useLiveSession(sessionId: string | undefined): LiveStatus {
         if (terminal || ev.code === 4403 || ev.code === 4404) return;
         attempt += 1;
         setStatus({ state: 'reconnecting', attempt });
+        if (attempt >= 2) void checkSession();
         const delay =
           Math.min(MAX_BACKOFF_MS, 500 * 2 ** Math.min(attempt, 5)) * (0.75 + Math.random() * 0.5);
         retryTimer = setTimeout(connect, delay);

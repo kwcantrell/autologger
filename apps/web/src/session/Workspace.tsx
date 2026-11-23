@@ -1,8 +1,9 @@
 import type { Session, WikiListItem } from '@autologger/contract';
+import { useQueryClient } from '@tanstack/react-query';
 import { BookOpenIcon, FileTextIcon, WifiOffIcon } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'wouter';
-import type { LiveStatus } from '@/api/live';
+import { type LiveStatus, setSession } from '@/api/live';
 import {
   listAllWikiPages,
   useCapabilities,
@@ -14,7 +15,7 @@ import {
 import { errorMessage, rpc } from '@/api/rpc';
 import { isTypingTarget } from '@/lib/keys';
 import { type TransportTint, transportStatus } from '@/lib/store';
-import { eventSec, fmtShort, useTransportClock } from '@/lib/timecode';
+import { fmtShort, useTransportClockStore } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
 import { Badge } from '@/shared/components/ui/badge';
@@ -58,14 +59,14 @@ const TABS: { id: WorkspaceTab; label: string }[] = [
 
 export function Workspace({ session, live }: { session: Session; live: LiveStatus }) {
   const sessionId = session.id;
+  const qc = useQueryClient();
   const caps = useCapabilities().data;
   const canWrite = session.access !== 'read';
   const categories = useCategories(session.showId);
   const events = useEvents(sessionId);
   const media = useMedia(sessionId, caps?.storage !== false);
-  const clock = useTransportClock(session);
-  const clockRef = useRef(clock);
-  clockRef.current = clock;
+  // A store: the clock ticks each frame while rolling, and only what draws it re-renders.
+  const clock = useTransportClockStore(session);
 
   const [tab, setTab] = useState<WorkspaceTab>('events');
   const [visited, setVisited] = useState<Set<WorkspaceTab>>(() => new Set(['events']));
@@ -73,7 +74,8 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
   const [busy, setBusy] = useState(false);
 
   const player = usePlayer(media.data, true);
-  const recorder = useRecorder(sessionId, () => clockRef.current.elapsedSec);
+  const { seek: playerSeek, toggle: playerToggle } = player;
+  const recorder = useRecorder(sessionId, () => clock.get().elapsedSec);
   const recording = recorder.state === 'recording' || recorder.state === 'starting';
 
   const tint: TransportTint = recording
@@ -104,9 +106,9 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
         showToast('Stop timecode to play back audio.', true);
         return;
       }
-      void player.seek(sec, play);
+      void playerSeek(sec, play);
     },
-    [player, session.isRolling],
+    [playerSeek, session.isRolling],
   );
 
   const revealEvent = useCallback(
@@ -124,14 +126,15 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
       try {
         if (action === 'stop' && recording) await recorder.stop();
         if (action === 'start' && player.isPlaying) void player.toggle();
-        await rpc(`transport.${action}`, { sessionId });
+        // Apply the result now; the socket's transport push carries the same state.
+        setSession(qc, sessionId, await rpc(`transport.${action}`, { sessionId }));
       } catch (e) {
         showToast(errorMessage(e), true);
       } finally {
         setBusy(false);
       }
     },
-    [sessionId, recording, recorder, player],
+    [sessionId, recording, recorder, player, qc],
   );
 
   // Recording ends when the transport stops (here or in another tab / Companion).
@@ -142,12 +145,13 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
   useEffect(() => {
     if (recorder.error) showToast(recorder.error, true);
   }, [recorder.error]);
+  const { error: playerError, clearError: clearPlayerError } = player;
   useEffect(() => {
-    if (player.error) {
-      showToast(player.error, true);
-      player.clearError();
+    if (playerError) {
+      showToast(playerError, true);
+      clearPlayerError();
     }
-  }, [player.error, player]);
+  }, [playerError, clearPlayerError]);
 
   // Space: play / pause (not while typing, with an overlay, or on a focused button).
   useEffect(() => {
@@ -159,11 +163,11 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
         return;
       if (session.isRolling) return;
       e.preventDefault();
-      void player.toggle();
+      void playerToggle();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [player, session.isRolling]);
+  }, [playerToggle, session.isRolling]);
 
   // Deep links from search and wiki citations: ?t=<sec>[&to=<sec>]&event=<id>&topic=<id>.
   // With `to`, pressing play plays the cited range and pauses at its end.
@@ -180,8 +184,10 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
       deepLinkDone.current = true;
       return;
     }
-    if (ev && !events.data) return;
-    if (t && !media.data && caps?.storage) return;
+    // Wait for what the link needs, but not on a failed query: an error still opens the tab and
+    // strips the query string (the feed shows the error).
+    if (ev && events.isPending) return;
+    if (t && media.isPending && caps?.storage) return;
     deepLinkDone.current = true;
     if (tr && TABS.some((x) => x.id === tr)) switchTab(tr as WorkspaceTab);
     if (ev) revealEvent(ev);
@@ -191,8 +197,8 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
       void player.seek(Number(t), false, Number.isFinite(to) ? to : null);
     navigate(location.pathname, { replace: true });
   }, [
-    events.data,
-    media.data,
+    events.isPending,
+    media.isPending,
     caps?.storage,
     revealEvent,
     switchTab,
@@ -202,20 +208,11 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
   ]);
 
   const ctx: WorkspaceCtx = useMemo(
-    () => ({ session, caps, canWrite, seek, setTab: switchTab, revealEvent }),
-    [session, caps, canWrite, seek, switchTab, revealEvent],
+    () => ({ session, caps, canWrite, clock, player, seek, setTab: switchTab, revealEvent }),
+    [session, caps, canWrite, clock, player, seek, switchTab, revealEvent],
   );
 
   const eventsList = events.data ?? [];
-  const lastEventSec = eventsList.reduce(
-    (m, e) => Math.max(m, eventSec(e.timecodeFrames, session) ?? 0),
-    0,
-  );
-  const audioEnd = player.segments.reduce((m, p) => Math.max(m, p.end), 0);
-  const totalSec = Math.max(60, clock.elapsedSec, audioEnd, lastEventSec + 5);
-  const playheadSec = session.isRolling
-    ? clock.elapsedSec
-    : (player.positionSec ?? clock.elapsedSec);
 
   return (
     <WorkspaceContext.Provider value={ctx}>
@@ -239,22 +236,13 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
           )}
           <UploadBanner sessionId={sessionId} />
           <TransportStrip
-            session={session}
-            clock={clock}
             tint={tint}
             busy={busy}
-            canWrite={canWrite}
-            caps={caps}
             categories={categories.data ?? []}
             categoriesError={categories.isError ? errorMessage(categories.error) : null}
             events={eventsList}
-            player={player}
             recorder={recorder}
-            totalSec={totalSec}
-            playheadSec={playheadSec}
             onTransport={transport}
-            onSeek={(sec) => void player.seek(sec, false)}
-            onRevealEvent={revealEvent}
           />
 
           <Tabs
@@ -298,21 +286,8 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
                       </div>
                     }
                   >
-                    {t.id === 'events' && (
-                      <EventsTab
-                        session={session}
-                        events={events}
-                        categories={categories.data ?? []}
-                        flash={flashEventId}
-                        playheadSec={playheadSec}
-                      />
-                    )}
-                    {t.id === 'transcript' && (
-                      <TranscriptTab
-                        session={session}
-                        playheadSec={player.isPlaying ? player.positionSec : null}
-                      />
-                    )}
+                    {t.id === 'events' && <EventsTab session={session} flash={flashEventId} />}
+                    {t.id === 'transcript' && <TranscriptTab session={session} />}
                     {t.id === 'topics' && <TopicsTab session={session} />}
                     {t.id === 'dashboards' && <DashboardsTab session={session} />}
                     {t.id === 'agents' && <AgentsTab session={session} />}
