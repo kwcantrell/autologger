@@ -49,7 +49,7 @@ import {
 const FOLLOW = '__follow';
 
 export function CompanionSection() {
-  const { allShows, showsLoading } = useActive();
+  const { allShows, show: activeShow, showsLoading } = useActive();
   const list = useCompanionDevices();
   const create = useOpMutation('companion.create', { invalidate: () => [qk.companion] });
   const revoke = useOpMutation('companion.revoke', { invalidate: () => [qk.companion] });
@@ -59,7 +59,12 @@ export function CompanionSection() {
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const chosenShow = manageable.find((s) => s.id === showId) ?? manageable[0] ?? null;
+  // Default to the show selected in the app, so a device isn't added to the wrong show.
+  const chosenShow =
+    manageable.find((s) => s.id === showId) ??
+    manageable.find((s) => s.id === activeShow?.id) ??
+    manageable[0] ??
+    null;
 
   async function add(e: FormEvent) {
     e.preventDefault();
