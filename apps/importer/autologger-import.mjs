@@ -2,15 +2,16 @@
 // @ts-check
 // AutoLogger local import helper: runs yt-dlp (and ffmpeg) on your own computer, with your
 // browser's YouTube cookies, and sends only the audio or the finished compilation MP4 to
-// AutoLogger. No cookies ever leave this machine. One dependency-free file (Node >= 22); the
+// AutoLogger. Cookies leave this machine only with `youtube-login`, which hands a team's YouTube
+// sign-in to the server so it can download by itself. One dependency-free file (Node >= 22); the
 // server serves it at /api/importer/autologger-import.mjs. Docs: docs/importer.md.
 
 import { spawn } from 'node:child_process';
 import { createReadStream, realpathSync } from 'node:fs';
-import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -23,6 +24,10 @@ Usage:
                              [--title-template "{episode}: {title}"]
   autologger-import video <video-url> (--show <showId> | --session <sessionId>)
   autologger-import compile <compilationId>
+  autologger-import youtube-login (--team <teamId> | --show <showId>) (--cookies-from-browser <browser> | --cookies <file>)
+                             give the AutoLogger server this YouTube sign-in for the team (of the
+                             show), so it imports and compiles all its shows' videos by itself
+                             (sends the youtube.com/google.com cookies; use a spare account)
 
 Options:
   --cookies-from-browser <browser>  yt-dlp reads your YouTube sign-in from this browser
@@ -70,7 +75,8 @@ export class CliError extends Error {}
 
 /**
  * @typedef {{
- *   command: string | undefined; target: string | undefined; show?: string; session?: string;
+ *   command: string | undefined; target: string | undefined; show?: string; team?: string;
+ *   session?: string;
  *   order: 'playlist' | 'reverse'; titleTemplate?: string; cookiesFromBrowser?: string;
  *   cookies?: string; dryRun: boolean; keep: boolean; workDir?: string; ytDlp?: string;
  *   ffmpeg?: string; help: boolean;
@@ -91,6 +97,7 @@ export function parseArgs(argv) {
   /** @type {Record<string, (v: string) => void>} */
   const withValue = {
     '--show': (v) => (a.show = v),
+    '--team': (v) => (a.team = v),
     '--session': (v) => (a.session = v),
     '--title-template': (v) => (a.titleTemplate = v),
     '--cookies-from-browser': (v) => (a.cookiesFromBrowser = v),
@@ -875,6 +882,136 @@ async function probeDuration(ctx, file) {
   }
 }
 
+// ── youtube-login ──────────────────────────────────────────────
+
+const YOUTUBE_DOMAIN = /^\.?(?:[a-z0-9-]+\.)*(?:youtube|google)\.com$/i;
+const SIGNED_IN_NAMES = new Set([
+  'SID',
+  '__Secure-1PSID',
+  '__Secure-3PSID',
+  'SAPISID',
+  'LOGIN_INFO',
+]);
+
+/**
+ * Only the youtube.com / google.com cookies of a Netscape cookies.txt or JSON cookie export, in
+ * the same format, plus how many there are and whether a signed-in session is among them.
+ * @param {string} text
+ * @returns {{ kept: string; count: number; signedIn: boolean }}
+ */
+export function youtubeCookiesOnly(text) {
+  const trimmed = text.trim();
+  if (trimmed.startsWith('[')) {
+    /** @type {unknown} */
+    let data;
+    try {
+      data = JSON.parse(trimmed);
+    } catch {
+      throw new CliError('The cookie file is not valid JSON.');
+    }
+    if (!Array.isArray(data)) throw new CliError('A JSON cookie export must be an array.');
+    const kept = data.filter(
+      (c) => c && typeof c.domain === 'string' && YOUTUBE_DOMAIN.test(c.domain),
+    );
+    return {
+      kept: JSON.stringify(kept),
+      count: kept.length,
+      signedIn: kept.some((c) => SIGNED_IN_NAMES.has(c.name)),
+    };
+  }
+  const lines = trimmed.split(/\r?\n/).filter((l) => {
+    const f = l.replace(/^#HttpOnly_/, '').split('\t');
+    return f.length === 7 && !l.startsWith('# ') && YOUTUBE_DOMAIN.test(f[0] ?? '');
+  });
+  return {
+    kept: `# Netscape HTTP Cookie File\n${lines.join('\n')}\n`,
+    count: lines.length,
+    signedIn: lines.some((l) => SIGNED_IN_NAMES.has(l.split('\t')[5] ?? '')),
+  };
+}
+
+/** A public video yt-dlp opens so it reads (and writes out) the browser's YouTube cookies. */
+const COOKIE_EXPORT_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
+
+/**
+ * Export the YouTube cookies (yt-dlp `--cookies-from-browser … --cookies <file>`, or the given
+ * cookies.txt) and store them as the show's YouTube sign-in on the server
+ * (media.setYoutubeCookies, which keeps only the youtube.com / google.com lines).
+ * @param {Ctx} ctx @param {Args} args
+ */
+async function youtubeLoginCommand(ctx, args) {
+  if (!args.show === !args.team)
+    throw new CliError('youtube-login needs --team <teamId> or --show <showId> (its team).');
+  if (!args.cookiesFromBrowser && !args.cookies)
+    throw new CliError(
+      'youtube-login needs --cookies-from-browser <browser> (one signed in to YouTube) or --cookies <file>.',
+    );
+  let text;
+  if (args.cookies) {
+    text = await readFile(resolve(args.cookies), 'utf8').catch((e) => {
+      throw new CliError(`Cannot read ${args.cookies}: ${errorText(e)}`);
+    });
+  } else {
+    await checkTools(ctx, false);
+    const dir = await mkdtemp(join(tmpdir(), 'autologger-cookies-'));
+    const file = join(dir, 'cookies.txt');
+    try {
+      say(`Reading your YouTube sign-in from ${args.cookiesFromBrowser}…`);
+      // yt-dlp writes the cookie jar to --cookies on exit, even when YouTube refuses the video.
+      await runTool(
+        ctx.ytDlp,
+        [
+          '--cookies-from-browser',
+          /** @type {string} */ (args.cookiesFromBrowser),
+          '--cookies',
+          file,
+          '--skip-download',
+          '--no-warnings',
+          '--quiet',
+          COOKIE_EXPORT_URL,
+        ],
+        { tool: 'yt-dlp', hint: YTDLP_HINT },
+      ).catch(() => {});
+      text = await readFile(file, 'utf8').catch(() => {
+        throw new CliError(
+          `yt-dlp could not read cookies from ${args.cookiesFromBrowser}. Close the browser (Chrome locks its cookie database) or try another browser or profile (e.g. chrome:Profile 1).`,
+        );
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+  const target = args.team ? `team ${args.team}` : `the team of show ${args.show}`;
+  const { kept, count, signedIn } = youtubeCookiesOnly(text);
+  if (!count)
+    throw new CliError(
+      'No youtube.com cookies found. Sign in to YouTube in that browser (or export the cookies while on youtube.com, signed in) and try again.',
+    );
+  if (!signedIn)
+    throw new CliError(
+      'These YouTube cookies are not from a signed-in session (no SID or LOGIN_INFO cookie). Sign in to YouTube in that browser first.',
+    );
+  if (ctx.dryRun) {
+    say(`Dry run: would send ${count} youtube.com/google.com cookies (signed in) to ${target}.`);
+    return;
+  }
+  // Only the YouTube and Google cookies leave this computer: never the rest of the browser's jar.
+  /** @type {{ teamId: string; teamName: string; check: { ok: boolean; message: string } | null; expiresAt: string | null }} */
+  const r = await ctx.rpc('media.setYoutubeCookies', {
+    ...(args.team ? { teamId: args.team } : { showId: args.show }),
+    cookies: kept,
+  });
+  say(
+    `Saved the YouTube sign-in for team ${r.teamName || r.teamId}; all its shows download with it.`,
+  );
+  if (r.check) say(`${r.check.ok ? '✓' : '✗'} ${r.check.message}`);
+  if (r.expiresAt)
+    say(`The cookies expire by ${r.expiresAt.slice(0, 10)} (YouTube may sign them out sooner).`);
+  say(
+    'Signing out of YouTube in that browser ends the server’s sign-in too. YouTube also rotates the cookies of open YouTube tabs, which can expire the server’s copy: a browser profile used only for this, or cookies exported from a private window you then close, last longest.',
+  );
+}
+
 // ── main ───────────────────────────────────────────────────────
 
 /**
@@ -893,11 +1030,16 @@ export async function main(argv, env = process.env) {
     say(USAGE);
     return args.help ? 0 : 2;
   }
-  const commands = { playlist: playlistCommand, video: videoCommand, compile: compileCommand };
+  const commands = {
+    playlist: playlistCommand,
+    video: videoCommand,
+    compile: compileCommand,
+    'youtube-login': youtubeLoginCommand,
+  };
   const command = commands[/** @type {keyof typeof commands} */ (args.command)];
   if (!command) {
     process.stderr.write(
-      `Unknown command ${args.command}. Commands: playlist, video, compile. See --help.\n`,
+      `Unknown command ${args.command}. Commands: playlist, video, compile, youtube-login. See --help.\n`,
     );
     return 2;
   }

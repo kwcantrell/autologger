@@ -45,6 +45,22 @@ export function toRpcError(err: unknown): RpcError {
     (err as { code?: string; cause?: { code?: string } })?.cause?.code ??
     (err as { code?: string })?.code;
   if (pgCode === '23505') return { code: 'conflict', message: 'That already exists.' };
-  console.error(err);
+  console.error(loggable(err));
   return { code: 'internal', message: 'Something went wrong on the server.' };
+}
+
+/**
+ * An unexpected error as it may be logged. A failed Drizzle query's message and its `params`
+ * carry every bound value (cookies, token hashes, user text), so for those only the SQL and the
+ * driver's own error are kept.
+ */
+export function loggable(err: unknown): unknown {
+  const e = err as {
+    query?: unknown;
+    params?: unknown;
+    cause?: { message?: string; code?: string };
+  };
+  if (e && typeof e === 'object' && typeof e.query === 'string' && 'params' in e)
+    return `Failed query: ${e.query}\n${e.cause?.code ?? ''} ${e.cause?.message ?? ''}`.trim();
+  return err;
 }

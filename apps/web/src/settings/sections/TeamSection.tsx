@@ -38,6 +38,7 @@ import {
   YOU_ARE,
 } from '../parts';
 import { isManager, memberLabel } from '../teamRules';
+import { YoutubeAccessCard } from './YoutubeAccessCard';
 
 function CreateTeamCard({ first }: { first?: boolean }) {
   return (
@@ -225,6 +226,8 @@ function TeamDetails({ team }: { team: Team }) {
           onSave={() => void save()}
         />
       </Card>
+
+      <YoutubeAccessCard team={team} />
 
       <Card>
         <CardHeader>
