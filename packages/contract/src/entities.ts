@@ -708,9 +708,49 @@ export interface MomentSearch {
   clips?: MomentClip[];
   /** `entities` values that matched no page title, alias or id (the search ignored them). */
   unknownEntities?: string[];
-  /** True when nothing matched every word of `query`, so these match any of its words. */
+  /**
+   * True when nothing matched every word of `query`, so these match at least half of its words
+   * (ranked by how many).
+   */
   relaxedQuery?: boolean;
   /** True when more transcript lines matched than one search considers (5000, best first): narrow by session or query. */
+  transcriptCapped?: boolean;
+}
+
+/** A moment in `moments.search` with `compact: true`: text trimmed, entities as titles. */
+export interface CompactMoment {
+  kind: Moment['kind'];
+  id: string;
+  sessionId: string;
+  sessionTitle: string;
+  startSec: number;
+  endSec: number | null;
+  title: string;
+  /** At most ~160 characters. */
+  text: string;
+  /** Citations only: the citing page's title. */
+  page?: string;
+  entities: string[];
+}
+
+/** A clip in `moments.search` with `compact: true`. */
+export interface CompactMomentClip {
+  sessionId: string;
+  sessionTitle: string;
+  startSec: number;
+  endSec: number;
+  label: string;
+  /** How many moments were merged into it. */
+  moments: number;
+}
+
+export interface CompactMomentSearch {
+  total: number;
+  moments: CompactMoment[];
+  nextOffset: number | null;
+  clips?: CompactMomentClip[];
+  unknownEntities?: string[];
+  relaxedQuery?: boolean;
   transcriptCapped?: boolean;
 }
 

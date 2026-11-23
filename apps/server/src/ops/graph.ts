@@ -4,6 +4,7 @@
 // Nothing here is stored: every call reads the current data, so it never drifts from the wiki.
 
 import {
+  type CompactMoment,
   framesToAtSec,
   type GraphEntity,
   MAX_CLIP_SEC,
@@ -243,16 +244,40 @@ const queryWords = (query: string) => query.match(/[\p{L}\p{N}]+/gu) ?? [];
 /** Whether `query` has more than one word, so OR-ing them can find more. */
 const severalWords = (query: string) => queryWords(query).length > 1;
 
-/** ts_rank of each text against the query (0 when it doesn't match), in input order. */
-async function rankTexts(ctx: Ctx, query: string, texts: string[], any = false): Promise<number[]> {
-  if (!texts.length) return [];
-  const rows = await ctx.db.execute<{ i: string; r: number }>(sql`
-    select x.i, ts_rank(to_tsvector('english', x.t), q) as r
-    from jsonb_array_elements_text(${JSON.stringify(texts)}::jsonb) with ordinality as x(t, i),
-         ${tsQuery(query, any)} as q
-    where to_tsvector('english', x.t) @@ q`);
-  const ranks = new Array<number>(texts.length).fill(0);
-  for (const r of rows) ranks[Number(r.i) - 1] = Number(r.r);
+/** What a moment is ranked on: where it sits (page, headings, topic title) and what it says. */
+interface RankDoc {
+  head: string;
+  body: string;
+}
+
+/**
+ * ts_rank of each document against the query (0 when it doesn't match), in input order. The head
+ * (page title, headings, topic title) weighs most, so an item under "Age" ranks first for "age".
+ * With `any` (the relaxed fallback) a document must match at least half of the query's words, and
+ * its rank is scaled by the share it matches.
+ */
+async function rankTexts(ctx: Ctx, query: string, docs: RankDoc[], any = false): Promise<number[]> {
+  if (!docs.length) return [];
+  const rows = await ctx.db.execute<{ i: string; r: number; hits: number; n: number }>(sql`
+    with lx as (select unnest(tsvector_to_array(to_tsvector('english', ${query}))) as l),
+         x as (
+           select d.i,
+                  setweight(to_tsvector('english', d.v->>'head'), 'A') ||
+                  setweight(to_tsvector('english', d.v->>'body'), 'D') as v
+           from jsonb_array_elements(${JSON.stringify(docs)}::jsonb) with ordinality as d(v, i)
+         )
+    select x.i, ts_rank(x.v, q) as r,
+           (select count(*) from lx where x.v @@ to_tsquery('simple', quote_literal(lx.l)))::int as hits,
+           (select count(*) from lx)::int as n
+    from x, ${tsQuery(query, any)} as q
+    where x.v @@ q`);
+  const ranks = new Array<number>(docs.length).fill(0);
+  for (const r of rows) {
+    const n = Number(r.n);
+    const hits = Number(r.hits);
+    if (any && n > 1 && hits < Math.ceil(n / 2)) continue;
+    ranks[Number(r.i) - 1] = Number(r.r) * (any && n > 0 ? hits / n : 1);
+  }
   return ranks;
 }
 
@@ -412,8 +437,17 @@ const KIND_WEIGHT: Record<Moment['kind'], number> = {
   transcript: 1,
 };
 
-/** Moments of one session merged into ranges when they overlap or are at most `gap` apart. */
-function mergeClips(moments: Moment[], gap: number, pointSec: number): MomentClip[] {
+/**
+ * Moments of one session merged into ranges when they overlap or are at most `gap` apart, never
+ * past `maxSec`. A moment longer than `maxSec` (a whole-segment topic) is left out when tighter
+ * moments overlap it, and otherwise becomes a clip of its own.
+ */
+function mergeClips(
+  moments: Moment[],
+  gap: number,
+  pointSec: number,
+  maxSec: number,
+): MomentClip[] {
   const bySession = new Map<string, Moment[]>();
   for (const m of moments) {
     const list = bySession.get(m.sessionId);
@@ -422,12 +456,23 @@ function mergeClips(moments: Moment[], gap: number, pointSec: number): MomentCli
   }
   type Building = MomentClip & { titles: string[] };
   const clips: Building[] = [];
-  for (const list of bySession.values()) {
-    list.sort((a, b) => a.startSec - b.startSec);
+  const endOf = (m: Moment) => m.endSec ?? m.startSec + pointSec;
+  for (const all of bySession.values()) {
+    const tight = all.filter((m) => endOf(m) - m.startSec <= maxSec);
+    const broad = all.filter(
+      (m) =>
+        endOf(m) - m.startSec > maxSec &&
+        !tight.some((t) => t.startSec < endOf(m) && endOf(t) > m.startSec),
+    );
+    const list = [...tight, ...broad].sort((a, b) => a.startSec - b.startSec);
     let cur: Building | null = null;
     for (const m of list) {
-      const end = m.endSec ?? m.startSec + pointSec;
-      if (cur && m.startSec <= cur.endSec + gap) {
+      const end = endOf(m);
+      if (
+        cur &&
+        m.startSec <= cur.endSec + gap &&
+        Math.max(cur.endSec, end) - cur.startSec <= maxSec
+      ) {
         cur.endSec = Math.max(cur.endSec, end);
         cur.momentIds.push(m.id);
         cur.titles.push(m.title);
@@ -465,10 +510,29 @@ function mergeClips(moments: Moment[], gap: number, pointSec: number): MomentCli
   });
 }
 
+/** Longest moment text in compact results. */
+const COMPACT_TEXT = 160;
+
+function compactMoment(m: Moment): CompactMoment {
+  const text = m.text.length > COMPACT_TEXT ? `${m.text.slice(0, COMPACT_TEXT - 1)}…` : m.text;
+  return {
+    kind: m.kind,
+    id: m.id,
+    sessionId: m.sessionId,
+    sessionTitle: m.sessionTitle,
+    startSec: m.startSec,
+    endSec: m.endSec,
+    title: m.title,
+    text,
+    ...(m.source ? { page: m.source.pageTitle } : {}),
+    entities: m.entities.map((e) => e.title),
+  };
+}
+
 defineOp({
   name: 'moments.search',
   description:
-    'Find clip-ready moments of a show: time ranges in sessions, each with what happens there and the wiki pages (people, recurring bits, topics) it is about. Sources, by `kinds` (default all): "citation" — every citation on the show wiki, described by the sentence or list item that cites it and tagged with its page plus the [[pages]] linked in that block (in a table row: its own cell and the cells before it) (the richest source once a wiki exists); "topic" — chapters; "event" — logged events (no end: endSec null; "Note" events are editorial and never tagged with entities); "transcript" — transcript lines (only those matching query or naming an entity). Filter with `query` (full text, websearch syntax: words, "phrases", -exclude, or; when nothing matches every word, moments matching any word are returned with relaxedQuery: true), `entities` (page titles, aliases or ids — a moment must be about all of them; for topics, events and transcript lines that means naming each entity\'s title or an alias in its text) or both, and `sessionId`. With a query, best matches first; without, in episode order (episode numbers when every session has one, else dates) then time. Every moment has sessionId, startSec and endSec (seconds from the session start; archived sessions included) — cite them, as [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), or use them as compilation clips. `mergeGapSec` > 0 also returns `clips`: this page\'s moments merged per session where they overlap or are at most that many seconds apart (moments without an end count as `pointSec` long), each within compilations_create\'s limits (at least 1 s; ranges over 20 min split into parts) — pass them to compilations_create as they are. transcriptCapped: true means more transcript lines matched than one search considers (5000, best first): narrow it. Use graph_entity first to see an entity\'s aliases, related pages and the sessions it appears in. Paged: total, limit (default 30, max 500), offset / nextOffset.',
+    'Find clip-ready moments of a show: time ranges in sessions, each with what happens there and the wiki pages (people, recurring bits, topics) it is about. Sources, by `kinds` (default all): "citation" — every citation on the show wiki, described by the sentence or list item that cites it and tagged with its page plus the [[pages]] linked in that block (in a table row: its own cell and the cells before it) (the richest source once a wiki exists); "topic" — chapters; "event" — logged events (no end: endSec null; "Note" events are editorial and never tagged with entities); "transcript" — transcript lines (only those matching query or naming an entity). Filter with `query` (full text, websearch syntax: words, "phrases", -exclude, or; page titles and headings weigh most; when nothing matches every word, moments matching at least half the words are returned, ranked by how many, with relaxedQuery: true), `entities` (page titles, aliases or ids — a moment must be about all of them; for topics, events and transcript lines that means naming each entity\'s title or an alias in its text) or both, and `sessionId`. With a query, best matches first; without, in episode order (episode numbers when every session has one, else dates) then time. Every moment has sessionId, startSec and endSec (seconds from the session start; archived sessions included) — cite them, as [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), or use them as compilation clips. `mergeGapSec` > 0 also returns `clips`: this page\'s moments merged per session where they overlap or are at most that many seconds apart (moments without an end count as `pointSec` long), at most `maxClipSec` long (default 180; a moment longer than that, like a whole-segment topic, is left out where tighter moments cover it) and at least 1 s — pass them to compilations_create as they are; `clipsOnly: true` returns just the clips. Agents get compact results by default (text trimmed to 160 characters, entities and page as titles, clips with a moment count); pass `compact: false` for full moments (context, headings, entity ids). transcriptCapped: true means more transcript lines matched than one search considers (5000, best first): narrow it. Use graph_entity first to see an entity\'s aliases, related pages and the sessions it appears in. Paged: total, limit (default 30, max 500), offset / nextOffset.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
@@ -525,11 +589,12 @@ defineOp({
       const ranks = await rankTexts(
         ctx,
         input.query,
-        found.map((m) =>
-          [m.source?.pageTitle, ...(m.source?.headings ?? []), m.title, m.text]
+        found.map((m) => ({
+          head: [m.source?.pageTitle, ...(m.source?.headings ?? []), m.kind === 'topic' && m.title]
             .filter(Boolean)
             .join(' \n '),
-        ),
+          body: m.kind === 'topic' ? m.text : `${m.title} \n ${m.text}`,
+        })),
         any,
       );
       return found
@@ -552,16 +617,38 @@ defineOp({
     );
     const page = candidates.slice(input.offset, input.offset + input.limit);
     const next = input.offset + page.length;
-    return {
-      total: candidates.length,
-      moments: page,
-      nextOffset: next < candidates.length ? next : null,
-      ...(input.mergeGapSec > 0
-        ? { clips: mergeClips(page, input.mergeGapSec, input.pointSec) }
-        : {}),
+    const clips =
+      input.mergeGapSec > 0
+        ? mergeClips(page, input.mergeGapSec, input.pointSec, input.maxClipSec)
+        : undefined;
+    const moments = input.clipsOnly && clips ? [] : page;
+    const flags = {
       ...(relaxed ? { relaxedQuery: true } : {}),
       ...(transcriptCapped ? { transcriptCapped: true } : {}),
       ...(unknown.length ? { unknownEntities: unknown } : {}),
+    };
+    const nextOffset = next < candidates.length ? next : null;
+    if (input.compact)
+      return {
+        total: candidates.length,
+        moments: moments.map(compactMoment),
+        nextOffset,
+        ...(clips
+          ? {
+              clips: clips.map(({ momentIds, entities: _, ...c }) => ({
+                ...c,
+                moments: momentIds.length,
+              })),
+            }
+          : {}),
+        ...flags,
+      };
+    return {
+      total: candidates.length,
+      moments,
+      nextOffset,
+      ...(clips ? { clips } : {}),
+      ...flags,
     };
   },
 });

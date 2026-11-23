@@ -123,10 +123,63 @@ describe('moments.search', () => {
       new Set(['citation', 'topic', 'transcript']),
     );
     expect(res.moments[0]!.kind).toBe('topic');
+    // The 200 s topic is longer than maxClipSec (180) and tighter moments cover it: left out.
     expect(res.clips).toEqual([
-      expect.objectContaining({ sessionId: ep2.id, startSec: 1180, endSec: 1380 }),
+      expect.objectContaining({ sessionId: ep2.id, startSec: 1200, endSec: 1300 }),
     ]);
-    expect(res.clips![0]!.momentIds).toHaveLength(res.moments.length);
+    expect(res.clips![0]!.momentIds).toHaveLength(res.moments.length - 1);
+    const wide = await call(owner, 'moments.search', {
+      showId: show.id,
+      query: 'airport',
+      mergeGapSec: 30,
+      maxClipSec: 600,
+    });
+    expect(wide.clips).toEqual([expect.objectContaining({ startSec: 1180, endSec: 1380 })]);
+    // A tight cap starts a new clip instead of growing one past it.
+    const capped = await call(owner, 'moments.search', {
+      showId: show.id,
+      query: 'airport',
+      mergeGapSec: 30,
+      maxClipSec: 60,
+    });
+    expect(capped.clips!.length).toBeGreaterThan(1);
+    // Compact (the MCP default) and clips only.
+    const small = await call(owner, 'moments.search', {
+      showId: show.id,
+      query: 'airport',
+      mergeGapSec: 30,
+      clipsOnly: true,
+      compact: true,
+    });
+    expect(small.moments).toEqual([]);
+    expect(small.clips).toEqual([
+      {
+        sessionId: ep2.id,
+        sessionTitle: 'EP_02',
+        startSec: 1200,
+        endSec: 1300,
+        label: '00:20:00 (+2)',
+        moments: 3,
+      },
+    ]);
+    const listed = await call(owner, 'moments.search', {
+      showId: show.id,
+      entities: ['Carly'],
+      kinds: ['citation'],
+      compact: true,
+    });
+    expect(listed.moments[0]).toEqual({
+      kind: 'citation',
+      id: expect.any(String),
+      sessionId: expect.any(String),
+      sessionTitle: 'EP_01',
+      startSec: 600,
+      endSec: 660,
+      title: 'EP_01 00:10:00',
+      text: 'Carly reads a letter about a moose',
+      page: 'Pig Talk',
+      entities: ['Pig Talk', 'Carly'],
+    });
   });
 
   it('falls back to any word when no moment matches every word of the query', async () => {
@@ -137,6 +190,37 @@ describe('moments.search', () => {
     expect(res.moments.some((m) => m.text.includes('airport'))).toBe(true);
     const strict = await call(owner, 'moments.search', { showId: show.id, query: 'airport story' });
     expect(strict.relaxedQuery).toBeUndefined();
+    // Relaxed needs at least half the words: one of four is not enough.
+    const thin = await call(owner, 'moments.search', {
+      showId: show.id,
+      query: 'moose zebra giraffe walrus',
+    });
+    expect(thin.total).toBe(0);
+  });
+
+  it('weighs headings above text, so an item under "Age" ranks first for "age"', async () => {
+    const { owner, show, ep1 } = await knowledgeShow();
+    await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'person',
+      title: 'Joe',
+      bodyMd: [
+        '## Age',
+        '',
+        `- Joe says he is 48 [EP_01 00:02:00](/sessions/${ep1.id}?t=120&to=130)`,
+        '',
+        '## Music',
+        '',
+        `- Joe talks about the age of vinyl and an aging, ageing, aged record collection [EP_01 00:03:00](/sessions/${ep1.id}?t=180&to=190)`,
+      ].join('\n'),
+    });
+    const res = await call(owner, 'moments.search', {
+      showId: show.id,
+      query: 'age',
+      entities: ['Joe'],
+      kinds: ['citation'],
+    });
+    expect(res.moments[0]!.startSec).toBe(120);
   });
 
   it('clamps early events, keeps clips within compilation limits, matches whole words', async () => {

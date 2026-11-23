@@ -106,16 +106,22 @@ the block.
 
 ## 6. Search moments and clips
 
-| Question                             | Calls                                                                                                              |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| Who/what is X, where does it appear? | `graph_entity {showId, entity: "X"}`                                                                               |
-| Every moment about X                 | `moments_search {showId, entities: ["X"]}`                                                                         |
-| Where X and Y come up together       | `moments_search {showId, entities: ["X", "Y"]}`                                                                    |
-| A theme in anyone's words            | `moments_search {showId, query: "airport stories"}` (add `kinds` to narrow)                                        |
-| Exact quote                          | `moments_search {showId, query: "\"never again\"", kinds: ["transcript"]}`                                         |
-| A supercut                           | `moments_search {…, mergeGapSec: 20}` → pass `clips` (sessionId, startSec, endSec, label) to `compilations_create` |
-| Cite it in an answer                 | `[label](/sessions/<sessionId>?t=<startSec>&to=<endSec>)`                                                          |
+| Question                             | Calls                                                                                                                                                                              |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Who/what is X, where does it appear? | `graph_entity {showId, entity: "X"}`                                                                                                                                               |
+| Every moment about X                 | `moments_search {showId, entities: ["X"]}`                                                                                                                                         |
+| Where X and Y come up together       | `moments_search {showId, entities: ["X", "Y"]}`                                                                                                                                    |
+| A theme in anyone's words            | `moments_search {showId, query: "airport stories"}` (add `kinds` to narrow)                                                                                                        |
+| Exact quote                          | `moments_search {showId, query: "\"never again\"", kinds: ["transcript"]}`                                                                                                         |
+| A supercut                           | `moments_search {…, mergeGapSec: 20, clipsOnly: true}` → pass `clips` (sessionId, startSec, endSec, label) to `compilations_create`; clips stay under `maxClipSec` (default 180 s) |
+| Cite it in an answer                 | `[label](/sessions/<sessionId>?t=<startSec>&to=<endSec>)`                                                                                                                          |
 
 Whole-graph consumers (graph databases, vector stores) download
 `/api/shows/<showId>/export/graph.jsonld`, `graph.jsonl`, `moments.jsonl` or `chunks.jsonl` with a
 bearer token, or page through `graph_export` over MCP.
+
+`moments_search` returns compact moments to agents by default (text trimmed to 160 characters,
+entities as titles); pass `compact: false` for the full block, headings and entity ids. A query
+that matches no moment on every word falls back to moments matching at least half of its words
+(`relaxedQuery: true`); page titles and headings weigh more than text, so headings that say what a
+section is ("Age", "Pig Talk letters") make items findable.

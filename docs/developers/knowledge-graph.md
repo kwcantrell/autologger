@@ -18,16 +18,16 @@ drift from the wiki.
 
 Everything is a projection of stored data; nothing new is persisted.
 
-| Graph element                                         | Comes from                                                               |
-| ----------------------------------------------------- | ------------------------------------------------------------------------ |
-| **Show** node                                         | the show                                                                 |
+| Graph element                                         | Comes from                                                                                          |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **Show** node                                         | the show                                                                                            |
 | **Episode** nodes                                     | sessions (episode order: episode numbers when every session has one, else episode date; then title) |
-| **Entity** nodes: Person, Bit, Topic, Recap, Question | live wiki pages by kind, with aliases and the first paragraph as summary |
-| `PART_OF` episode → show                              | sessions                                                                 |
-| `RECAP_OF` recap → episode                            | a session page's `sessionId`                                             |
-| `LINKS_TO` page → page                                | `[[links]]` resolved through titles and aliases                          |
-| `APPEARS_IN` entity → episode (with a count)          | citations about the entity in that episode                               |
-| **Moments**                                           | wiki citations, topics, events (and transcript lines when searching)     |
+| **Entity** nodes: Person, Bit, Topic, Recap, Question | live wiki pages by kind, with aliases and the first paragraph as summary                            |
+| `PART_OF` episode → show                              | sessions                                                                                            |
+| `RECAP_OF` recap → episode                            | a session page's `sessionId`                                                                        |
+| `LINKS_TO` page → page                                | `[[links]]` resolved through titles and aliases                                                     |
+| `APPEARS_IN` entity → episode (with a count)          | citations about the entity in that episode                                                          |
+| **Moments**                                           | wiki citations, topics, events (and transcript lines when searching)                                |
 
 ### Moments — the unit of search
 
@@ -57,11 +57,11 @@ The block parser lives in `packages/contract/src/knowledge.ts` (`wikiBlocks`, `w
 
 ## Ops (HTTP RPC and MCP)
 
-| Op               | MCP tool         | What it does                                                                                                                                                                                                                                                                      |
-| ---------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `moments.search` | `moments_search` | Find moments by `query` (full text), `entities` (titles, aliases or page ids — all must match), `sessionId` and `kinds`. Ranked with a query, else in episode order. `mergeGapSec` also returns `clips`: the page's moments merged per session — ready for `compilations.create`. |
-| `graph.entity`   | `graph_entity`   | One entity: kind, aliases, summary, moment count, the episodes it appears in (with its first moment in each) and related pages (links, backlinks, co-cited), strongest first.                                                                                                     |
-| `graph.export`   | `graph_export`   | The graph as paged JSONL rows (`nodes`, `edges`, `moments`, `chunks`, or `all`) or one JSON-LD document.                                                                                                                                                                          |
+| Op               | MCP tool         | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `moments.search` | `moments_search` | Find moments by `query` (full text), `entities` (titles, aliases or page ids — all must match), `sessionId` and `kinds`. Ranked with a query (page titles and headings weigh most; a query no moment matches in full falls back to at least half its words), else in episode order. `mergeGapSec` also returns `clips`: the page's moments merged per session, at most `maxClipSec` long (whole-segment topics are dropped where tighter moments cover them) — ready for `compilations.create`; `clipsOnly` returns only those. `compact` (the MCP default) trims each moment to ids, times, 160 characters of text and entity titles. |
+| `graph.entity`   | `graph_entity`   | One entity: kind, aliases, summary, moment count, the episodes it appears in (with its first moment in each) and related pages (links, backlinks, co-cited), strongest first.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `graph.export`   | `graph_export`   | The graph as paged JSONL rows (`nodes`, `edges`, `moments`, `chunks`, or `all`) or one JSON-LD document.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ## Export files
 

@@ -10,6 +10,7 @@ import type {
   AudioSegment,
   Category,
   Change,
+  CompactMomentSearch,
   CompanionDevice,
   Compilation,
   Dashboard,
@@ -660,6 +661,15 @@ export const opInputs = {
       mergeGapSec: z.number().min(0).max(600).default(0),
       /** Length given to moments without an end (events, open citations) when merging into clips. */
       pointSec: z.number().min(1).max(600).default(30),
+      /**
+       * Longest clip merging may build. Moments longer than this (e.g. a whole-segment topic) are
+       * left out of clips when tighter moments cover them, and merging starts a new clip rather
+       * than grow one past it.
+       */
+      maxClipSec: z.number().min(10).max(1200).default(180),
+      /** With mergeGapSec: return only the clips (moments: []). */
+      clipsOnly: z.boolean().default(false),
+      compact,
     })
     .refine((v) => v.query || v.entities, { message: 'Pass query, entities or both.' }),
   'graph.entity': z.object({
@@ -1035,6 +1045,7 @@ export interface CompactOpOutputs {
   'dashboards.updateWidgets': CompactDashboard;
   'wiki.upsert': CompactWikiPage;
   'wiki.patch': CompactWikiPage;
+  'moments.search': CompactMomentSearch;
 }
 
 /**
