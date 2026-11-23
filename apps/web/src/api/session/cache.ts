@@ -11,6 +11,7 @@ import type {
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import { qk } from '../queries';
 import { removeFromList, SESSION_ENTITIES, upsertList } from './entities';
+import { recordPatch } from './journal';
 
 type WithId = { id: string };
 
@@ -68,19 +69,12 @@ function patchList(
   sort: ((a: WithId, b: WithId) => number) | undefined,
 ) {
   // Upserts and deletes by id are idempotent, so the same patch can be applied twice.
-  const patch = () => {
-    if (qc.getQueryData(key) === undefined) return;
-    if (op === 'delete') qc.setQueryData<WithId[]>(key, (l) => removeFromList(l, id));
-    else qc.setQueryData<WithId[]>(key, (l) => upsertList(l, data as WithId, sort));
-  };
-  patch();
-  // A fetch in flight may have read the list before this change and would overwrite the patch
-  // when it lands: re-apply it on the fetched data instead of refetching again (a refetch per push
-  // would chain under a busy log). Not loaded and not fetching: the first fetch will be current.
-  if (qc.getQueryState(key)?.fetchStatus === 'fetching')
-    void qc
-      .refetchQueries({ queryKey: key, exact: true }, { cancelRefetch: false })
-      .then(patch, () => {});
+  const patch = (l: WithId[] | undefined) =>
+    op === 'delete' ? removeFromList(l, id) : upsertList(l, data as WithId, sort);
+  if (qc.getQueryData(key) !== undefined) qc.setQueryData<WithId[]>(key, patch);
+  // A fetch in flight may have read the list before this change: it replays the patch onto
+  // what it fetched (see journal.ts).
+  recordPatch(qc, key, patch);
 }
 
 /** Apply a session socket message (or a transport op result, as a `transport` message). */
