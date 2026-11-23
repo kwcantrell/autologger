@@ -27,6 +27,11 @@ export const DashboardQuery = z.discriminatedUnion('name', [
     limit: z.number().int().min(1).max(500).default(100),
   }),
   z.object({ name: z.literal('summary_stats') }),
+  /** One `{ count }` row: events in these categories (0 when there are none). For a stat. */
+  z.object({
+    name: z.literal('category_count'),
+    categories: z.array(z.string().min(1)).min(1).max(50),
+  }),
 ]);
 export type DashboardQuery = z.infer<typeof DashboardQuery>;
 
