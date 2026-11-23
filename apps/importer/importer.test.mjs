@@ -352,6 +352,15 @@ describe('autologger-import', () => {
     });
     const ytdlp = (await toolCalls()).find((c) => c.includes('--skip-download'));
     expect(ytdlp.slice(1, 3)).toEqual(['--cookies', join(process.cwd(), 'c.txt')]);
+    expect(state.calls[2].input.transcribe).toBeUndefined();
+  });
+
+  it('--no-transcribe uploads the audio without transcription', async () => {
+    const r = await cli(['playlist', PLAYLIST, '--show', 'shw_1', '--no-transcribe']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('not transcribed (--no-transcribe)');
+    const done = state.calls.filter((c) => c.op === 'media.completeUpload');
+    expect(done.map((c) => c.input.transcribe)).toEqual([false, false]);
   });
 
   it('builds a compilation locally like the worker and uploads it; resumes encoded clips', async () => {
