@@ -12,11 +12,11 @@ import { FileTextIcon, TriangleAlertIcon } from 'lucide-react';
 import { useId, useRef, useState } from 'react';
 import { qk, useOpMutation, useTranscript } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
-import { NativeSelect } from '@/components/NativeSelect';
 import { fmtSec } from '@/lib/timecode';
 import { Alert, AlertDescription, AlertTitle } from '@/shared/components/ui/alert';
 import { Button } from '@/shared/components/ui/button';
 import { Field, FieldDescription, FieldLabel } from '@/shared/components/ui/field';
+import { NativeSelect, NativeSelectOption } from '@/shared/components/ui/native-select';
 import { RadioGroup, RadioGroupItem } from '@/shared/components/ui/radio-group';
 import { Dialog, DialogActions } from '@/shared/ui/Dialog';
 import { useWorkspace } from './context';
@@ -209,11 +209,11 @@ export function TranscriptImportDialog({
               setResult(null);
             }}
           >
-            <option value={SESSION}>Whole session</option>
+            <NativeSelectOption value={SESSION}>Whole session</NativeSelectOption>
             {recordings.map((s) => (
-              <option key={s.id} value={s.id}>
+              <NativeSelectOption key={s.id} value={s.id}>
                 {recordingLabel(s)}
-              </option>
+              </NativeSelectOption>
             ))}
           </NativeSelect>
           <FieldDescription>

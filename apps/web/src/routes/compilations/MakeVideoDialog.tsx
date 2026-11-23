@@ -14,6 +14,11 @@ import { fmtShort } from '@/lib/timecode';
 import { showToast } from '@/shared/components/Toast';
 import { Button } from '@/shared/components/ui/button';
 import { Checkbox } from '@/shared/components/ui/checkbox';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleSummary,
+} from '@/shared/components/ui/collapsible';
 import { Field, FieldLabel } from '@/shared/components/ui/field';
 import { Input } from '@/shared/components/ui/input';
 import { Spinner } from '@/shared/components/ui/spinner';
@@ -260,12 +265,14 @@ function MakeVideoForm({
       </section>
 
       {plan.skipped.length > 0 && (
-        <details className="min-w-0 text-sm">
-          <summary className="cursor-pointer text-si-muted hover:text-si-fg">
+        <Collapsible className="min-w-0 text-sm">
+          <CollapsibleSummary className="text-si-muted hover:text-si-fg">
             {plan.skipped.length} left out
-          </summary>
-          <SkippedList skipped={plan.skipped} />
-        </details>
+          </CollapsibleSummary>
+          <CollapsibleContent hiddenUntilFound>
+            <SkippedList skipped={plan.skipped} />
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       <p className="m-0 text-xs text-si-dim">
