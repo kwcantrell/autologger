@@ -1,6 +1,7 @@
 import { normTitle, wikiLinkTargets } from '@autologger/contract';
 import { asc, eq } from 'drizzle-orm';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { newId } from '../core/ids.ts';
 import type { Actor } from '../core/op.ts';
 import { db, schema } from '../db/client.ts';
 import { backfillWikiLinks, wikiNames } from '../ops/wiki.ts';
@@ -803,5 +804,73 @@ describe('question pages and citations', () => {
     const [patch] = await call(owner, 'changes.list', { showId: show.id });
     await call(owner, 'changes.revert', { changeId: patch!.id });
     expect((await citing(session.id)).find(([t]) => t === 'Recap')?.[1]).toHaveLength(2);
+  });
+});
+
+describe('wiki edits based on a stale revision', () => {
+  async function pageAt2() {
+    const fx = await studio();
+    const page = await call(fx.owner, 'wiki.upsert', {
+      showId: fx.show.id,
+      kind: 'topic',
+      title: 'Edit race',
+      bodyMd: 'Line one.',
+    });
+    // An agent appends while the human's editor still holds r1.
+    await call(asAgent(fx.owner, 'Claude Code'), 'wiki.patch', {
+      pageId: page.id,
+      append: 'Agent paragraph.',
+    });
+    return { ...fx, page };
+  }
+  const humanSave = (fx: Awaited<ReturnType<typeof pageAt2>>, baseRevision?: number) => ({
+    showId: fx.show.id,
+    pageId: fx.page.id,
+    kind: 'topic' as const,
+    title: 'Edit race',
+    bodyMd: 'Line one. Human line.',
+    ...(baseRevision === undefined ? {} : { baseRevision }),
+  });
+
+  it('refuses a stale baseRevision with conflict naming the current revision, saving nothing', async () => {
+    const fx = await pageAt2();
+    const err = await call(fx.owner, 'wiki.upsert', humanSave(fx, 1)).catch((e: Error) => e);
+    expect(err).toMatchObject({ code: 'conflict' });
+    expect((err as Error).message).toMatch(/now revision 2, last changed by Claude Code/);
+    await failsWith(
+      call(asAgent(fx.owner), 'wiki.patch', { pageId: fx.page.id, append: 'x', baseRevision: 1 }),
+      'conflict',
+    );
+    const now = await call(fx.owner, 'wiki.get', { pageId: fx.page.id });
+    expect(now).toMatchObject({ revision: 2, bodyMd: 'Line one.\nAgent paragraph.' });
+    expect(await call(fx.owner, 'wiki.revisions', { pageId: fx.page.id })).toHaveLength(2);
+
+    // Undoing the agent's edit puts the page back at r1, so an edit based on r1 saves again.
+    const [agentEdit] = await call(fx.owner, 'changes.list', { showId: fx.show.id });
+    await call(fx.owner, 'changes.revert', { changeId: agentEdit!.id });
+    expect(await call(fx.owner, 'wiki.upsert', humanSave(fx, 1))).toMatchObject({
+      revision: 3,
+      bodyMd: 'Line one. Human line.',
+    });
+  });
+
+  it('saves when baseRevision matches, and without it as before (last write wins)', async () => {
+    const fx = await pageAt2();
+    const saved = await call(fx.owner, 'wiki.upsert', humanSave(fx, 2));
+    expect(saved).toMatchObject({ revision: 3, bodyMd: 'Line one. Human line.' });
+    const patched = await call(fx.owner, 'wiki.patch', {
+      pageId: fx.page.id,
+      append: 'More.',
+      baseRevision: 3,
+    });
+    expect(patched.revision).toBe(4);
+    const blind = await call(fx.owner, 'wiki.upsert', { ...humanSave(fx), bodyMd: 'Overwritten.' });
+    expect(blind).toMatchObject({ revision: 5, bodyMd: 'Overwritten.' });
+  });
+
+  it('checks access first: an outsider gets not_found, not the conflict', async () => {
+    const fx = await pageAt2();
+    const outsider = await makeUser(`out-${newId('x')}@example.com`);
+    await failsWith(call(outsider, 'wiki.upsert', humanSave(fx, 1)), 'not_found');
   });
 });
