@@ -197,8 +197,18 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
   ]);
 
   const ctx: WorkspaceCtx = useMemo(
-    () => ({ session, caps, canWrite, clock, player, seek, setTab: switchTab, revealEvent }),
-    [session, caps, canWrite, clock, player, seek, switchTab, revealEvent],
+    () => ({
+      sessionId,
+      showId: session.showId,
+      caps,
+      canWrite,
+      clock,
+      player,
+      seek,
+      setTab: switchTab,
+      revealEvent,
+    }),
+    [sessionId, session.showId, caps, canWrite, clock, player, seek, switchTab, revealEvent],
   );
 
   const eventsList = events.data ?? [];
@@ -275,12 +285,13 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
                       </div>
                     }
                   >
-                    {t.id === 'events' && <EventsTab session={session} flash={flashEventId} />}
-                    {t.id === 'transcript' && <TranscriptTab session={session} />}
-                    {t.id === 'topics' && <TopicsTab session={session} />}
-                    {t.id === 'dashboards' && <DashboardsTab session={session} />}
-                    {t.id === 'agents' && <AgentsTab session={session} />}
-                    {t.id === 'export' && <ExportTab session={session} />}
+                    {/* Memoized; each reads the session fields it needs (useSessionSlice). */}
+                    {t.id === 'events' && <EventsTab flash={flashEventId} />}
+                    {t.id === 'transcript' && <TranscriptTab />}
+                    {t.id === 'topics' && <TopicsTab />}
+                    {t.id === 'dashboards' && <DashboardsTab />}
+                    {t.id === 'agents' && <AgentsTab />}
+                    {t.id === 'export' && <ExportTab />}
                   </Suspense>
                 )}
               </TabsContent>

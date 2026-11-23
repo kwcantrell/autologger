@@ -1,13 +1,13 @@
 // Dashboards tab: the session's agent-authored dashboards, rendered from their declarative spec.
 
-import type { Dashboard, Session } from '@autologger/contract';
+import type { Dashboard } from '@autologger/contract';
 import { Braces, TriangleAlert } from 'lucide-react';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { useDashboards } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { useSessionMutation } from '@/api/session/writes';
 import { settingsOpen } from '@/lib/store';
-import { useWorkspace } from '@/session/context';
+import { useSessionSlice, useWorkspace } from '@/session/context';
 import { SpecEditorDialog } from '@/session/dashboards/SpecEditor';
 import { WidgetGrid } from '@/session/dashboards/widgets';
 import {
@@ -31,7 +31,9 @@ import { Tooltip } from '@/shared/ui/Tooltip';
 const DATE = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const fmtDate = (iso: string) => DATE.format(new Date(iso));
 
-export function DashboardsTab({ session }: { session: Session }) {
+export const DashboardsTab = memo(function DashboardsTab() {
+  const session = useSessionSlice((s) => ({ id: s.id }));
+
   const { canWrite } = useWorkspace();
   const list = useDashboards(session.id);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -159,7 +161,7 @@ export function DashboardsTab({ session }: { session: Session }) {
       {promptElement}
     </FeedShell>
   );
-}
+});
 
 // One line tab per dashboard (Tabs variant="line": arrow keys move between them). Dashboard
 // titles are agent-written data, so the tabs keep the UI face in sentence case at 0.85rem rather

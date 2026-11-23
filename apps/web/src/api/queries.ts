@@ -148,6 +148,11 @@ export const useSessions = (showId: string | undefined) =>
     { showId, includeArchived: true, limit: 500 },
     { enabled: !!showId },
   );
+/** The session query (sessions.get), for observers that select a slice of it. */
+export const sessionQuery = (sessionId: string) => ({
+  queryKey: qk.session(sessionId),
+  queryFn: () => rpc('sessions.get', { sessionId }),
+});
 export const useSession = (sessionId: string | undefined) =>
   useOpQuery(
     qk.session(sessionId ?? ''),
