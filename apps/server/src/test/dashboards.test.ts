@@ -82,3 +82,27 @@ describe('dashboard spec validation', () => {
     expect(await call(owner, 'dashboards.get', { dashboardId: id })).toMatchObject({ id });
   });
 });
+
+describe('dashboard queries', () => {
+  it('reports event atSec rounded to ms, the same value events_list gives', async () => {
+    const { owner, session } = await studio();
+    // 48.97 s snaps to a whole frame (48.9583… at the default 24 fps).
+    await call(owner, 'events.create', { sessionId: session.id, category: 'Laugh', atSec: 48.97 });
+    const [listed] = await call(owner, 'events.list', { sessionId: session.id });
+    const rows = await call(owner, 'dashboards.query', {
+      sessionId: session.id,
+      query: { name: 'events', limit: 10 },
+    });
+    expect(listed!.atSec).toBe(48.958);
+    expect(rows).toMatchObject([{ atSec: 48.958, category: 'Laugh' }]);
+
+    const outsider = await makeUser('outsider@example.com');
+    await failsWith(
+      call(outsider, 'dashboards.query', {
+        sessionId: session.id,
+        query: { name: 'events', limit: 10 },
+      }),
+      'not_found',
+    );
+  });
+});
