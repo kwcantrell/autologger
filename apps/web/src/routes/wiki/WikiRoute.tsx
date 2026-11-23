@@ -20,15 +20,18 @@ import { NewWikiPageDialog } from './NewWikiPageDialog';
 import { fmtDate, fold, wikiHref } from './wikiShared';
 
 const TABS: { id: WikiKind; label: string; empty: string }[] = [
-  { id: 'person', label: 'People', empty: 'No people yet.' },
-  { id: 'topic', label: 'Topics', empty: 'No topics yet.' },
-  { id: 'bit', label: 'Running bits', empty: 'No running bits yet.' },
-  { id: 'session', label: 'Sessions', empty: 'No session pages yet.' },
-  { id: 'question', label: 'Questions', empty: 'No questions yet.' },
+  { id: 'person', label: 'People', empty: 'No people yet' },
+  { id: 'topic', label: 'Topics', empty: 'No topics yet' },
+  { id: 'bit', label: 'Running bits', empty: 'No running bits yet' },
+  { id: 'session', label: 'Sessions', empty: 'No session pages yet' },
+  { id: 'question', label: 'Questions', empty: 'No questions yet' },
 ];
 
 const ROW =
   'flex w-full min-w-0 flex-col items-start gap-0.5 rounded-ctl px-3 py-2.5 text-left no-underline outline-none transition-colors hover:bg-si-panel-2 focus-visible:ring-[3px] focus-visible:ring-ring/50';
+
+/** Titles in reading order: numbers compare as numbers ("Chapter 2" before "Chapter 10"). */
+const TITLE_ORDER = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 function matches(page: WikiPageSummary, needle: string) {
   return !needle || [page.title, ...page.aliases].some((s) => fold(s).includes(needle));
@@ -76,7 +79,13 @@ function PageList({
   filterText: string;
 }) {
   const { data, isPending, isError, error, refetch, isRefetching } = useWikiList(showId);
-  const ofKind = useMemo(() => (data ?? []).filter((p) => p.kind === tab.id), [data, tab.id]);
+  const ofKind = useMemo(
+    () =>
+      (data ?? [])
+        .filter((p) => p.kind === tab.id)
+        .sort((a, b) => TITLE_ORDER.compare(a.title, b.title)),
+    [data, tab.id],
+  );
   const pages = useMemo(() => ofKind.filter((p) => matches(p, needle)), [ofKind, needle]);
 
   if (isError)
@@ -98,13 +107,15 @@ function PageList({
     );
   if (ofKind.length === 0)
     return (
-      <div className="flex flex-col items-center gap-1 py-10 text-center">
-        <p className="m-0 text-sm text-si-muted">{tab.empty}</p>
-        <p className="m-0 max-w-[26rem] text-xs text-si-dim">
-          Pages are written by operators here with “New page”, or by agents connected over MCP. Link
-          pages to each other with [[Title]].
-        </p>
-      </div>
+      <Empty className="py-10">
+        <EmptyHeader className="max-w-[26rem]">
+          <EmptyTitle>{tab.empty}</EmptyTitle>
+          <EmptyDescription>
+            Pages are written by operators here with “New page”, or by agents connected over MCP.
+            Link pages to each other with [[Title]].
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   if (pages.length === 0)
     return (

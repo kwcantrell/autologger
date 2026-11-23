@@ -73,14 +73,16 @@ function CompilationList({ showId, canWrite }: { showId: string; canWrite: boole
     );
   if (data.length === 0)
     return (
-      <div className="flex flex-col items-center gap-1 py-10 text-center">
-        <p className="m-0 text-sm text-si-muted">No compilations yet.</p>
-        <p className="m-0 max-w-[30rem] text-xs text-si-dim">
-          Use “Make video” on a wiki page with citations or on a session’s Topics tab, or ask an
-          agent connected over MCP — for example “make a video of every time we talked about the
-          dog”. Only sessions imported from YouTube can be compiled.
-        </p>
-      </div>
+      <Empty className="py-10">
+        <EmptyHeader className="max-w-[30rem]">
+          <EmptyTitle>No compilations yet</EmptyTitle>
+          <EmptyDescription>
+            Use “Make video” on a wiki page with citations or on a session’s Topics tab, or ask an
+            agent connected over MCP — for example “make a video of every time we talked about the
+            dog”. Only sessions imported from YouTube can be compiled.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   return (
     <>
