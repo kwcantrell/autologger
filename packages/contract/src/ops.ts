@@ -266,6 +266,8 @@ export const opInputs = {
     toSec: sec.optional(),
     format: z.enum(['lines', 'compact']).default('lines'),
     ids: z.boolean().default(false),
+    /** compact only: seconds between inline `[@…]` stamps; 0 stamps every segment. */
+    stampEverySec: z.number().min(0).max(3600).default(60),
   }),
   'transcript.updateSegment': z.object({
     segmentId: id,
@@ -769,6 +771,8 @@ export interface OpOutputs {
     totalSegments: number;
     /** End of the last segment in the session, seconds from session start. */
     durationSec: number;
+    /** As Session.transcriptStatus: done with 0 totalSegments means no speech was found. */
+    transcriptStatus: Session['transcriptStatus'];
   };
   'transcript.updateSegment': TranscriptSegment;
   'transcript.find':
