@@ -576,21 +576,16 @@ defineOp({
         found.push(
           ...k.citations.filter((m) => !input.sessionId || m.sessionId === input.sessionId),
         );
-      const free: Moment[] = [];
-      if (kinds.has('topic')) free.push(...(await topicMoments(ctx, k, sessionIds)));
-      if (kinds.has('event')) free.push(...(await eventMoments(ctx, k, sessionIds)));
-      if (kinds.has('transcript')) {
-        const lines = await transcriptMoments(
-          ctx,
-          k,
-          sessionIds,
-          input.query,
-          input.query ? [] : entityNames,
-          any,
-        );
-        free.push(...lines.moments);
-        transcriptCapped = lines.capped;
-      }
+      // Independent reads: run them together.
+      const [topicRows, eventRows, lines] = await Promise.all([
+        kinds.has('topic') ? topicMoments(ctx, k, sessionIds) : [],
+        kinds.has('event') ? eventMoments(ctx, k, sessionIds) : [],
+        kinds.has('transcript')
+          ? transcriptMoments(ctx, k, sessionIds, input.query, input.query ? [] : entityNames, any)
+          : { moments: [], capped: false },
+      ]);
+      if (kinds.has('transcript')) transcriptCapped = lines.capped;
+      const free: Moment[] = [...topicRows, ...eventRows, ...lines.moments];
       for (const m of free) m.entities = isNote(m) ? [] : matchNames(m.text);
       found.push(...free);
       if (entityIds.length)
@@ -811,10 +806,11 @@ async function graphRows(ctx: Ctx, k: Knowledge) {
 
   const sessionIds = [...k.sessions.keys()];
   const matchNames = nameMatcher(k);
-  const free = [
-    ...(await topicMoments(ctx, k, sessionIds)),
-    ...(await eventMoments(ctx, k, sessionIds)),
-  ];
+  const [topicRows, eventRows] = await Promise.all([
+    topicMoments(ctx, k, sessionIds),
+    eventMoments(ctx, k, sessionIds),
+  ]);
+  const free = [...topicRows, ...eventRows];
   for (const m of free) m.entities = isNote(m) ? [] : matchNames(m.text);
   const order = (m: Moment) => k.sessions.get(m.sessionId)!.order;
   const moments = [...k.citations, ...free]
