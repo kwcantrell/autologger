@@ -58,6 +58,7 @@ describe('MCP tolerance for stale client tool lists', () => {
     const created = await callTool('events_createMany', {
       sessionId: session.id,
       events: [{ category: 'Note', atSec: '12.5', value: '42' }],
+      compact: 'false',
     });
     expect(created.isError).toBe(false);
     const [event] = JSON.parse(created.text);
@@ -78,6 +79,43 @@ describe('MCP tolerance for stale client tool lists', () => {
     const plain = await callTool('transcript_find', { sessionId: session.id });
     expect(plain.isError).toBe(true);
     expect(plain.text).not.toContain('tool list');
+  });
+});
+
+describe('MCP input schemas', () => {
+  it('emit repeated sub-schemas once under $defs and still coerce through them', async () => {
+    const tools = mcpTools().tools;
+    const save = tools.find((t) => t.name === 'dashboards_save')!.inputSchema;
+    expect(Object.keys(save.$defs as object).sort()).toEqual([
+      'DashboardQuery',
+      'ValueFormat',
+      'WidgetData',
+    ]);
+    // A def used once is inlined: dashboards_query has no $defs.
+    const query = tools.find((t) => t.name === 'dashboards_query')!.inputSchema;
+    expect(query.$defs).toBeUndefined();
+    expect(JSON.stringify(query)).not.toContain('$ref');
+
+    const { owner, session } = await studio();
+    const callTool = await connect(asAgent(owner));
+    const res = await callTool('dashboards_save', {
+      sessionId: session.id,
+      compact: 'true',
+      spec: {
+        title: 'Overview',
+        widgets: [
+          {
+            id: 'o',
+            type: 'line',
+            x: 'atSec',
+            y: 'count',
+            query: { name: 'events_over_time', bucketSec: '60' },
+          },
+        ],
+      },
+    });
+    expect(res.isError).toBe(false);
+    expect(JSON.parse(res.text)).toEqual({ id: expect.any(String), revision: 1 });
   });
 });
 

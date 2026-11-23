@@ -560,6 +560,7 @@ describe('question pages and citations', () => {
       sessionId: session.id,
       title: 'Ep 3 recap',
       bodyMd: `${cite('t=6100&to=6185')} ${cite('t=6100&to=6200')} ${cite('t=6100&to=6184.5')}`,
+      compact: false,
     });
     const saved = `${cite('t=6100&to=6184.8')} ${cite('t=6100&to=6200')} ${cite('t=6100&to=6184.5')}`;
     expect(page.bodyMd).toBe(saved);

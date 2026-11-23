@@ -6,7 +6,7 @@ import {
   type TranscriptJob,
   transportElapsed,
 } from '@autologger/contract';
-import { and, desc, eq, inArray, isNotNull, isNull, type SQL, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, type SQL, sql } from 'drizzle-orm';
 import {
   readableShowCondition,
   requireSession,
@@ -23,7 +23,7 @@ import { toJob, withJobEstimates } from '../media/jobs.ts';
 import { deletePrefix, sessionPrefix, showPrefix } from '../media/s3.ts';
 import { iso, userRefs } from './map.ts';
 
-const { events, jobs, sessions, shows } = schema;
+const { categories, events, jobs, sessions, shows } = schema;
 
 const aggregates = {
   eventCount: sql<number>`(select count(*)::int from events e where e.session_id = ${sessions.id})`,
@@ -199,13 +199,37 @@ defineOp({
 defineOp({
   name: 'sessions.get',
   description:
-    'One session: metadata, transport state, frame rate, event count and transcript status. transcriptJob is the queued or running background job that will produce the transcript, or null when none is (then transcriptStatus is final: done, partial, failed or none; done only means transcription finished — it may have found no speech, e.g. a music-only video, which transcript_text reports as "(transcript is empty: no speech detected)"): {id, kind, status, queuePosition?, etaSec?}. kind is "transcribe", or "youtube_import" while a YouTube import is still downloading (its transcription is queued when the download finishes). With several (one per audio segment) it is the one expected to finish last. queuePosition means the same as in jobs.list; etaSec is a rough estimate in seconds until the transcript is ready: for a youtube_import it includes the expected transcription time when the video length was read at import (media.importPlaylist and media.importYoutube read it; if YouTube did not say, it covers the download only, an underestimate); wait for the job with jobs.list (sessionId, waitSec, kinds ["youtube_import","transcribe"]). Waveform jobs (timeline drawing only) never count as transcriptJob.',
+    'One session: metadata, transport state, frame rate, event count and transcript status. transcriptJob is the queued or running background job that will produce the transcript, or null when none is (then transcriptStatus is final: done, partial, failed or none; done only means transcription finished — it may have found no speech, e.g. a music-only video, which transcript_text reports as "(transcript is empty: no speech detected)"): {id, kind, status, queuePosition?, etaSec?}. kind is "transcribe", or "youtube_import" while a YouTube import is still downloading (its transcription is queued when the download finishes). With several (one per audio segment) it is the one expected to finish last. queuePosition means the same as in jobs.list; etaSec is a rough estimate in seconds until the transcript is ready: for a youtube_import it includes the expected transcription time when the video length was read at import (media.importPlaylist and media.importYoutube read it; if YouTube did not say, it covers the download only, an underestimate); wait for the job with jobs.list (sessionId, waitSec, kinds ["youtube_import","transcribe"]). Waveform jobs (timeline drawing only) never count as transcriptJob. For agents it also lists the show\'s event buttons in hotkey order as categories: [{ id, name, kind, options?, onLabel?, offLabel? }] — pass a name as `category` to events_create / events_createMany (a "dropdown" lists its options and a "toggle" its onLabel / offLabel: the values it takes as `value`), so no categories_list call is needed.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId }): Promise<SessionDetail> {
     await requireSession(ctx, sessionId, 'read');
     const session = await getSession(ctx, sessionId);
-    return { ...session, transcriptJob: await transcriptJob(ctx, sessionId) };
+    const detail = { ...session, transcriptJob: await transcriptJob(ctx, sessionId) };
+    // Agents log events by button name; the web keeps its own live categories.list.
+    if (ctx.actor.via !== 'mcp') return detail;
+    const buttons = await ctx.db
+      .select({
+        id: categories.id,
+        name: categories.name,
+        kind: categories.kind,
+        options: categories.options,
+        onLabel: categories.onLabel,
+        offLabel: categories.offLabel,
+      })
+      .from(categories)
+      .where(eq(categories.showId, session.showId))
+      .orderBy(asc(categories.position));
+    return {
+      ...detail,
+      categories: buttons.map(({ options, onLabel, offLabel, ...b }) =>
+        b.kind === 'dropdown'
+          ? { ...b, options }
+          : b.kind === 'toggle'
+            ? { ...b, onLabel, offLabel }
+            : b,
+      ),
+    };
   },
 });
 

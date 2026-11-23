@@ -1,4 +1,5 @@
 import {
+  type CompactEventsAck,
   formatFrames,
   formatIssues,
   opInputs,
@@ -153,7 +154,7 @@ export async function publishEvents(
 defineOp({
   name: 'events.list',
   description:
-    'All events logged in a session, in timecode order. Each event has `atSec` (seconds from the session start, rounded to ms; lines up with transcript_text @seconds and is the same value events.create/update accept as atSec) and `timecodeFrames` (frame count on the session clock, including startOffsetFrames — see sessions.get for frameRate). atSec is null only when the event has no timecode. Pass `compact: true` (recommended for agents, e.g. to check an events_createMany batch) to get only `[{ id, atSec, category, message }]` per event.',
+    'All events logged in a session, in timecode order. Each event has `atSec` (seconds from the session start, rounded to ms; lines up with transcript_text @seconds and is the same value events_create/update accept as atSec) and `timecodeFrames` (frame count on the session clock, including startOffsetFrames — see sessions_get for frameRate). atSec is null only when the event has no timecode. Agents get `[{ id, atSec, category, message }]` per event by default (compact); pass `compact: false` for full events.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, categoryIds, source, compact }) {
@@ -179,7 +180,7 @@ defineOp({
 defineOp({
   name: 'events.create',
   description:
-    'Log one event. Pick the button by categoryId or category name (unknown names become free labels). Place it with `timecode` (HH:MM:SS:FF on the session clock) or `atSec` (seconds from the start, which lines up with transcript times); without either it lands at the live transport position. Times are stored as whole frames: atSec snaps to the nearest frame of the session’s frame rate (frameRate in sessions_get; at 30 fps 69.975 → 69.967), and the returned atSec (rounded to ms, as in events_list) is the stored value. A timecode before the session start timecode (sessions_get) is refused with bad_request, like a negative atSec.',
+    'Log one event. Pick the button by categoryId or category name (case-insensitive; button names in sessions_get categories — unknown names become free labels). Place it with `timecode` (HH:MM:SS:FF on the session clock) or `atSec` (seconds from the start, which lines up with transcript times); without either it lands at the live transport position. Times are stored as whole frames: atSec snaps to the nearest frame of the session’s frame rate (frameRate in sessions_get; at 30 fps 69.975 → 69.967), and the returned atSec (rounded to ms, as in events_list) is the stored value. A timecode before the session start timecode (sessions_get) is refused with bad_request, like a negative atSec.',
   kind: 'write',
   surfaces: ['web', 'mcp', 'companion'],
   async run(ctx, { sessionId, ...input }) {
@@ -193,7 +194,7 @@ defineOp({
 defineOp({
   name: 'events.createMany',
   description:
-    'Log up to 500 events at once (same fields as events.create). All-or-nothing: an invalid item (e.g. a timecode before the session start) fails the whole call with bad_request naming its index. Use atSec to line events up with the transcript; it snaps to the session’s frame grid like events_create, so compare returned atSec values, not the ones you sent. Returns the created events in input order; pass `compact: true` to get only `[{ id, atSec, category }]` per event (atSec in seconds from the session start, category = resolved button name), which saves context on large batches.',
+    'Log up to 500 events at once (same fields as events_create). All-or-nothing: an invalid item (e.g. a timecode before the session start) fails the whole call with bad_request naming its index. Use atSec to line events up with the transcript; it snaps to the session’s frame grid like events_create (by at most half a frame). Agents get `{ ids, freeLabels }` by default (compact): the new event ids in input order, and `[{ category, indexes }]` for each category name that matched no button of the show and so became a free label, with the input indexes that used it (intended, or fix them with events_updateMany); stored atSec values are in events_list. Pass `compact: false` for the created events.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, events: list, compact }) {
@@ -202,9 +203,26 @@ defineOp({
     for (const [i, e] of list.entries())
       rows.push(await atItem(i, () => insertEvent(ctx, session, e)));
     const out = await publishEvents(ctx, session, rows);
-    return compact ? out.map(({ id, atSec, category }) => ({ id, atSec, category })) : out;
+    return compact ? eventsAck(rows, (_, row) => row.categoryId === null) : out;
   },
 });
+
+/**
+ * The compact acknowledgement of a bulk event write: ids in input order, plus the input indexes
+ * whose button name became a free label (`isFree(i, row)`), grouped by that name.
+ */
+function eventsAck(
+  rows: EventRow[],
+  isFree: (i: number, row: EventRow) => boolean,
+): CompactEventsAck {
+  const free = new Map<string, number[]>();
+  for (const [i, r] of rows.entries())
+    if (isFree(i, r)) free.set(r.category, [...(free.get(r.category) ?? []), i]);
+  return {
+    ids: rows.map((r) => r.id),
+    freeLabels: [...free].map(([category, indexes]) => ({ category, indexes })),
+  };
+}
 
 /** Run one item of a bulk write; a bad_request names the item (`events[3]: …`). */
 async function atItem<T>(i: number, fn: () => Promise<T>): Promise<T> {
@@ -289,7 +307,7 @@ defineOp({
 defineOp({
   name: 'events.updateMany',
   description:
-    'Edit up to 500 events of one session in one call. Each item is { id (event id from events_list), and only the fields to change: categoryId | category (button), message, value, atSec (seconds from the session start, as in transcript_text; snaps to the session’s frame grid as in events_create) | timecode }; omitted fields stay as they are. All-or-nothing: an unknown id or an event from another session fails the whole call with nothing changed. Each edit is its own entry in the change log, so it can be undone per event. Returns the updated events in input order; pass `compact: true` to get only `[{ id, atSec, category }]`.',
+    'Edit up to 500 events of one session in one call. Each item is { id (event id from events_list), and only the fields to change: categoryId | category (button), message, value, atSec (seconds from the session start, as in transcript_text; snaps to the session’s frame grid as in events_create) | timecode }; omitted fields stay as they are. All-or-nothing: an unknown id or an event from another session fails the whole call with nothing changed. Each edit is its own entry in the change log, so it can be undone per event. Agents get `{ ids, freeLabels }` by default (compact): ids in input order, and `[{ category, indexes }]` for new category names that matched no button and became free labels. Pass `compact: false` for the updated events.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, events: list, compact }) {
@@ -310,7 +328,14 @@ defineOp({
     for (const [i, { id, ...patch }] of list.entries())
       updated.push(await atItem(i, () => updateEventRow(ctx, session, byId.get(id)!, patch)));
     const out = await publishEvents(ctx, session, updated);
-    return compact ? out.map(({ id, atSec, category }) => ({ id, atSec, category })) : out;
+    if (!compact) return out;
+    // Only an edit that set the button can have turned it into a free label.
+    return eventsAck(
+      updated,
+      (i, row) =>
+        row.categoryId === null &&
+        (list[i]!.category !== undefined || list[i]!.categoryId !== undefined),
+    );
   },
 });
 

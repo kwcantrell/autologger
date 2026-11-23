@@ -103,6 +103,7 @@ describe('dashboard spec validation', () => {
     const saved = await call(agent, 'dashboards.save', {
       sessionId: session.id,
       spec: { title: 'Talk', widgets: [pie, wpm] },
+      compact: false,
     });
     expect(saved.spec.widgets).toMatchObject([pie, wpm]);
 
@@ -124,6 +125,7 @@ describe('dashboard spec validation', () => {
     const patched = await call(agent, 'dashboards.updateWidgets', {
       dashboardId: saved.id,
       widgets: [{ id: 'talk', emptyText: null }],
+      compact: false,
     });
     expect(patched.spec.widgets[0]).not.toHaveProperty('emptyText');
 

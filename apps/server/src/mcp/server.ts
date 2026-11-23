@@ -1,7 +1,14 @@
 // The MCP server: stateless Streamable HTTP at POST /mcp. Tools are generated from the ops
 // registry (every op exposed on the 'mcp' surface), so adding an op adds a tool.
 
-import { type OpName, opInputs } from '@autologger/contract';
+import {
+  DashboardQuery,
+  EntityId,
+  type OpName,
+  opInputs,
+  ValueFormat,
+  WidgetData,
+} from '@autologger/contract';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import {
@@ -16,7 +23,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { z } from 'zod';
 import { toRpcError } from '../core/errors.ts';
-import { type Actor, executeOp, listOps } from '../core/op.ts';
+import { type Actor, executeOp, hasCompactOption, listOps } from '../core/op.ts';
 import { bearerFrom } from '../http/app.ts';
 import {
   coerceArguments,
@@ -40,7 +47,7 @@ Importing: media_importPlaylist creates one session per video of a YouTube playl
 
 Time conventions: atSec / startSec / durationSec are seconds from the session start and line up with transcript_text, where each line looks like \`[HH:MM:SS @123.4s] Speaker: text\` (format "compact": paragraphs \`@123.4 Speaker: text\` with inline \`[@183.4]\` stamps about once a minute, or at every segment with stampEverySec: 0 — use that when you need exact times for topics, events or citations) — use the @seconds value. timecode strings (HH:MM:SS:FF) are on the session clock (frame rate and start offset in sessions_get). Prefer atSec when working from the transcript.
 
-Writes apply immediately, are attributed to you (this client) in the session's change log, and the operator can undo any of them from the Agents tab — so act, but stay within what was asked. topics_replace swaps the whole topic list (the usual way to (re)generate chapters); events_createMany logs many events at once. For partial edits, send only what changes: events_updateMany, dashboards_updateWidgets, wiki_patch. Tools with a compact option (events_list, the bulk writes, wiki_upsert) return much less with compact: true; prefer it.
+Writes apply immediately, are attributed to you (this client) in the session's change log, and the operator can undo any of them from the Agents tab — so act, but stay within what was asked. topics_replace swaps the whole topic list (the usual way to (re)generate chapters); events_createMany logs many events at once. For partial edits, send only what changes: events_updateMany, dashboards_updateWidgets, wiki_patch. Tools with a compact option (events_list, topics_list, the bulk writes, dashboards_save / dashboards_updateWidgets, wiki_upsert, wiki_patch) return a small compact result by default for you; pass compact: false only when you need the full record. sessions_get lists the show's event buttons (categories), so you can log events by button name without another call.
 
 Dashboards: dashboards_save takes a declarative JSON spec (its description lists widget types and named queries; preview data with dashboards_query). Nothing you write is executed or rendered as HTML.
 
@@ -62,14 +69,70 @@ type ToolCache = {
 };
 let toolCache: ToolCache | null = null;
 
+/**
+ * Sub-schemas that appear many times in one tool's input (dashboards_save repeats the query union,
+ * data rows and value format in every widget type). They are emitted once under `$defs` and
+ * referenced by name, which halves that tool's schema; a def used only once is inlined again.
+ */
+const sharedDefs = z.registry<{ id: string }>();
+sharedDefs.add(DashboardQuery, { id: 'DashboardQuery' });
+sharedDefs.add(WidgetData, { id: 'WidgetData' });
+sharedDefs.add(ValueFormat, { id: 'ValueFormat' });
+
+type Json = Record<string, unknown>;
+
+/** Replace `$ref`s to defs referenced only once by the def itself, and drop those defs. */
+function inlineSingleUseDefs(json: Json): Json {
+  const defs = json.$defs as Record<string, Json> | undefined;
+  if (!defs) return json;
+  const refs = new Map<string, number>();
+  const count = (v: unknown) => {
+    if (Array.isArray(v)) v.forEach(count);
+    else if (v && typeof v === 'object') {
+      const r = (v as Json).$ref;
+      if (typeof r === 'string') refs.set(r, (refs.get(r) ?? 0) + 1);
+      Object.values(v).forEach(count);
+    }
+  };
+  count(json);
+  const inline = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(inline);
+    if (!v || typeof v !== 'object') return v;
+    const r = (v as Json).$ref;
+    if (typeof r === 'string' && refs.get(r) === 1) {
+      const def = defs[r.slice('#/$defs/'.length)];
+      if (def) return inline(def);
+    }
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, inline(x)]));
+  };
+  const { $defs: _, ...rest } = json;
+  const out = inline(rest) as Json;
+  const kept = Object.entries(defs).filter(([k]) => (refs.get(`#/$defs/${k}`) ?? 0) > 1);
+  if (kept.length) out.$defs = Object.fromEntries(kept.map(([k, d]) => [k, inline(d)]));
+  return out;
+}
+
 function inputSchema(op: OpName): Tool['inputSchema'] {
   const schema = opInputs[op] as z.ZodType;
-  const json = z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }) as Record<
-    string,
-    unknown
-  >;
+  const json = inlineSingleUseDefs(
+    z.toJSONSchema(schema, {
+      io: 'input',
+      unrepresentable: 'any',
+      metadata: sharedDefs,
+      // Entity ids are opaque strings copied from other results; their length limits (still
+      // validated by the op) are noise in every tool's schema.
+      override: ({ zodSchema, jsonSchema }) => {
+        if (zodSchema !== EntityId) return;
+        delete jsonSchema.minLength;
+        delete jsonSchema.maxLength;
+      },
+    }) as Json,
+  );
   delete json.$schema;
   if (json.type !== 'object') return { type: 'object', properties: {} };
+  // MCP callers get compact results by default (see executeOp).
+  const compact = (json.properties as Record<string, Json> | undefined)?.compact;
+  if (compact && hasCompactOption(op)) compact.default = true;
   return json as Tool['inputSchema'];
 }
 

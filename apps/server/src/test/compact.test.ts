@@ -7,6 +7,44 @@ import { asAgent, call, failsWith, makeUser, resetDb, setupDb, studio } from './
 beforeAll(setupDb);
 beforeEach(resetDb);
 
+describe('compact by default for MCP callers', () => {
+  it('MCP gets compact unless it passes compact: false; RPC keeps the full shape', async () => {
+    const { owner, session } = await studio();
+    const agent = asAgent(owner);
+    const events = [{ category: 'Scene', atSec: 5 }];
+    const ack = await call(agent, 'events.createMany', { sessionId: session.id, events });
+    expect(ack).toEqual({ ids: [expect.any(String)], freeLabels: [] });
+    const full = await call(agent, 'events.createMany', {
+      sessionId: session.id,
+      events,
+      compact: false,
+    });
+    expect(full).toEqual([expect.objectContaining({ category: 'Scene', sessionId: session.id })]);
+    // Same op over RPC (web): the full record, as before.
+    const web = await call(owner, 'events.list', { sessionId: session.id });
+    expect(web[0]).toHaveProperty('wallTime');
+    const lines = await call(agent, 'events.list', { sessionId: session.id });
+    expect(Object.keys(lines[0]!).sort()).toEqual(['atSec', 'category', 'id', 'message']);
+  });
+
+  it('sessions.get lists the show buttons for agents only', async () => {
+    const { owner, session } = await studio();
+    const forAgent = await call(asAgent(owner), 'sessions.get', { sessionId: session.id });
+    expect(forAgent.categories).toEqual([
+      { id: expect.any(String), name: 'Scene', kind: 'button' },
+      {
+        id: expect.any(String),
+        name: 'Audio issue',
+        kind: 'dropdown',
+        options: ['Lav', 'Boom', 'Noise', 'Clipping'],
+      },
+      { id: expect.any(String), name: 'Note', kind: 'text' },
+    ]);
+    const forWeb = await call(owner, 'sessions.get', { sessionId: session.id });
+    expect(forWeb).not.toHaveProperty('categories');
+  });
+});
+
 describe('compact responses for bulk writes', () => {
   it('transcript.updateSegments returns { updated, ids } of changed segments', async () => {
     const { owner, session } = await studio();
@@ -33,7 +71,7 @@ describe('compact responses for bulk writes', () => {
     expect(res).toEqual({ updated: 2, ids: [ids[0], ids[2]] });
   });
 
-  it('events.createMany returns [{ id, atSec, category }] and checks access', async () => {
+  it('events.createMany returns { ids, freeLabels } and checks access', async () => {
     const { owner, session } = await studio();
     const events = [
       { category: 'Laugh', message: 'big laugh', atSec: 5 },
@@ -44,10 +82,16 @@ describe('compact responses for bulk writes', () => {
       events,
       compact: true,
     });
-    expect(res).toEqual([
-      { id: expect.any(String), atSec: 5, category: 'Laugh' },
-      { id: expect.any(String), atSec: 20, category: 'Laugh' },
-    ]);
+    expect(res).toEqual({
+      ids: [expect.any(String), expect.any(String)],
+      freeLabels: [{ category: 'Laugh', indexes: [0, 1] }],
+    });
+    const named = await call(asAgent(owner), 'events.createMany', {
+      sessionId: session.id,
+      events: [{ category: 'scene', atSec: 1 }],
+      compact: true,
+    });
+    expect(named.freeLabels).toEqual([]);
     const outsider = await makeUser('outsider@example.com');
     await failsWith(
       call(outsider, 'events.createMany', { sessionId: session.id, events, compact: true }),
@@ -68,6 +112,25 @@ describe('compact responses for bulk writes', () => {
     expect(res).toEqual([
       { id: expect.any(String), startSec: 0, level: 2, title: 'Cold open' },
       { id: expect.any(String), startSec: 60, level: 1, title: 'Interview' },
+    ]);
+  });
+
+  it('topics.list returns [{ id, startSec, durationSec, level, title, summary }]', async () => {
+    const { owner, session } = await studio();
+    await call(owner, 'topics.replace', {
+      sessionId: session.id,
+      topics: [{ startSec: 60, durationSec: 30, title: 'Interview', summary: 'Dana on dogs' }],
+    });
+    const res = await call(asAgent(owner), 'topics.list', { sessionId: session.id, compact: true });
+    expect(res).toEqual([
+      {
+        id: expect.any(String),
+        startSec: 60,
+        durationSec: 30,
+        level: 1,
+        title: 'Interview',
+        summary: 'Dana on dogs',
+      },
     ]);
   });
 
@@ -169,6 +232,31 @@ describe('compact responses for bulk writes', () => {
       }),
       'not_found',
     );
+  });
+
+  it('wiki.patch returns the compact page with unresolvedLinks', async () => {
+    const { owner, show } = await studio();
+    const page = await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'topic',
+      title: 'Episode notes',
+      bodyMd: 'Notes.',
+    });
+    const res = await call(asAgent(owner), 'wiki.patch', {
+      pageId: page.id,
+      append: 'See [[Tom Talks]] and [[Episode notes]].',
+      compact: true,
+    });
+    expect(res).toEqual({
+      id: page.id,
+      title: 'Episode notes',
+      kind: 'topic',
+      revision: 2,
+      unresolvedLinks: ['Tom Talks'],
+      citationCount: 0,
+      badCitations: [],
+      clampedCitations: [],
+    });
   });
 
   it('transcript.replace returns counts, and trimmed samples on a dry run', async () => {
