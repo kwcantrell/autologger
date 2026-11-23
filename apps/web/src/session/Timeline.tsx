@@ -2,12 +2,13 @@
 // track with the audio waveform and clips, event markers and the playhead, ticks, and the zoom rail.
 
 import type { Session, SessionEvent } from '@autologger/contract';
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type CSSProperties, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isTypingTarget } from '@/lib/keys';
 import { eventSec, fmtSec } from '@/lib/timecode';
 import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 import { isOverlayOpen } from '@/shared/ui/overlayOpen';
 import type { PlayerSegment } from './audio/usePlayer';
+import { indexAt, usePlayhead, usePlayheadSource } from './context';
 import { TimelineWaveform } from './TimelineWaveform';
 import { useWaveform } from './waveform';
 
@@ -34,12 +35,24 @@ interface Marker {
   sec: number;
 }
 
-export function Timeline({
+/** The playhead line; follows the playhead on its own. */
+function PlayheadLine({ totalSec }: { totalSec: number }) {
+  // Hundredths of a percent: smooth even zoomed in, without a render per unchanged position.
+  const pos = usePlayhead((sec) => Math.round(Math.max(0, Math.min(1e4, (sec / totalSec) * 1e4))));
+  return <span className={PLAYHEAD} style={{ left: `${pos / 100}%` }} aria-hidden="true" />;
+}
+
+/** The playhead as clock time, re-rendered once per second. */
+function PlayheadTime() {
+  return <>{fmtSec(usePlayhead((sec) => Math.floor(sec)))}</>;
+}
+
+/** Memoized; the playhead is followed by PlayheadLine, PlayheadTime and coarse selectors. */
+export const Timeline = memo(function Timeline({
   session,
   events,
   segments,
   totalSec,
-  playheadSec,
   onSeek,
   onSelectEvent,
   locked,
@@ -48,7 +61,6 @@ export function Timeline({
   events: SessionEvent[];
   segments: PlayerSegment[];
   totalSec: number;
-  playheadSec: number;
   onSeek: (sec: number) => void;
   onSelectEvent: (eventId: string) => void;
   locked?: boolean;
@@ -90,16 +102,15 @@ export function Timeline({
 
   const pct = (sec: number) => `${Math.max(0, Math.min(100, (sec / totalSec) * 100))}%`;
 
-  // Current marker: the last one at or before the playhead.
-  const current = useMemo(() => {
-    let c: Marker | null = null;
-    for (const m of markers) {
-      if (m.sec <= playheadSec + 0.05) c = m;
-      else break;
-    }
-    return c;
-  }, [markers, playheadSec]);
-  const currentLit = current != null && playheadSec - current.sec < 3;
+  // Current marker: the last one at or before the playhead, lit for 3 s after it. Selected
+  // coarsely so the timeline re-renders when they change, not on every frame of playback.
+  const playhead = usePlayheadSource();
+  const starts = useMemo(() => markers.map((m) => m.sec), [markers]);
+  const currentIdx = usePlayhead((sec) => indexAt(starts, sec + 0.05));
+  const current = currentIdx >= 0 ? (markers[currentIdx] as Marker) : null;
+  const currentLit = usePlayhead((sec) => current != null && sec - current.sec < 3);
+  /** Whole seconds (as the readout shows them), for the scrubber's accessible value. */
+  const playheadWhole = usePlayhead((sec) => Math.floor(sec));
 
   const secAt = useCallback(
     (clientX: number) => {
@@ -176,14 +187,19 @@ export function Timeline({
     return () => vp.removeEventListener('wheel', onWheel);
   }, [zoom, applyZoom]);
 
-  // Keep the playhead in view while playing.
+  // Keep the playhead in view while playing (scrolls without re-rendering).
   useEffect(() => {
-    const vp = viewportRef.current;
-    if (!vp || zoom === 1 || dragging.current) return;
-    const x = (playheadSec / totalSec) * vp.scrollWidth;
-    if (x < vp.scrollLeft || x > vp.scrollLeft + vp.clientWidth)
-      vp.scrollLeft = x - vp.clientWidth * 0.2;
-  }, [playheadSec, totalSec, zoom]);
+    if (zoom === 1) return;
+    const follow = () => {
+      const vp = viewportRef.current;
+      if (!vp || dragging.current) return;
+      const x = (playhead.get() / totalSec) * vp.scrollWidth;
+      if (x < vp.scrollLeft || x > vp.scrollLeft + vp.clientWidth)
+        vp.scrollLeft = x - vp.clientWidth * 0.2;
+    };
+    follow();
+    return playhead.subscribe(follow);
+  }, [playhead, totalSec, zoom]);
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (locked || (e.target as HTMLElement).closest('.timelineMarker')) return;
@@ -202,8 +218,8 @@ export function Timeline({
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     const step = e.shiftKey ? 10 : 1;
-    if (e.key === 'ArrowLeft') onSeek(Math.max(0, playheadSec - step));
-    else if (e.key === 'ArrowRight') onSeek(Math.min(totalSec, playheadSec + step));
+    if (e.key === 'ArrowLeft') onSeek(Math.max(0, playhead.get() - step));
+    else if (e.key === 'ArrowRight') onSeek(Math.min(totalSec, playhead.get() + step));
     else if (e.key === 'Home') onSeek(0);
     else return;
     e.preventDefault();
@@ -352,8 +368,8 @@ export function Timeline({
             aria-label="Timeline scrubber"
             aria-valuemin={0}
             aria-valuemax={Math.round(totalSec)}
-            aria-valuenow={Math.round(playheadSec)}
-            aria-valuetext={fmtSec(playheadSec)}
+            aria-valuenow={playheadWhole}
+            aria-valuetext={fmtSec(playheadWhole)}
             className={cn(
               'relative isolate w-full shrink-0 cursor-ew-resize touch-none overflow-hidden rounded-b-[6px] border border-t-0 border-si-line bg-[rgba(0,0,0,0.28)] outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
               TRACK_H,
@@ -365,12 +381,7 @@ export function Timeline({
             onKeyDown={onKeyDown}
           >
             {waveform.data && waveform.data.length > 0 && (
-              <TimelineWaveform
-                peaks={waveform.data}
-                totalSec={totalSec}
-                view={view}
-                playheadSec={playheadSec}
-              />
+              <TimelineWaveform peaks={waveform.data} totalSec={totalSec} view={view} />
             )}
             {waveformNote && (
               <span className="pointer-events-none absolute top-1 right-2 z-[1] font-label text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-si-dim">
@@ -401,7 +412,7 @@ export function Timeline({
             )}
             {/* Markers */}
             <div className="pointer-events-none absolute inset-0 z-[5]">{markerButtons}</div>
-            <span className={PLAYHEAD} style={{ left: pct(playheadSec) }} aria-hidden="true" />
+            <PlayheadLine totalSec={totalSec} />
           </div>
           {/* Ticks */}
           <div
@@ -510,7 +521,7 @@ export function Timeline({
         </div>
         <div className="flex shrink-0 flex-row items-baseline gap-[0.15rem] whitespace-nowrap pl-1 tabular-nums">
           <span className="font-tc text-[0.8125rem] font-semibold text-si-fg">
-            {fmtSec(playheadSec)}
+            <PlayheadTime />
           </span>
           <span className="font-tc text-[0.6875rem] font-medium text-si-dim">
             / {fmtSec(totalSec)}
@@ -543,4 +554,4 @@ export function Timeline({
       )}
     </div>
   );
-}
+});

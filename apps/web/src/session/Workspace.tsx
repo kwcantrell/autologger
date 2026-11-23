@@ -126,7 +126,6 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
       try {
         if (action === 'stop' && recording) await recorder.stop();
         if (action === 'start' && player.isPlaying) void player.toggle();
-        // Apply the result now; the socket's transport push carries the same state.
         // The result shows at once; the socket's transport push carries the same state.
         await write(`transport.${action}`, { sessionId });
       } catch (e) {
@@ -142,17 +141,6 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
   useEffect(() => {
     if (!session.isRolling && recorder.state === 'recording') void recorder.stop();
   }, [session.isRolling, recorder]);
-
-  useEffect(() => {
-    if (recorder.error) showToast(recorder.error, true);
-  }, [recorder.error]);
-  const { error: playerError, clearError: clearPlayerError } = player;
-  useEffect(() => {
-    if (playerError) {
-      showToast(playerError, true);
-      clearPlayerError();
-    }
-  }, [playerError, clearPlayerError]);
 
   // Space: play / pause (not while typing, with an overlay, or on a focused button).
   useEffect(() => {

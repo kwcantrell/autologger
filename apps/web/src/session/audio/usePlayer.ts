@@ -6,6 +6,7 @@ import type { AudioSegment } from '@autologger/contract';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { errorMessage, rpc } from '@/api/rpc';
 import { createStore } from '@/lib/store';
+import { showToast } from '@/shared/components/Toast';
 
 const PLAYABLE = new Set<AudioSegment['status']>(['ready', 'transcribing', 'transcribed']);
 
@@ -32,7 +33,6 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
   const [isPlaying, setPlaying] = useState(false);
   /** Playhead in session seconds; a store so only its readers re-render each frame. */
   const [position] = useState(() => createStore<number | null>(null));
-  const [error, setError] = useState<string | null>(null);
   const rafRef = useRef(0);
   /** Session second to pause at (a cited range's end), cleared by the next seek or that pause. */
   const stopAtRef = useRef<number | null>(null);
@@ -119,19 +119,19 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
       const ps = locate(sec);
       if (!ps) {
         if (play)
-          setError(
+          showToast(
             listRef.current.length
               ? 'No audio at this point of the session.'
               : 'This session has no playable audio yet.',
+            true,
           );
         return;
       }
       try {
-        setError(null);
         if (!(await load(ps, Math.max(0, sec - ps.start), isCurrent))) return;
         if (play) await audioRef.current!.play();
       } catch (e) {
-        if (isCurrent()) setError(errorMessage(e));
+        if (isCurrent()) showToast(errorMessage(e), true);
       }
     },
     [load, locate, position],
@@ -150,7 +150,7 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
     try {
       await a.play();
     } catch (e) {
-      setError(errorMessage(e));
+      showToast(errorMessage(e), true);
     }
   }, [seek, position]);
 
@@ -200,10 +200,9 @@ export function usePlayer(segments: AudioSegment[] | undefined, enabled: boolean
     [],
   );
 
-  const clearError = useCallback(() => setError(null), []);
   return useMemo(
-    () => ({ segments: list, isPlaying, position, error, seek, toggle, clearError }),
-    [list, isPlaying, position, error, seek, toggle, clearError],
+    () => ({ segments: list, isPlaying, position, seek, toggle }),
+    [list, isPlaying, position, seek, toggle],
   );
 }
 

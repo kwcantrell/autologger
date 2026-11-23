@@ -1,6 +1,6 @@
 import type { Capabilities, Session } from '@autologger/contract';
-import { createContext, useContext } from 'react';
-import { type Store, useStore } from '@/lib/store';
+import { createContext, useContext, useMemo, useSyncExternalStore } from 'react';
+import type { Store } from '@/lib/store';
 import type { TransportClock } from '@/lib/timecode';
 import type { Player } from './audio/usePlayer';
 
@@ -31,13 +31,61 @@ export function useWorkspace(): Workspace {
   return ws;
 }
 
+/** A value that changes faster than React should render: read it, or subscribe to changes. */
+export interface Source<T> {
+  get: () => T;
+  subscribe: (onChange: () => void) => () => void;
+}
+
 /**
  * Session second under the playhead: the clock while rolling, else the player position (or the
- * clock when nothing was played yet). Re-renders the caller each frame while rolling or playing.
+ * clock when nothing was played yet). Changes every frame while rolling or playing, so read it
+ * in event handlers and effects, or through `usePlayhead` with a coarse selector.
  */
-export function usePlayheadSec(): number {
+export function usePlayheadSource(): Source<number> {
   const { session, clock, player } = useWorkspace();
-  const c = useStore(clock);
-  const pos = useStore(player.position);
-  return session.isRolling ? c.elapsedSec : (pos ?? c.elapsedSec);
+  const rolling = session.isRolling;
+  const position = player.position;
+  return useMemo(
+    () => ({
+      get: () => {
+        const c = clock.get().elapsedSec;
+        return rolling ? c : (position.get() ?? c);
+      },
+      subscribe: (onChange) => {
+        const a = clock.subscribe(onChange);
+        const b = position.subscribe(onChange);
+        return () => {
+          a();
+          b();
+        };
+      },
+    }),
+    [rolling, clock, position],
+  );
+}
+
+/**
+ * `select(playheadSec)`, re-rendering the caller only when the selected value changes. Select
+ * something coarse (a row index, whole seconds, a pixel column): selecting the raw second
+ * re-renders every frame.
+ */
+export function usePlayhead<T>(select: (sec: number) => T): T {
+  const source = usePlayheadSource();
+  return useSyncExternalStore(source.subscribe, () => select(source.get()));
+}
+
+/** Index of the last of `starts` (ascending) at or before `sec`, or -1. */
+export function indexAt(starts: readonly number[], sec: number): number {
+  let lo = 0;
+  let hi = starts.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if ((starts[mid] as number) <= sec) {
+      found = mid;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return found;
 }

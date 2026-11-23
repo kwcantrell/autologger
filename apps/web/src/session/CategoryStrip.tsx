@@ -3,7 +3,7 @@
 // Toggle flips between its on/off labels (state derived from the last logged value).
 
 import type { Category, Session, SessionEvent } from '@autologger/contract';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { errorMessage } from '@/api/rpc';
 import { useSessionWrite } from '@/api/session/writes';
 import { isTypingTarget } from '@/lib/keys';
@@ -19,7 +19,8 @@ import { LogButton } from './LogButton';
 
 type Pending = { cat: Category; atSec: number };
 
-export function CategoryStrip({
+/** Memoized: the transport strip re-renders on transport and audio state it doesn't need. */
+export const CategoryStrip = memo(function CategoryStrip({
   session,
   categories,
   events,
@@ -191,7 +192,7 @@ export function CategoryStrip({
       )}
     </>
   );
-}
+});
 
 function DropdownDialog({
   pending,

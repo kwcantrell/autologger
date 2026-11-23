@@ -27,6 +27,12 @@ export function useStore<T>(store: Store<T>): T {
   return useSyncExternalStore(store.subscribe, store.get, store.get);
 }
 
+/** `select(store value)`, re-rendering only when the selected value changes. */
+export function useStoreSelect<T, U>(store: Store<T>, select: (v: T) => U): U {
+  const get = () => select(store.get());
+  return useSyncExternalStore(store.subscribe, get, get);
+}
+
 const safeGet = (k: string) => {
   try {
     return localStorage.getItem(k);
