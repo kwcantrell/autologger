@@ -2,7 +2,7 @@
 title: Import helper
 section: developers
 order: 30
-description: The autologger-import command-line helper that downloads YouTube audio on your own computer, builds local compilations and hands the server a YouTube sign-in.
+description: The autologger-import command-line helper that downloads YouTube audio on your own computer, bulk-imports local audio files, builds local compilations and hands the server a YouTube sign-in.
 ---
 
 YouTube often bot-checks downloads from datacenter IPs (see
@@ -38,9 +38,10 @@ export AUTOLOGGER_TOKEN=alp_…            # Settings › Agents › Personal ac
 node autologger-import.mjs playlist '<playlist-url>' --show <showId> --cookies-from-browser chrome
 node autologger-import.mjs video '<video-url>' (--show <showId> | --session <sessionId>)
 node autologger-import.mjs compile <compilationId>
+node autologger-import.mjs files <folder | manifest.csv> --show <showId> [--parallel 3]
 ```
 
-Needs yt-dlp (and ffmpeg + ffprobe for `compile`) on the user's computer; it says how to install
+Needs yt-dlp (and ffmpeg + ffprobe for `compile`; neither for `files`) on the user's computer; it says how to install
 them when they are missing. `--cookies-from-browser <browser>` / `--cookies <file>` are passed to
 yt-dlp; `--dry-run` changes nothing; re-running a command resumes. All options:
 [apps/importer/README.md](https://github.com/kwcantrell/autologger/blob/main/apps/importer/README.md).
@@ -50,18 +51,40 @@ yt-dlp; `--dry-run` changes nothing; re-running a command resumes. All options:
 The helper authenticates with a personal access token (Settings › Agents) as `Authorization:
 Bearer alp_…` and calls `POST /api/rpc/<op>`, so it gets the MCP surface and acts as the user:
 
-| Step                     | Op                                                                                                                                                                                                                                                                                         |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Sessions for a playlist  | `media.importPlaylist` with `videos: [{url, title, durationSec?, uploadDate?}]` instead of `url`: same skipping, titles, episodes and `dryRun`, but no download jobs.                                                                                                                      |
-| Upload one video's audio | `media.createUpload` with `origin: "youtube"`, `youtube: {url, title?, uploadDate?, private?}` → PUT → `media.completeUpload` (waveform; transcription unless `transcribe: false`).                                                                                                        |
-| Resume                   | `media.list`: a session whose YouTube segment is stored (status other than `uploading`) is done. A new YouTube upload replaces an unfinished one of the session.                                                                                                                           |
-| Build a compilation      | `compilations.create` with `buildLocally: true` (or `compilations.retry` with `buildLocally: true` for a failed / still-queued server build; no compile job), then `compilations.createUpload` (clip plan in video seconds + presigned PUT) → PUT → `compilations.completeUpload` (ready). |
+| Step                     | Op                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sessions for a playlist  | `media.importPlaylist` with `videos: [{url, title, durationSec?, uploadDate?}]` instead of `url`: same skipping, titles, episodes and `dryRun`, but no download jobs.                                                                                                                                                                                                        |
+| Upload one video's audio | `media.createUpload` with `origin: "youtube"`, `youtube: {url, title?, uploadDate?, private?}` → PUT → `media.completeUpload` (waveform; transcription unless `transcribe: false`).                                                                                                                                                                                          |
+| Resume                   | `media.list`: a session whose YouTube segment is stored (status other than `uploading`) is done. A new YouTube upload replaces an unfinished one of the session.                                                                                                                                                                                                             |
+| Local audio files        | `media.importFiles` (up to 100 files per call: `{fileName, sizeBytes, mimeType, title?, episode?, episodeDate?, notes?, keyTerms?}`) → one new session and upload each → PUTs (in parallel) → `media.completeUploads` (durations are measured by the waveform job). A file is recognized by name + size in the show: re-runs skip uploaded files and resume unfinished ones. |
+| Large files              | Over 32 MiB, every upload (`media.createUpload`, `media.importFiles`, `compilations.createUpload` with `sizeBytes`) returns `parts` instead of `uploadUrl`: PUT bytes `[offset, offset + sizeBytes)` to each part URL; parts already stored on a resume are marked `uploaded`. Transient storage errors (e.g. a proxy's 524) are retried per part.                           |
+| Build a compilation      | `compilations.create` with `buildLocally: true` (or `compilations.retry` with `buildLocally: true` for a failed / still-queued server build; no compile job), then `compilations.createUpload` (clip plan in video seconds + presigned PUT) → PUT → `compilations.completeUpload` (ready).                                                                                   |
 
 A YouTube upload stores the video URL on the segment (`audio_segments.source_url`) and, once
 completed, makes it the session's source (`sessions.source_kind/source_url`), so the session can be
 compiled like a server import. `private: true` (`audio_segments.source_private`) marks audio the
 server could never download: `compilations.create` / `compilations.retry` and the worker's
 `compile` job refuse clips of it with a message pointing at `buildLocally`.
+
+## Importing local audio files (`files`)
+
+For an archive of recordings on disk — mp3, m4a, aac, wav, flac, ogg/opus, webm, aiff, mp4 or
+mov — `files` creates one session per file in a show and uploads them without an agent in the
+loop:
+
+```sh
+node autologger-import.mjs files ~/Archive/Season1 --show <showId> --dry-run   # what it would do
+node autologger-import.mjs files ~/Archive/Season1 --show <showId> --no-transcribe
+node autologger-import.mjs files manifest.csv --show <showId>
+```
+
+A folder imports its audio/video files (not subfolders) in name order, titled by the file name.
+A CSV manifest names the columns in its first row: `file` (path relative to the CSV) and,
+optionally, `title`, `episode`, `episodeDate` (YYYY-MM-DD), `notes` and `keyTerms` (terms
+separated by `;`). Episodes without a number take the show's next one. Files over 32 MiB go up in
+parts; `--parallel <n>` (default 3) uploads that many files at a time. Run the same command again
+after an interruption: uploaded files are skipped and unfinished ones resume with their missing
+parts, in the same sessions.
 
 ## Giving the server a YouTube sign-in (`youtube-login`)
 

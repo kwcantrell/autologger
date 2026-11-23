@@ -15,8 +15,12 @@ vi.hoisted(() => {
 });
 vi.mock('../media/s3.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../media/s3.ts')>()),
-  presignUpload: async () => 'http://upload.invalid/put',
-  headObject: async () => ({ size: 1234, contentType: 'audio/wav' }),
+  presignUploadTarget: async (_key: string, contentType: string) => ({
+    uploadUrl: 'http://upload.invalid/put',
+    headers: { 'Content-Type': contentType },
+    expiresAt: new Date().toISOString(),
+  }),
+  finishUpload: async () => ({ size: 1234 }),
   deleteObject: async () => {},
 }));
 
@@ -149,7 +153,9 @@ describe('waveform jobs and media.waveform', () => {
       origin: 'file',
       fileName: 'a.wav',
     });
-    const seg = await call(owner, 'media.completeUpload', { segmentId: up.segment.id });
+    const seg = await call(owner, 'media.completeUpload', {
+      segmentId: up.segment.id,
+    });
     expect(seg.hasWaveform).toBe(false);
     const queued = await db.select().from(jobs).where(eq(jobs.sessionId, session.id));
     expect(queued.map((j) => [j.kind, j.payload])).toEqual([['waveform', { segmentId: seg.id }]]);
@@ -163,7 +169,11 @@ describe('waveform jobs and media.waveform', () => {
     await segment(session.id, 1, null);
     const list = await call(owner, 'media.waveform', { sessionId: session.id });
     expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ segmentId: withPeaks, startSec: 60, durationSec: 60 });
+    expect(list[0]).toMatchObject({
+      segmentId: withPeaks,
+      startSec: 60,
+      durationSec: 60,
+    });
     expect(list[0]!.url).toContain(`sessions/${session.id}/seg.peaks.json`);
     expect(list[0]!.url).toContain('X-Amz-Signature=');
 
@@ -187,7 +197,10 @@ describe('waveform jobs and media.waveform', () => {
     expect(await backfillWaveforms()).toBe(1);
     expect(await backfillWaveforms()).toBe(0); // already queued
     const [job] = await db.select().from(jobs).where(eq(jobs.status, 'queued'));
-    expect(job).toMatchObject({ kind: 'waveform', payload: { segmentId: bare } });
+    expect(job).toMatchObject({
+      kind: 'waveform',
+      payload: { segmentId: bare },
+    });
 
     env.ffmpegPath = '/nonexistent/ffmpeg';
     const note = await handlers.waveform.run(job!);
@@ -219,7 +232,10 @@ describe('waveform jobs and media.waveform', () => {
     expect(await backfillWaveforms()).toBe(1); // untranscribed only; the failure is left alone
 
     const reader = await makeUser('reader@example.com');
-    await call(owner, 'teams.invite', { teamId: team.id, email: 'reader@example.com' });
+    await call(owner, 'teams.invite', {
+      teamId: team.id,
+      email: 'reader@example.com',
+    });
     await call(owner, 'teams.setGrant', {
       teamId: team.id,
       userId: reader.user.id,
@@ -234,7 +250,9 @@ describe('waveform jobs and media.waveform', () => {
     );
 
     // The session: segments without peaks; the one already queued keeps its job.
-    const queued = await call(owner, 'media.rewaveform', { sessionId: session.id });
+    const queued = await call(owner, 'media.rewaveform', {
+      sessionId: session.id,
+    });
     expect(queued.map((j) => [j.kind, j.status])).toEqual([
       ['waveform', 'queued'],
       ['waveform', 'queued'],
@@ -252,7 +270,10 @@ describe('waveform jobs and media.waveform', () => {
     });
     expect(one).toMatchObject({ kind: 'waveform', status: 'queued' });
     await failsWith(
-      call(owner, 'media.rewaveform', { sessionId: session.id, segmentId: newId('aud') }),
+      call(owner, 'media.rewaveform', {
+        sessionId: session.id,
+        segmentId: newId('aud'),
+      }),
       'not_found',
     );
   });

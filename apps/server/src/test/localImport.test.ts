@@ -14,12 +14,19 @@ vi.hoisted(() => {
   process.env.S3_SECRET_ACCESS_KEY = 'test';
   process.env.S3_ENDPOINT = 'http://127.0.0.1:9';
 });
-const stored = vi.hoisted(() => ({ heads: new Map<string, number>(), deletes: [] as string[] }));
+const stored = vi.hoisted(() => ({
+  heads: new Map<string, number>(),
+  deletes: [] as string[],
+}));
 vi.mock('../media/s3.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../media/s3.ts')>()),
-  presignUpload: async (key: string) => `http://upload.invalid/${key}`,
-  headObject: async (key: string) =>
-    stored.heads.has(key) ? { size: stored.heads.get(key)!, contentType: 'x' } : null,
+  presignUploadTarget: async (key: string, contentType: string) => ({
+    uploadUrl: `http://upload.invalid/${key}`,
+    headers: { 'Content-Type': contentType },
+    expiresAt: new Date().toISOString(),
+  }),
+  finishUpload: async (key: string) =>
+    stored.heads.has(key) ? { size: stored.heads.get(key)! } : null,
   deleteObject: async (key: string) => {
     stored.deletes.push(key);
   },
@@ -37,13 +44,21 @@ const VIDEO_A = 'https://www.youtube.com/watch?v=aaaaaaaaaaa';
 const VIDEO_B = 'https://youtu.be/bbbbbbbbbbb';
 
 /** The fields these tests read from rpc results. */
-type Data = { uploadUrl: string; segment: { id: string }; url: string; [k: string]: unknown };
+type Data = {
+  uploadUrl: string;
+  segment: { id: string };
+  url: string;
+  [k: string]: unknown;
+};
 
 /** POST /api/rpc/<op> with a bearer token, as the import helper does. */
 async function rpc(token: string, op: string, input: unknown) {
   const res = await createApp().request(`/api/rpc/${op}`, {
     method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
     body: JSON.stringify(input),
   });
   return (await res.json()) as {
@@ -59,7 +74,12 @@ async function uploadVideo(token: string, sessionId: string, url: string, priv =
     sessionId,
     mimeType: 'audio/mp4',
     origin: 'youtube',
-    youtube: { url, title: 'Episode audio', uploadDate: '2021-04-01', private: priv },
+    youtube: {
+      url,
+      title: 'Episode audio',
+      uploadDate: '2021-04-01',
+      private: priv,
+    },
   });
   expect(started.ok).toBe(true);
   const key = new URL(started.data.uploadUrl).pathname.slice(1);
@@ -88,7 +108,12 @@ describe('local import helper ops', () => {
     env.youtubeEnabled = false;
     try {
       const videos = [
-        { url: VIDEO_A, title: 'First', durationSec: 3600, uploadDate: '2020-01-02' },
+        {
+          url: VIDEO_A,
+          title: 'First',
+          durationSec: 3600,
+          uploadDate: '2020-01-02',
+        },
         { url: VIDEO_B, title: 'Second', durationSec: null },
       ];
       const dry = await call(agent, 'media.importPlaylist', {
@@ -107,8 +132,18 @@ describe('local import helper ops', () => {
         playlistTitle: null,
         dryRun: false,
         created: [
-          { title: '2: First', episode: '2', videoId: 'aaaaaaaaaaa', jobId: null },
-          { title: '3: Second', episode: '3', videoId: 'bbbbbbbbbbb', jobId: null },
+          {
+            title: '2: First',
+            episode: '2',
+            videoId: 'aaaaaaaaaaa',
+            jobId: null,
+          },
+          {
+            title: '3: Second',
+            episode: '3',
+            videoId: 'bbbbbbbbbbb',
+            jobId: null,
+          },
         ],
         skipped: [],
       });
@@ -124,7 +159,10 @@ describe('local import helper ops', () => {
       });
 
       // Re-running (the helper resuming) skips them and says which session each video has.
-      const again = await call(agent, 'media.importPlaylist', { showId: show.id, videos });
+      const again = await call(agent, 'media.importPlaylist', {
+        showId: show.id,
+        videos,
+      });
       expect(again.created).toEqual([]);
       expect(again.skipped.map((s) => [s.reason, s.sessionId])).toEqual([
         ['already_imported', out.created[0]!.sessionId],
@@ -144,7 +182,9 @@ describe('local import helper ops', () => {
 
   it('uploads a YouTube video over a personal access token and keeps its provenance', async () => {
     const { owner, session } = await studio();
-    const { token } = await call(owner, 'tokens.createPat', { name: 'importer' });
+    const { token } = await call(owner, 'tokens.createPat', {
+      name: 'importer',
+    });
     // An interrupted earlier upload is replaced, not left behind.
     const stale = await rpc(token, 'media.createUpload', {
       sessionId: session.id,
@@ -191,7 +231,9 @@ describe('local import helper ops', () => {
 
   it('builds a compilation of private sessions locally; the server refuses to', async () => {
     const { owner, show, session } = await studio();
-    const { token } = await call(owner, 'tokens.createPat', { name: 'importer' });
+    const { token } = await call(owner, 'tokens.createPat', {
+      name: 'importer',
+    });
     await uploadVideo(token, session.id, VIDEO_A, true);
     const agent = asAgent(owner);
     const clips = [{ sessionId: session.id, startSec: 10, endSec: 40 }];
@@ -216,19 +258,27 @@ describe('local import helper ops', () => {
     expect(c.progress).toContain(`autologger-import compile ${c.id}`);
     expect(await db.select().from(jobs).where(eq(jobs.kind, 'compile'))).toEqual([]);
 
-    const plan = await rpc(token, 'compilations.createUpload', { compilationId: c.id });
+    const plan = await rpc(token, 'compilations.createUpload', {
+      compilationId: c.id,
+    });
     expect(plan.data).toMatchObject({
       sources: [{ sessionId: session.id, url: VIDEO_A, fromSec: 10, toSec: 40 }],
       headers: { 'Content-Type': 'video/mp4' },
     });
-    const early = await rpc(token, 'compilations.completeUpload', { compilationId: c.id });
+    const early = await rpc(token, 'compilations.completeUpload', {
+      compilationId: c.id,
+    });
     expect(early.error?.code).toBe('conflict');
     stored.heads.set(new URL(plan.data.uploadUrl).pathname.slice(1), 9999);
     const done = await rpc(token, 'compilations.completeUpload', {
       compilationId: c.id,
       durationSec: 30.2,
     });
-    expect(done.data).toMatchObject({ status: 'ready', sizeBytes: 9999, durationSec: 30.2 });
+    expect(done.data).toMatchObject({
+      status: 'ready',
+      sizeBytes: 9999,
+      durationSec: 30.2,
+    });
     expect(done.data.url).toContain(`compilations/${c.id}.mp4`);
     const [row] = await db.select().from(compilations).where(eq(compilations.id, c.id));
     expect(row!.objectKey).toBe(`shows/${show.id}/compilations/${c.id}.mp4`);
@@ -236,7 +286,9 @@ describe('local import helper ops', () => {
 
   it('answers not_found to someone without access to the show', async () => {
     const { owner, show, session } = await studio();
-    const { token } = await call(owner, 'tokens.createPat', { name: 'importer' });
+    const { token } = await call(owner, 'tokens.createPat', {
+      name: 'importer',
+    });
     await uploadVideo(token, session.id, VIDEO_A, true);
     const c = await call(owner, 'compilations.create', {
       showId: show.id,

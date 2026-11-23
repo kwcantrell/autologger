@@ -12,6 +12,8 @@ const bucket = vi.hoisted(() => new Map<string, Date>());
 vi.mock('../media/s3.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../media/s3.ts')>()),
   presignUpload: async () => 'http://upload.invalid/put',
+  abortUploads: async () => {},
+  abortStaleUploads: async () => [],
   deleteObject: async (key: string) => {
     bucket.delete(key);
   },
@@ -83,9 +85,13 @@ describe('media sweep', () => {
   it('removes prefixes of deleted sessions and shows, keeps live ones and recent orphans', async () => {
     const { show, session } = await studio();
     const compId = newId('cmp');
-    await db
-      .insert(schema.compilations)
-      .values({ id: compId, showId: show.id, title: 'Best of', clips: [], durationSec: 5 });
+    await db.insert(schema.compilations).values({
+      id: compId,
+      showId: show.id,
+      title: 'Best of',
+      clips: [],
+      durationSec: 5,
+    });
     const live = [
       `sessions/${session.id}/aud_old.wav`, // live session: left to the live-session pass
       `shows/${show.id}/notes/keep.json`, // unknown shape under a live show: kept
@@ -105,7 +111,11 @@ describe('media sweep', () => {
     bucket.set(`shows/${show.id}/compilations/cmp_new.mp4`, ago(1));
 
     const log = vi.spyOn(console, 'log');
-    const r = await sweepMedia({ orphanGraceMs: 24 * HOUR, dryRun: false, liveSessionsPerRun: 0 });
+    const r = await sweepMedia({
+      orphanGraceMs: 24 * HOUR,
+      dryRun: false,
+      liveSessionsPerRun: 0,
+    });
     expect(log).toHaveBeenLastCalledWith(
       expect.stringMatching(
         /^media sweep: 0 stuck uploads, 2 orphan prefixes, 1 compilation object, 0 unreferenced live-session objects removed; 2 orphans within grace; checked 0 of \d+ live sessions?; \d+ s$/,
@@ -139,7 +149,10 @@ describe('media sweep', () => {
     bucket.set(strayPeaks, ago(30));
     bucket.set(fresh, ago(1));
     // A second live session with no segments: its old object is an orphan too.
-    const other = await call(owner, 'sessions.create', { showId: show.id, title: 'Two' });
+    const other = await call(owner, 'sessions.create', {
+      showId: show.id,
+      title: 'Two',
+    });
     const otherKey = `sessions/${other.id}/aud_x.wav`;
     bucket.set(otherKey, ago(48));
     const [first, second] = [session.id, other.id].sort();

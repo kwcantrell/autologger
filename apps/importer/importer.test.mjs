@@ -75,8 +75,8 @@ const VIDEOS = {
 
 // ── stub AutoLogger ────────────────────────────────────────────
 
-/** @type {{ calls: { op: string; input: any }[]; sessions: Map<string, string>; segments: any[]; puts: Map<string, number> }} */
-const state = { calls: [], sessions: new Map(), segments: [], puts: new Map() };
+/** @type {{ calls: { op: string; input: any }[]; sessions: Map<string, string>; segments: any[]; puts: Map<string, number>; bodies: Map<string, string> }} */
+const state = { calls: [], sessions: new Map(), segments: [], puts: new Map(), bodies: new Map() };
 let base = '';
 
 /** @param {string} op @param {any} input */
@@ -123,6 +123,84 @@ function handle(op, input) {
         uploadUrl: `${base}/put/${segment.id}`,
         headers: { 'Content-Type': input.mimeType },
       };
+    }
+    case 'media.importFiles':
+      return {
+        dryRun: input.dryRun,
+        files: input.files.map((f) => {
+          const prior = state.segments.find(
+            (s) => s.fileName === f.fileName && s.sizeBytes === f.sizeBytes,
+          );
+          if (prior)
+            return {
+              fileName: f.fileName,
+              status: prior.status === 'uploading' ? 'resumed' : 'skipped',
+              sessionId: prior.sessionId,
+              segmentId: prior.id,
+              title: prior.title,
+              episode: null,
+            };
+          const title = f.title ?? f.fileName.replace(/\.[^.]+$/, '');
+          if (input.dryRun)
+            return {
+              fileName: f.fileName,
+              status: 'created',
+              sessionId: null,
+              segmentId: null,
+              title,
+              episode: null,
+            };
+          const seg = {
+            id: `aud_${state.segments.length}`,
+            sessionId: `ses_f${state.segments.length}`,
+            origin: 'file',
+            status: 'uploading',
+            fileName: f.fileName,
+            sizeBytes: f.sizeBytes,
+            title,
+            input: f,
+          };
+          state.segments.push(seg);
+          // Files over 8 bytes go up in parts of 8 (the server's are 32 MiB).
+          const upload =
+            f.sizeBytes > 8
+              ? {
+                  headers: {},
+                  parts: Array.from({ length: Math.ceil(f.sizeBytes / 8) }, (_, i) => ({
+                    partNumber: i + 1,
+                    offset: i * 8,
+                    sizeBytes: Math.min(8, f.sizeBytes - i * 8),
+                    url: `${base}/put/${seg.id}.${i + 1}`,
+                  })),
+                }
+              : { uploadUrl: `${base}/put/${seg.id}`, headers: { 'Content-Type': f.mimeType } };
+          return {
+            fileName: f.fileName,
+            status: 'created',
+            sessionId: seg.sessionId,
+            segmentId: seg.id,
+            title,
+            episode: '1',
+            upload,
+          };
+        }),
+      };
+    case 'media.completeUploads': {
+      const completed = [];
+      for (const id of input.segmentIds) {
+        const seg = state.segments.find((s) => s.id === id);
+        const body =
+          state.bodies.get(id) ??
+          [...state.bodies]
+            .filter(([k]) => k.startsWith(`${id}.`))
+            .sort(([a], [b]) => Number(a.split('.')[1]) - Number(b.split('.')[1]))
+            .map(([, v]) => v)
+            .join('');
+        seg.status = 'ready';
+        seg.stored = body;
+        completed.push(seg);
+      }
+      return { completed, pending: [] };
     }
     case 'media.completeUpload': {
       const seg = state.segments.find((s) => s.id === input.segmentId);
@@ -174,6 +252,7 @@ const server = http.createServer((req, res) => {
     const put = /^\/put\/(.+)$/.exec(req.url ?? '');
     if (req.method === 'PUT' && put) {
       state.puts.set(put[1], body.length);
+      state.bodies.set(put[1], body);
       res.writeHead(200).end();
       return;
     }
@@ -251,6 +330,7 @@ beforeEach(async () => {
   state.sessions.clear();
   state.segments = [];
   state.puts.clear();
+  state.bodies.clear();
   await writeFile(join(dir, 'log.jsonl'), '');
 });
 
@@ -416,6 +496,56 @@ describe('autologger-import', () => {
     const badToken = await cli(['compile', 'cmp_1'], { AUTOLOGGER_TOKEN: 'alp_wrong' });
     expect(badToken.code).toBe(1);
     expect(badToken.stderr).toContain('Settings › Agents');
+  });
+});
+
+describe('autologger-import files', () => {
+  it('imports a folder and a CSV manifest: sessions, part uploads, completion; a re-run skips', async () => {
+    const folder = join(dir, 'archive');
+    await mkdir(folder, { recursive: true });
+    await writeFile(join(folder, 'ep2.mp3'), 'small');
+    await writeFile(join(folder, 'ep10.flac'), 'a large flac file body');
+    await writeFile(join(folder, 'notes.txt'), 'ignored');
+    const run = await cli(['files', folder, '--show', 'shw_1', '--no-transcribe']);
+    expect(run.stderr).toBe('');
+    expect(run.code).toBe(0);
+    const imp = state.calls.find((c) => c.op === 'media.importFiles');
+    expect(imp?.input.files.map((f) => [f.fileName, f.mimeType, f.sizeBytes])).toEqual([
+      ['ep2.mp3', 'audio/mpeg', 5],
+      ['ep10.flac', 'audio/flac', 22],
+    ]);
+    const done = state.calls.find((c) => c.op === 'media.completeUploads');
+    expect(done?.input).toEqual({ segmentIds: expect.any(Array), transcribe: false });
+    expect(state.segments.map((s) => [s.fileName, s.status, s.stored])).toEqual([
+      ['ep2.mp3', 'ready', 'small'],
+      ['ep10.flac', 'ready', 'a large flac file body'],
+    ]);
+
+    state.calls.length = 0;
+    const again = await cli(['files', folder, '--show', 'shw_1']);
+    expect(again.code).toBe(0);
+    expect(again.stdout).toContain('2 already there');
+    expect(state.calls.map((c) => c.op)).toEqual(['media.importFiles']);
+
+    await writeFile(join(dir, 'ep3.wav'), 'wave');
+    await writeFile(
+      join(dir, 'manifest.csv'),
+      'file,title,episode,episodeDate,keyTerms\nep3.wav,"Three, with a comma",3,2019-05-01,Tom; Jerry\n',
+    );
+    state.calls.length = 0;
+    const csv = await cli(['files', join(dir, 'manifest.csv'), '--show', 'shw_1']);
+    expect(csv.code).toBe(0);
+    expect(state.calls.find((c) => c.op === 'media.importFiles')?.input.files).toEqual([
+      {
+        fileName: 'ep3.wav',
+        sizeBytes: 4,
+        mimeType: 'audio/wav',
+        title: 'Three, with a comma',
+        episode: '3',
+        episodeDate: '2019-05-01',
+        keyTerms: ['Tom', 'Jerry'],
+      },
+    ]);
   });
 });
 
