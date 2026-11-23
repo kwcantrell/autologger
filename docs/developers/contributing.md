@@ -49,7 +49,10 @@ transcribed. More on storage and the worker in [Self-hosting](/docs/developers/s
 - Schema changes: edit `apps/server/src/db/schema.ts`, then run `npx drizzle-kit generate` in
   `apps/server`. Never edit generated migrations.
 - UI keeps the established look: see `apps/web/DESIGN.md` and the shared primitives in
-  `apps/web/src/shared`.
+  `apps/web/src/shared`. The primitives are shadcn/ui components on Base UI (style `base-nova`,
+  Tailwind v4); `apps/web/components.json` describes that setup, so the shadcn CLI and its MCP
+  server add new primitives under `src/shared/components/ui`. Restyle anything you add to the
+  tokens in `DESIGN.md` before using it.
 
 ## Tests and checks
 
