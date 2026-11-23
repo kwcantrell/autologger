@@ -97,7 +97,11 @@ describe('change groups', () => {
       { category: 'Note', message: 'b', atSec: 2 },
     ];
     await call(agent, 'events.createMany', { sessionId: session.id, events });
-    const [kept] = await call(agent, 'events.createMany', { sessionId: session.id, events });
+    const [kept] = await call(agent, 'events.createMany', {
+      sessionId: session.id,
+      events,
+      compact: false,
+    });
     const keptGroup = (await call(owner, 'changes.list', { sessionId: session.id }))[0]!.groupId;
     // Make the older call look pre-#60: no group id, one `at` (the transaction's now()).
     const old = (await call(owner, 'changes.list', { sessionId: session.id })).slice(2);

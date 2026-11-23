@@ -220,6 +220,7 @@ describe('transcript.replace', () => {
       sessionId: session.id,
       rules: [doctorRule],
       dryRun: true,
+      compact: false,
     });
     expect(preview).toEqual({
       dryRun: true,

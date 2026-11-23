@@ -39,7 +39,9 @@ import type {
 } from './entities.ts';
 import { MAX_TRANSCRIPT_RULES, TranscriptRuleInput } from './transcriptRules.ts';
 
-const id = z.string().min(1).max(64);
+/** An entity id (ses_…, evt_…). */
+export const EntityId = z.string().min(1).max(64);
+const id = EntityId;
 const name = z.string().trim().min(1).max(200);
 
 /** Show transcription key terms (Deepgram keyterm prompting caps a request at ~500 tokens). */
@@ -107,7 +109,7 @@ const TopicFields = {
   summary: z.string().max(10000).default(''),
 };
 
-/** Bulk write ops: return a small acknowledgement instead of echoing every written entity. */
+/** `compact: true`: a small acknowledgement / listing instead of full entities (see CompactOpOutputs). */
 const compact = z.boolean().default(false);
 
 export const opInputs = {
@@ -365,7 +367,7 @@ export const opInputs = {
   }),
 
   // ── topics ────────────────────────────────────────────────
-  'topics.list': z.object({ sessionId: id }),
+  'topics.list': z.object({ sessionId: id, compact }),
   'topics.create': z.object({ sessionId: id, ...TopicFields }),
   'topics.update': z.object({
     topicId: id,
@@ -438,6 +440,7 @@ export const opInputs = {
     append: z.string().max(100_000).optional(),
     /** The revision the edit started from; a page that moved on since fails with conflict. */
     baseRevision: z.number().int().min(1).optional(),
+    compact,
   }),
   'wiki.delete': z.object({ pageId: id }),
   'wiki.revisions': z.object({ pageId: id }),
@@ -685,11 +688,26 @@ export interface CompanionState {
 
 // Compact write acknowledgements, returned instead of the full echo when a bulk write op is
 // called with `compact: true` (meant for MCP agents, to save context).
-export type CompactEvent = Pick<SessionEvent, 'id' | 'atSec' | 'category'>;
+/**
+ * Compact acknowledgement of events.createMany / events.updateMany: the event ids in input order,
+ * and the items whose button name matched no button of the show and so became a free label.
+ */
+export interface CompactEventsAck {
+  ids: string[];
+  /**
+   * One entry per unmatched name (as sent, trimmed) with the input `indexes` that used it, in
+   * input order. Empty when every name matched a button.
+   */
+  freeLabels: { category: string; indexes: number[] }[];
+}
 export type CompactTopic = Pick<Topic, 'id' | 'startSec' | 'level' | 'title'>;
 export type CompactDashboard = Pick<Dashboard, 'id' | 'revision'>;
 // Compact read / write results for the ops agents call most on long sessions.
 export type CompactEventLine = Pick<SessionEvent, 'id' | 'atSec' | 'category' | 'message'>;
+export type CompactTopicLine = Pick<
+  Topic,
+  'id' | 'startSec' | 'durationSec' | 'level' | 'title' | 'summary'
+>;
 export type CompactWikiPage = Pick<WikiPage, 'id' | 'title' | 'kind' | 'revision'> & {
   /** [[link]] targets in the body that match no page title or alias in the show. */
   unresolvedLinks: string[];
@@ -883,14 +901,16 @@ export interface OpOutputs {
 /** What ops that take `compact` return with `compact: true`, in place of their OpOutputs. */
 export interface CompactOpOutputs {
   'events.list': CompactEventLine[];
-  'events.createMany': CompactEvent[];
-  'events.updateMany': CompactEvent[];
+  'events.createMany': CompactEventsAck;
+  'events.updateMany': CompactEventsAck;
   'transcript.updateSegments': { updated: number; ids: string[] };
   'transcript.replace': TranscriptReplaceCompactResult;
+  'topics.list': CompactTopicLine[];
   'topics.replace': CompactTopic[];
   'dashboards.save': CompactDashboard;
   'dashboards.updateWidgets': CompactDashboard;
   'wiki.upsert': CompactWikiPage;
+  'wiki.patch': CompactWikiPage;
 }
 
 /**

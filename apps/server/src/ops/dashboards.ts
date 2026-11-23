@@ -233,8 +233,8 @@ Empty state on any data widget: emptyText (≤200 chars, e.g. "No speech in this
 its query returns no rows (a stat: its value is null, e.g. wpm without a transcript); hideWhenEmpty: true hides the widget instead.
 Use them when one layout is applied to many sessions, some without speech, topics or events.
 Prefer live queries for counts so the dashboard stays current. Markdown is rendered without HTML.
-Returns the saved dashboard including its spec; pass compact: true to get only { id, revision } (revision starts at 1 and
-increases on every save), which saves context.`,
+Returns { id, revision } by default for agents (revision starts at 1 and increases on every save); pass compact: false
+for the saved dashboard including its spec.`,
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, dashboardId, spec, compact }) {
@@ -280,7 +280,7 @@ stored ones (a query or data replaces the whole query/data), fields you omit sta
 field (e.g. labelMaxChars: null). Example: { dashboardId, widgets: [{ id: "talk", title: "Talk time", format: "minutes" }] }.
 Each patched widget is validated like dashboards_save (bad_request with the path, e.g. widgets[3].x); an unknown widget
 id fails with nothing changed. type cannot be patched; changing type, order, adding and removing widgets need
-dashboards_save. Saved as one new revision, undoable from the change log; a patch that changes nothing saves nothing. Returns the dashboard; compact: true returns only { id, revision }.`,
+dashboards_save. Saved as one new revision, undoable from the change log; a patch that changes nothing saves nothing. Returns { id, revision } by default for agents; compact: false returns the whole dashboard.`,
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { dashboardId, widgets: patches, compact }) {

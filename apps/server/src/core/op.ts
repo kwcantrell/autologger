@@ -11,6 +11,7 @@ import {
   type Via,
 } from '@autologger/contract';
 import { sql } from 'drizzle-orm';
+import { z } from 'zod';
 import { db, schema, type Tx } from '../db/client.ts';
 import { type BusMessage, publish, type Topic } from './bus.ts';
 import { AppError, forbidden } from './errors.ts';
@@ -143,7 +144,7 @@ export async function executeOp<N extends OpName, I = unknown>(
       'Text may not contain NUL characters (\\u0000).',
       nul.map((path) => ({ path, message: 'Remove the NUL character (\\u0000).' })),
     );
-  const input = opInputs[name].parse(rawInput ?? {}) as OpParsed<N>;
+  const input = opInputs[name].parse(surfaceDefaults(name, rawInput, surface)) as OpParsed<N>;
   const prepared = op.prepare ? await op.prepare(actor, input) : undefined;
 
   const watch = op.watch?.(input, signal);
@@ -158,6 +159,25 @@ export async function executeOp<N extends OpName, I = unknown>(
   } finally {
     watch?.cancel();
   }
+}
+
+/** Whether op `name` takes a `compact` option. */
+export function hasCompactOption(name: OpName): boolean {
+  const schema = opInputs[name] as z.ZodType;
+  return schema instanceof z.ZodObject && 'compact' in schema.shape;
+}
+
+/**
+ * MCP callers (agents) get the compact result of ops with a `compact` option unless they pass
+ * `compact` themselves; `compact: false` still returns the full record. RPC and Companion callers
+ * keep `compact: false` as the default.
+ */
+function surfaceDefaults(name: OpName, rawInput: unknown, surface: Surface): unknown {
+  const input = rawInput ?? {};
+  if (surface !== 'mcp' || !hasCompactOption(name)) return input;
+  if (typeof input !== 'object' || Array.isArray(input)) return input;
+  if ((input as { compact?: unknown }).compact !== undefined) return input;
+  return { ...input, compact: true };
 }
 
 /**

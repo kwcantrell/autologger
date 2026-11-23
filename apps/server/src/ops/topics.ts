@@ -59,16 +59,25 @@ async function insertTopic(
 defineOp({
   name: 'topics.list',
   description:
-    'Topics (chapters) of a session in time order. Level 1 = major segment, 2–3 = sub-topics.',
+    'Topics (chapters) of a session in time order. Level 1 = major segment, 2–3 = sub-topics. startSec / durationSec are seconds from the session start (as in transcript_text). Agents get `[{ id, startSec, durationSec, level, title, summary }]` per topic by default (compact); pass `compact: false` for full topics.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId }) {
+  async run(ctx, { sessionId, compact }) {
     await requireSession(ctx, sessionId, 'read');
     const rows = await ctx.db
       .select()
       .from(topics)
       .where(eq(topics.sessionId, sessionId))
       .orderBy(asc(topics.startSec), asc(topics.level));
+    if (compact)
+      return rows.map(({ id, startSec, durationSec, level, title, summary }) => ({
+        id,
+        startSec,
+        durationSec,
+        level,
+        title,
+        summary,
+      }));
     return entities(ctx, rows);
   },
 });
@@ -90,7 +99,7 @@ defineOp({
 defineOp({
   name: 'topics.replace',
   description:
-    'Replace every topic in the session with this list — the usual way to (re)generate topics from the transcript. Each removed and added topic is in the change log, so the operator can undo it. Returns the new topics sorted by startSec; pass `compact: true` to get only `[{ id, startSec, level, title }]` per topic, which saves context.',
+    'Replace every topic in the session with this list — the usual way to (re)generate topics from the transcript. Each removed and added topic is in the change log, so the operator can undo it. Returns the new topics sorted by startSec; agents get only `[{ id, startSec, level, title }]` per topic by default (compact); pass `compact: false` for full topics.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, topics: list, compact }) {

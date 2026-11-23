@@ -142,8 +142,23 @@ export interface Session {
 }
 
 /** sessions.get: a session plus its unfinished transcription work. */
+/**
+ * An event button as sessions.get lists it for agents: `options` only on dropdowns, the labels
+ * only on toggles (the values an event's `value` takes).
+ */
+export interface SessionButton {
+  id: string;
+  name: string;
+  kind: CategoryKind;
+  options?: string[];
+  onLabel?: string;
+  offLabel?: string;
+}
+
 export interface SessionDetail extends Session {
   transcriptJob: TranscriptJob | null;
+  /** MCP callers only: the show's event buttons in hotkey order (the web uses categories.list). */
+  categories?: SessionButton[];
 }
 
 export type EventSource = 'operator' | 'companion' | 'agent' | 'import';

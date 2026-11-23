@@ -35,9 +35,12 @@ export const DashboardQuery = z.discriminatedUnion('name', [
 ]);
 export type DashboardQuery = z.infer<typeof DashboardQuery>;
 
+/** Static rows computed by the agent (one schema instance, shared by every data widget). */
+export const WidgetData = z.array(Row).max(1000);
+
 const DataSource = {
   /** Static rows computed by the agent. */
-  data: z.array(Row).max(1000).optional(),
+  data: WidgetData.optional(),
   /** Or a live query. Exactly one of `data` / `query` must be present for data widgets. */
   query: DashboardQuery.optional(),
   /** Shown instead of the widget when it has nothing to show (no rows, or a stat value of null). */

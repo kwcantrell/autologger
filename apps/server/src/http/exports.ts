@@ -39,6 +39,8 @@ exportRoutes.get('/api/sessions/:sessionId/export/:format', async (c) => {
     );
   const sessionId = c.req.param('sessionId');
   const format = c.req.param('format');
+  // Agents' bearer tokens get the MCP surface; exports ask for full records (compact: false),
+  // which MCP callers otherwise don't get by default.
   const surface = actor.via === 'mcp' ? 'mcp' : 'web';
   try {
     const session = await executeOp('sessions.get', { sessionId }, actor, surface);
@@ -50,7 +52,12 @@ exportRoutes.get('/api/sessions/:sessionId/export/:format', async (c) => {
       });
 
     if (format === 'events.csv' || format === 'events.jsonl') {
-      const events = await executeOp('events.list', { sessionId }, actor, surface);
+      const events = await executeOp(
+        'events.list',
+        { sessionId, compact: false as const },
+        actor,
+        surface,
+      );
       if (format === 'events.jsonl')
         return send(
           events.map((e) => JSON.stringify(e)).join('\n'),
@@ -98,7 +105,12 @@ exportRoutes.get('/api/sessions/:sessionId/export/:format', async (c) => {
       return send(body, 'application/x-subrip', 'srt');
     }
     if (format === 'topics.csv') {
-      const topics = await executeOp('topics.list', { sessionId }, actor, surface);
+      const topics = await executeOp(
+        'topics.list',
+        { sessionId, compact: false as const },
+        actor,
+        surface,
+      );
       const lines = topics.map((t) =>
         [t.startSec.toFixed(1), t.durationSec.toFixed(1), t.level, t.title, t.summary]
           .map(csvCell)

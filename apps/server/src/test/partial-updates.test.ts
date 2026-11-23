@@ -48,6 +48,7 @@ describe('wiki.patch', () => {
         { find: 'Sam laughed', replace: 'Dana laughed' },
       ],
       append: '## Notes\nFixed attribution.',
+      compact: false,
     });
     expect(res).toMatchObject({ id: page.id, revision: 2, kind: 'session', sessionId: session.id });
     expect(res).not.toHaveProperty('bodyMd');
@@ -226,10 +227,8 @@ describe('events.updateMany', () => {
       ],
       compact: true,
     });
-    expect(res).toEqual([
-      { id: a!.id, atSec: 10, category: 'Note' },
-      { id: b!.id, atSec: 25, category: 'Laugh' },
-    ]);
+    // 'Laugh' matches no button of the show, so it became a free label.
+    expect(res).toEqual({ ids: [a!.id, b!.id], freeLabels: [{ category: 'Laugh', indexes: [1] }] });
     const list = await call(owner, 'events.list', { sessionId: session.id });
     expect(list.map((e) => [e.message, e.atSec])).toEqual([
       ['4 laughs', 10],

@@ -67,6 +67,7 @@ describe('transcript find and batch update', () => {
         { segmentId: b!, text: 'nothing to see here' }, // no-op: skipped
         { segmentId: c!, text: 'the dr said 50% off', speaker: 'Dana' },
       ],
+      compact: false,
     });
     expect(res.updated).toBe(2);
     if (!('segments' in res)) throw new Error('expected the full response');
