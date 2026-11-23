@@ -1,6 +1,5 @@
-import type { Session } from '@autologger/contract';
 import { BotIcon, FilmIcon } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { useTopics } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { useSessionWrite } from '@/api/session/writes';
@@ -11,7 +10,7 @@ import { cn } from '@/shared/lib/utils';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { Tooltip } from '@/shared/ui/Tooltip';
 import { MakeVideoDialog, useMakeVideoBlocked } from '../../routes/compilations/MakeVideoDialog';
-import { useWorkspace } from '../context';
+import { useSessionSlice, useWorkspace } from '../context';
 import {
   FEED_EMPTY,
   FeedShell,
@@ -22,7 +21,17 @@ import {
 } from '../feed';
 import { TOPIC_COLUMNS, TopicRow } from './TopicRow';
 
-export function TopicsTab({ session }: { session: Session }) {
+export const TopicsTab = memo(function TopicsTab() {
+  const session = useSessionSlice((s) => ({
+    id: s.id,
+    title: s.title,
+    showId: s.showId,
+    showName: s.showName,
+    isRolling: s.isRolling,
+    sourceKind: s.sourceKind,
+    sourceUrl: s.sourceUrl,
+  }));
+
   const { canWrite, seek } = useWorkspace();
   const q = useTopics(session.id);
   const { confirm, confirmElement } = useConfirm();
@@ -159,4 +168,4 @@ export function TopicsTab({ session }: { session: Session }) {
       />
     </FeedShell>
   );
-}
+});

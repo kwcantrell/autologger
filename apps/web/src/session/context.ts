@@ -1,13 +1,20 @@
-import type { Capabilities, Session } from '@autologger/contract';
+import type { Capabilities, SessionDetail } from '@autologger/contract';
+import { useQuery } from '@tanstack/react-query';
 import { createContext, useContext, useMemo, useSyncExternalStore } from 'react';
+import { sessionQuery } from '@/api/queries';
 import type { Store } from '@/lib/store';
 import type { TransportClock } from '@/lib/timecode';
 import type { Player } from './audio/usePlayer';
 
 export type WorkspaceTab = 'events' | 'transcript' | 'topics' | 'dashboards' | 'agents' | 'export';
 
+/**
+ * What the session workspace shares with everything under it. It holds no session data (read it
+ * with `useSessionSlice`), so a session push doesn't re-render every consumer.
+ */
 export interface Workspace {
-  session: Session;
+  sessionId: string;
+  showId: string;
   caps: Capabilities | undefined;
   /** The user may change this session's content. */
   canWrite: boolean;
@@ -31,6 +38,16 @@ export function useWorkspace(): Workspace {
   return ws;
 }
 
+/**
+ * The fields of the open session that the caller reads, re-rendering it only when they change
+ * (structural sharing keeps an unchanged slice the same object). Select only what you use.
+ */
+export function useSessionSlice<T>(select: (s: SessionDetail) => T): T {
+  const { sessionId } = useWorkspace();
+  // The workspace only renders once the session is loaded, so `data` is there.
+  return useQuery({ ...sessionQuery(sessionId), select }).data as T;
+}
+
 /** A value that changes faster than React should render: read it, or subscribe to changes. */
 export interface Source<T> {
   get: () => T;
@@ -43,8 +60,8 @@ export interface Source<T> {
  * in event handlers and effects, or through `usePlayhead` with a coarse selector.
  */
 export function usePlayheadSource(): Source<number> {
-  const { session, clock, player } = useWorkspace();
-  const rolling = session.isRolling;
+  const { clock, player } = useWorkspace();
+  const rolling = useSessionSlice((s) => s.isRolling);
   const position = player.position;
   return useMemo(
     () => ({

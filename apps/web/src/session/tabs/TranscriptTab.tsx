@@ -10,7 +10,7 @@ import { Button } from '@/shared/components/ui/button';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { useTextPrompt } from '@/shared/ui/PromptDialog';
 import type { Player } from '../audio/usePlayer';
-import { useWorkspace } from '../context';
+import { useSessionSlice, useWorkspace } from '../context';
 import { FeedShell, FeedTable, ToolbarCaption } from '../feed';
 import { TranscriptImportDialog } from '../TranscriptImportDialog';
 import { SEGMENT_COLUMNS, SegmentRow } from './SegmentRow';
@@ -65,7 +65,15 @@ const TranscriptRow = memo(function TranscriptRow({
   );
 });
 
-export function TranscriptTab({ session }: { session: Session }) {
+export const TranscriptTab = memo(function TranscriptTab() {
+  const session = useSessionSlice((s) => ({
+    id: s.id,
+    title: s.title,
+    isRolling: s.isRolling,
+    audioSeconds: s.audioSeconds,
+    transcriptStatus: s.transcriptStatus,
+  }));
+
   const { canWrite, seek, player, caps } = useWorkspace();
   const q = useTranscript(session.id);
   const jobs = useJobs(session.id);
@@ -206,4 +214,4 @@ export function TranscriptTab({ session }: { session: Session }) {
       )}
     </FeedShell>
   );
-}
+});

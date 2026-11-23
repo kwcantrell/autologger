@@ -20,7 +20,7 @@ import { useConfirm } from '@/shared/ui/ConfirmDialog';
 import { Tooltip } from '@/shared/ui/Tooltip';
 import { recorderSupport, type useRecorder } from './audio/useRecorder';
 import { CategoryStrip } from './CategoryStrip';
-import { indexAt, usePlayhead, useWorkspace } from './context';
+import { indexAt, usePlayhead, useSessionSlice, useWorkspace } from './context';
 import { Timeline } from './Timeline';
 
 type Recorder = ReturnType<typeof useRecorder>;
@@ -248,14 +248,9 @@ export function TransportStrip({
   const { confirm, confirmElement } = useConfirm();
   // Nothing here reads the clock or playhead per frame: ClockReadout and the Timeline's leaves
   // do, and the marker jumps re-render only when the neighbouring markers change.
-  const {
-    session,
-    canWrite,
-    caps,
-    player,
-    clock: clockStore,
-    revealEvent: onRevealEvent,
-  } = useWorkspace();
+  const { canWrite, caps, player, clock: clockStore, revealEvent: onRevealEvent } = useWorkspace();
+  // The strip shows most of the session's fields, so it follows the whole session.
+  const session = useSessionSlice((s) => s);
   // Move the playhead without playing (and without the rolling check of the context's `seek`).
   const { seek: playerSeek } = player;
   const onSeek = useCallback((sec: number) => void playerSeek(sec, false), [playerSeek]);

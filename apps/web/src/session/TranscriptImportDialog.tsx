@@ -57,7 +57,7 @@ export function TranscriptImportDialog({
   segments,
   onClose,
 }: {
-  session: Session;
+  session: Pick<Session, 'id' | 'title'>;
   /** The session's recordings (media.list); those still uploading can't take a transcript. */
   segments: AudioSegment[] | undefined;
   onClose: () => void;

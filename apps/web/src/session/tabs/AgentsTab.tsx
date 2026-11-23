@@ -1,13 +1,13 @@
 // Agents tab: how to connect an MCP agent, and the session's change log with undo.
 
 import type { Change, Session } from '@autologger/contract';
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { useCapabilities, useChanges, useEvents, useTopics } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { useSessionMutation } from '@/api/session/writes';
 import { settingsOpen } from '@/lib/store';
 import { eventSec } from '@/lib/timecode';
-import { useWorkspace } from '@/session/context';
+import { useSessionSlice, useWorkspace } from '@/session/context';
 import { FeedShell, FeedTable, IconFilter, ToolbarCaption } from '@/session/feed';
 import { showToast } from '@/shared/components/Toast';
 import { Button } from '@/shared/components/ui/button';
@@ -51,14 +51,20 @@ function useNow(ms = 30_000) {
 
 // ── tab ─────────────────────────────────────────────────────────────
 
-export function AgentsTab({ session }: { session: Session }) {
+export const AgentsTab = memo(function AgentsTab() {
+  const session = useSessionSlice((s) => ({
+    id: s.id,
+    frameRate: s.frameRate,
+    startOffsetFrames: s.startOffsetFrames,
+  }));
+
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <ConnectCard />
       <ChangeFeed session={session} />
     </div>
   );
-}
+});
 
 function copyToClipboard(value: string) {
   navigator.clipboard.writeText(value).then(
@@ -113,7 +119,11 @@ function ConnectCard() {
   );
 }
 
-function ChangeFeed({ session }: { session: Session }) {
+function ChangeFeed({
+  session,
+}: {
+  session: Pick<Session, 'id' | 'frameRate' | 'startOffsetFrames'>;
+}) {
   const { canWrite, seek } = useWorkspace();
   const [filter, setFilter] = useState<Filter>('all');
   const changes = useChanges(session.id, filter === 'mcp' ? 'mcp' : 'all');

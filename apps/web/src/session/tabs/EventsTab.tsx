@@ -16,7 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/shared/components/ui/dropdown-menu';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
-import { useWorkspace } from '../context';
+import { useSessionSlice, useWorkspace } from '../context';
 import {
   FeedShell,
   FeedTable,
@@ -73,13 +73,19 @@ const FeedEventRow = memo(function FeedEventRow({
   );
 });
 
-export function EventsTab({
-  session,
+export const EventsTab = memo(function EventsTab({
   flash,
 }: {
-  session: Session;
   flash: { id: string; n: number } | null;
 }) {
+  const session = useSessionSlice((s) => ({
+    id: s.id,
+    showId: s.showId,
+    isRolling: s.isRolling,
+    frameRate: s.frameRate,
+    startOffsetFrames: s.startOffsetFrames,
+  }));
+
   const events = useEvents(session.id);
   const categories = useCategories(session.showId).data ?? NO_CATEGORIES;
   const { canWrite, seek } = useWorkspace();
@@ -271,4 +277,4 @@ export function EventsTab({
       {confirmElement}
     </FeedShell>
   );
-}
+});
