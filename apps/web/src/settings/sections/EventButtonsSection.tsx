@@ -79,7 +79,7 @@ const KINDS: { value: CategoryKind; label: string; help: string }[] = [
   {
     value: 'dropdown',
     label: 'Dropdown',
-    help: 'You pick an option when logging. The option becomes the event message.',
+    help: 'You pick an option when logging, and can add a note.',
   },
   { value: 'text', label: 'Text', help: 'You type a short message when logging.' },
   { value: 'toggle', label: 'On / Off', help: 'Toggles between two states and logs each change.' },
@@ -617,7 +617,9 @@ function ButtonPanel({
       {btn.kind === 'dropdown' && (
         <FieldSet>
           <FieldLegend>Options</FieldLegend>
-          <FieldDescription>The chosen option becomes the event message.</FieldDescription>
+          <FieldDescription>
+            The chosen option is logged with the event, before any note.
+          </FieldDescription>
           <FieldGroup className="gap-2">
             {btn.options.map((opt, i) => {
               const n = i + 1;

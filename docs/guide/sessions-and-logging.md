@@ -47,7 +47,7 @@ colour, a type and a position.
 | Type     | What a press does                                                         |
 | -------- | ------------------------------------------------------------------------- |
 | Button   | Logs one event with the button's name.                                    |
-| Dropdown | Asks you to choose an option; the option becomes the event message.       |
+| Dropdown | Asks you to choose an option and an optional note; both show in the feed. |
 | Text     | Asks for a short note, which becomes the event message.                   |
 | On / Off | Toggles between two states and logs each change with its On or Off label. |
 
