@@ -405,7 +405,10 @@ export function TransportStrip({
                 tabIndex={0}
                 className="m-0 flex min-w-0 flex-1 cursor-default flex-row items-baseline gap-x-1.5 overflow-hidden rounded-[4px] font-ui text-[0.8125rem] leading-tight text-si-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
               >
-                <span className="min-w-0 truncate font-semibold">{session.showName || '—'}</span>
+                {/* The show keeps its natural width up to half the line; the title takes the rest. */}
+                <span className="min-w-0 max-w-1/2 shrink-0 truncate font-semibold">
+                  {session.showName || '—'}
+                </span>
                 {session.title && session.title !== session.showName && (
                   <>
                     <span className="shrink-0 select-none text-si-dim" aria-hidden="true">

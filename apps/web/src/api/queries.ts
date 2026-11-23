@@ -27,6 +27,7 @@ import {
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { getCapabilities, RpcError, rpc } from './rpc';
 import { journaledFetch } from './session/journal';
+import { shareRowsById } from './session/share';
 import { fetchShowJobs, type ShowJobs, sameJobs, UNFINISHED } from './showJobs';
 
 export const qk = {
@@ -45,8 +46,11 @@ export const qk = {
   topics: (sessionId: string) => ['topics', sessionId] as const,
   dashboards: (sessionId: string) => ['dashboards', sessionId] as const,
   dashboardQueryAll: (sessionId: string) => ['dashboard-query', sessionId] as const,
+  /** Every live query of one name, so a change refetches only the queries that read it. */
+  dashboardQueryNamed: (sessionId: string, name: DashboardQuery['name']) =>
+    ['dashboard-query', sessionId, name] as const,
   dashboardQuery: (sessionId: string, query: DashboardQuery) =>
-    ['dashboard-query', sessionId, query] as const,
+    ['dashboard-query', sessionId, query.name, query] as const,
   media: (sessionId: string) => ['media', sessionId] as const,
   /** `ready`: which segments have peaks, so a new waveform refetches. */
   waveform: (sessionId: string, ready: string) => ['waveform', sessionId, ready] as const,
@@ -174,6 +178,8 @@ function useSessionList<N extends OpName>(
   return useQuery<Out<N>, RpcError, Out<N>, QueryKey>({
     queryKey: key,
     queryFn: ({ signal }) => journaledFetch(qc, key, () => rpc(name, input, signal)),
+    // Rows keep their identity by id, so memoized rows skip re-rendering when one is inserted.
+    structuralSharing: shareRowsById,
     ...opts,
   });
 }

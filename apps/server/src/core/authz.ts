@@ -108,11 +108,16 @@ export async function requireSession(
  * the session. The checks above only use ctx.actor and ctx.db, so no op context is needed.
  */
 export async function canReadSession(actor: Actor, sessionId: string): Promise<boolean> {
+  return (await sessionAccess(actor, sessionId)) !== null;
+}
+
+/** The actor's access to a session's show outside an op, or null when they cannot read it. */
+export async function sessionAccess(actor: Actor, sessionId: string): Promise<ShowAccess | null> {
   return db.transaction(async (tx) => {
     const ctx = { actor, db: tx } as Pick<Ctx, 'actor' | 'db'> as Ctx;
     return requireSession(ctx, sessionId, 'read').then(
-      () => true,
-      () => false,
+      (r) => r.access,
+      () => null,
     );
   });
 }

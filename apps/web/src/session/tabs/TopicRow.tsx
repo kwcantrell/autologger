@@ -117,7 +117,7 @@ export function TopicRow({
       <td className={cn(FEED_CELL, FEED_CELL_TEXT, 'align-top max-md:hidden @max-md/feed:hidden')}>
         <Input
           variant="unstyled"
-          className={cn(FEED_INLINE_INPUT, 'tabular-nums')}
+          className={cn(FEED_INLINE_INPUT, 'font-tc tabular-nums')}
           type="number"
           min={0}
           aria-label="Duration in seconds"
@@ -171,7 +171,9 @@ export function TopicRow({
             className={cn(
               FEED_INLINE_INPUT,
               FEED_TEXTAREA,
-              'min-w-0 font-semibold',
+              // An arbitrary property, so it replaces the input face's `[font-weight:inherit]` (a plain
+              // `font-semibold` lost to it and the title rendered at 400).
+              'min-w-0 [font-weight:600]',
               conflicts.length > 0 && 'max-md:basis-full',
             )}
             aria-label="Title"

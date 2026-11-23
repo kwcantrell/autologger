@@ -56,7 +56,7 @@ export function fmtRelative(iso: string, now: number): string {
   if (a < 3600) return RTF.format(Math.round(s / 60), 'minute');
   if (a < 86_400) return RTF.format(Math.round(s / 3600), 'hour');
   if (a < 30 * 86_400) return RTF.format(Math.round(s / 86_400), 'day');
-  return new Date(iso).toLocaleDateString();
+  return new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
 }
 
 export function ChangeRow({
@@ -118,21 +118,22 @@ export function ChangeRow({
           '@max-3xl/feed:col-[2/-1] @max-3xl/feed:row-start-2',
         )}
       >
-        <div className="flex min-w-0 flex-wrap items-center gap-1">
-          <span className="truncate font-semibold">{c.actor?.name ?? 'System'}</span>
+        {/* The client is a name the agent or device chose: plain muted text, not an accent badge
+            (the accent is for primary, selection, focus and ignition). In the table it takes its
+            own line under the name; stacked, it follows the name on the same line. */}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5">
+          <span className="min-w-0 truncate font-semibold">{c.actor?.name ?? 'System'}</span>
+          <Badge variant="outline" size="sm" className="shrink-0">
+            {VIA_LABEL[c.via]}
+          </Badge>
           {client && (
-            <Badge
-              variant="outline"
-              size="sm"
-              className="border-[color-mix(in_oklab,var(--si-accent)_45%,var(--si-line))] text-(--si-accent-text) @max-3xl/feed:max-w-full @max-3xl/feed:whitespace-normal @max-3xl/feed:[overflow-wrap:anywhere]"
+            <span
+              className="max-w-[12rem] basis-full truncate text-[0.72rem] text-si-muted @max-3xl/feed:max-w-full @max-3xl/feed:basis-auto"
               title={`${c.via === 'mcp' ? 'MCP client' : 'Companion device'}: ${client}`}
             >
               {client}
-            </Badge>
+            </span>
           )}
-          <Badge variant="outline" size="sm">
-            {VIA_LABEL[c.via]}
-          </Badge>
         </div>
       </td>
       <td

@@ -27,6 +27,19 @@ import { ChangedElsewhere, useServerDraft } from '../serverDraft';
 
 export type TimeMode = 'session' | 'world';
 
+const SOURCE_BADGE = 'shrink-0 px-1 py-px align-[0.1em] text-[0.6rem]';
+
+/** The category's colour on its own channel (DESIGN.md: a 2px swatch, never the label). */
+function CategorySwatch({ color }: { color: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="size-2 shrink-0 rounded-[2px]"
+      style={{ backgroundColor: color }}
+    />
+  );
+}
+
 export function eventColumns(timeMode: TimeMode): Column[] {
   return [
     JUMP_COLUMN,
@@ -78,6 +91,19 @@ export function EventRow({
   const messageText = [e.value && e.value !== e.message ? e.value : null, e.message]
     .filter(Boolean)
     .join(' — ');
+  const sourceBadge = agent ? (
+    <Badge
+      variant="outline"
+      className={SOURCE_BADGE}
+      title={`Logged by an agent${e.createdBy ? ` acting as ${e.createdBy.name}` : ''}`}
+    >
+      agent
+    </Badge>
+  ) : e.source === 'companion' ? (
+    <Badge variant="outline" className={SOURCE_BADGE} title="Logged from a Companion device">
+      deck
+    </Badge>
+  ) : null;
 
   return (
     <tr
@@ -136,10 +162,8 @@ export function EventRow({
             {timeText}
           </span>
         )}
-        <span
-          className="block whitespace-normal font-ui text-[0.68rem] font-semibold md:@min-md/feed:hidden"
-          style={{ color: e.color }}
-        >
+        <span className="flex items-center gap-1.5 whitespace-normal font-ui text-[0.68rem] font-semibold text-si-fg md:@min-md/feed:hidden">
+          <CategorySwatch color={e.color} />
           {e.category}
         </span>
       </td>
@@ -149,31 +173,35 @@ export function EventRow({
           FEED_CELL_LABEL,
           'align-middle whitespace-nowrap max-md:hidden @max-md/feed:hidden',
         )}
-        style={{ color: e.color }}
       >
         {editable ? (
-          <select
-            className={cn(FEED_INLINE_INPUT, 'bg-si-panel')}
-            aria-label="Category"
-            value={e.categoryId ?? ''}
-            style={{ color: e.color }}
-            onChange={(ev) =>
-              void onSave({
-                eventId: e.id,
-                categoryId: ev.target.value || null,
-                ...(ev.target.value ? {} : { category: e.category }),
-              }).catch(() => {})
-            }
-          >
-            {!e.categoryId && <option value="">{e.category}</option>}
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <span className="flex items-center gap-1.5">
+            <CategorySwatch color={e.color} />
+            <select
+              className={cn(FEED_INLINE_INPUT, 'min-w-0 flex-1 bg-si-panel')}
+              aria-label="Category"
+              value={e.categoryId ?? ''}
+              onChange={(ev) =>
+                void onSave({
+                  eventId: e.id,
+                  categoryId: ev.target.value || null,
+                  ...(ev.target.value ? {} : { category: e.category }),
+                }).catch(() => {})
+              }
+            >
+              {!e.categoryId && <option value="">{e.category}</option>}
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </span>
         ) : (
-          e.category
+          <span className="flex items-center gap-1.5">
+            <CategorySwatch color={e.color} />
+            {e.category}
+          </span>
         )}
       </td>
       <td
@@ -206,7 +234,12 @@ export function EventRow({
             />
           ) : (
             // `anywhere`, not `break-word`: only it lets a long token (a URL) shrink the cell.
-            <span className="min-w-0 [overflow-wrap:anywhere]">{messageText}</span>
+            // The source badge flows inline after the text, so it stays beside the last word
+            // when the message wraps instead of drifting to the cell's far edge.
+            <span className="min-w-0 [overflow-wrap:anywhere]">
+              {messageText}
+              {sourceBadge && <> {sourceBadge}</>}
+            </span>
           )}
           {editable && conflicts.length > 0 && (
             <ChangedElsewhere
@@ -216,24 +249,7 @@ export function EventRow({
               }}
             />
           )}
-          {agent && (
-            <Badge
-              variant="outline"
-              className="shrink-0 px-1 py-px text-[0.6rem]"
-              title={`Logged by an agent${e.createdBy ? ` acting as ${e.createdBy.name}` : ''}`}
-            >
-              agent
-            </Badge>
-          )}
-          {e.source === 'companion' && (
-            <Badge
-              variant="outline"
-              className="shrink-0 px-1 py-px text-[0.6rem]"
-              title="Logged from a Companion device"
-            >
-              deck
-            </Badge>
-          )}
+          {editable && sourceBadge}
         </span>
       </td>
       <td
