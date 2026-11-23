@@ -5,7 +5,7 @@ import type { Session, SessionEvent } from '@autologger/contract';
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isTypingTarget } from '@/lib/keys';
 import { eventSec, fmtSec } from '@/lib/timecode';
-import { cn } from '@/shared/lib/utils';
+import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 import { isOverlayOpen } from '@/shared/ui/overlayOpen';
 import type { PlayerSegment } from './audio/usePlayer';
 import { TimelineWaveform } from './TimelineWaveform';
@@ -434,32 +434,37 @@ export function Timeline({
         role="toolbar"
         aria-label="Timeline zoom"
       >
-        <input
-          className={ZOOM_VALUE}
-          aria-label="Timeline zoom percent"
-          value={zoomText}
-          onChange={(e) => setZoomText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              const n = Number.parseFloat(zoomText);
-              if (Number.isFinite(n)) applyZoom(n / 100);
+        {/* The label carries the touch hit area (an input draws no ::after); a tap on it
+            focuses the field, which sits above it. */}
+        <label className={cn('relative flex shrink-0', TOUCH_HIT)}>
+          <input
+            className={cn(ZOOM_VALUE, 'relative z-[1]')}
+            aria-label="Timeline zoom percent"
+            value={zoomText}
+            onChange={(e) => setZoomText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const n = Number.parseFloat(zoomText);
+                if (Number.isFinite(n)) applyZoom(n / 100);
+                else setZoomText(`${Math.round(zoom * 100)}%`);
+                zoomTextSet.current = true;
+                (e.target as HTMLInputElement).blur();
+              } else if (e.key === 'Escape') {
+                setZoomText(`${Math.round(zoom * 100)}%`);
+                zoomTextSet.current = true;
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            onBlur={() => {
+              if (zoomTextSet.current) zoomTextSet.current = false;
               else setZoomText(`${Math.round(zoom * 100)}%`);
-              zoomTextSet.current = true;
-              (e.target as HTMLInputElement).blur();
-            } else if (e.key === 'Escape') {
-              setZoomText(`${Math.round(zoom * 100)}%`);
-              zoomTextSet.current = true;
-              (e.target as HTMLInputElement).blur();
-            }
-          }}
-          onBlur={() => {
-            if (zoomTextSet.current) zoomTextSet.current = false;
-            else setZoomText(`${Math.round(zoom * 100)}%`);
-          }}
-        />
+            }}
+          />
+        </label>
         <div
           ref={railRef}
-          className="relative isolate h-(--v4-zoom-handle-h) min-w-0 flex-1 rounded-full border border-si-line bg-si-panel-2"
+          // Touch: room either side so the handles' 44px hit areas stay off the zoom field.
+          className="relative isolate h-(--v4-zoom-handle-h) min-w-0 flex-1 rounded-full border border-si-line bg-si-panel-2 max-md:mx-4 pointer-coarse:mx-4"
         >
           <div
             className="absolute top-1/2 z-[1] h-[120%] -translate-y-1/2 cursor-grab touch-none rounded-full bg-[color-mix(in_oklab,var(--si-accent)_55%,var(--si-panel-2))] active:cursor-grabbing"
@@ -469,7 +474,7 @@ export function Timeline({
           <button
             type="button"
             aria-label="Increase timeline zoom"
-            className={ZOOM_HANDLE}
+            className={cn(ZOOM_HANDLE, TOUCH_HIT)}
             style={{ left: `${view.left * 100}%` }}
             onPointerDown={railDrag('start')}
             onKeyDown={(e) => {
@@ -480,7 +485,7 @@ export function Timeline({
           <button
             type="button"
             aria-label="Reduce timeline zoom"
-            className={ZOOM_HANDLE}
+            className={cn(ZOOM_HANDLE, TOUCH_HIT)}
             style={{ left: `${(view.left + view.width) * 100}%` }}
             onPointerDown={railDrag('end')}
             onKeyDown={(e) => {

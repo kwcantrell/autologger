@@ -2,7 +2,7 @@ import { Dialog as SheetPrimitive } from '@base-ui/react/dialog';
 import { XIcon } from 'lucide-react';
 import type * as React from 'react';
 
-import { cn } from '@/shared/lib/utils';
+import { cn, TOUCH_HIT } from '@/shared/lib/utils';
 
 // shadcn Sheet (redesign-show-ignition D10). Hygiene rewrite: local `cn`; overlay and content sit
 // on the app's dialog z-index layer (--z-dialog-overlay / --z-dialog-content) instead of z-50, so a
@@ -69,7 +69,12 @@ function SheetContent({
       >
         {children}
         {showCloseButton && (
-          <SheetPrimitive.Close className="absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-open:bg-secondary">
+          <SheetPrimitive.Close
+            className={cn(
+              'absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-open:bg-secondary',
+              TOUCH_HIT,
+            )}
+          >
             <XIcon className="size-4" />
             <span className="sr-only">Close</span>
           </SheetPrimitive.Close>
