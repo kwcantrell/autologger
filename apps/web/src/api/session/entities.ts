@@ -4,6 +4,7 @@
 import type {
   AudioSegment,
   ChangeEntity,
+  DashboardQuery,
   Job,
   LiveEntity,
   SessionEvent,
@@ -35,6 +36,10 @@ const byStart = (a: { startSec: number }, b: { startSec: number }) => a.startSec
 const byOrdinal = (a: AudioSegment, b: AudioSegment) => a.ordinal - b.ordinal;
 const byNewest = (a: Job, b: Job) => b.createdAt.localeCompare(a.createdAt);
 
+/** The dashboards' live queries of these names (see runDashboardQuery for what each reads). */
+const dashboardQueries = (sid: string, ...names: DashboardQuery['name'][]): QueryKey[] =>
+  names.map((n) => qk.dashboardQueryNamed(sid, n));
+
 export interface EntitySpec {
   /** The cache entry holding this entity for a session. */
   key: (sessionId: string) => QueryKey;
@@ -53,26 +58,37 @@ export const SESSION_ENTITIES: Record<LiveEntity, EntitySpec> = {
   session: {
     key: qk.session,
     apply: 'session',
+    // Refetched on deletes and refetch hints; an upsert patches its row in them (cache.ts).
     derived: () => [qk.sessionsAll],
   },
   event: {
     key: qk.events,
     apply: 'list',
     sort: byEventTime,
-    // Dashboards' live queries; the sessions list shows event counts.
-    derived: (sid) => [qk.dashboardQueryAll(sid), qk.sessionsAll],
+    // Dashboards' live queries that count or list events. Not the sessions list (rail event
+    // counts): the server follows every event write with the session (publishSession, or an
+    // `invalidate session` on undo), which carries the new eventCount.
+    derived: (sid) =>
+      dashboardQueries(
+        sid,
+        'events_by_category',
+        'events_over_time',
+        'events',
+        'category_count',
+        'summary_stats',
+      ),
   },
   topic: {
     key: qk.topics,
     apply: 'list',
     sort: byStart,
-    derived: (sid) => [qk.dashboardQueryAll(sid)],
+    derived: (sid) => dashboardQueries(sid, 'topics', 'summary_stats'),
   },
   transcript_segment: {
     key: qk.transcript,
     apply: 'list',
     sort: byStart,
-    derived: (sid) => [qk.dashboardQueryAll(sid)],
+    derived: (sid) => dashboardQueries(sid, 'speaker_talk_time', 'summary_stats'),
   },
   audio_segment: {
     key: qk.media,
