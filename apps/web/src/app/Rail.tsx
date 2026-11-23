@@ -182,6 +182,10 @@ export function Rail({ activeSessionId }: { activeSessionId: string | null }) {
               closeSheet();
               navigate('/compilations');
             }}
+            onOpenSettings={() => {
+              setJobsOpenFor(null);
+              closeSheet();
+            }}
             onClose={() => setJobsOpenFor(null)}
           />
         )}

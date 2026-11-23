@@ -1,8 +1,10 @@
 import type { ApiToken } from '@autologger/contract';
-import { BotIcon } from 'lucide-react';
+import { BotIcon, DownloadIcon } from 'lucide-react';
 import { type FormEvent, Fragment, useState } from 'react';
 import { qk, useCapabilities, useOpMutation, useTokens } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
+import { useActive } from '@/app/useActive';
+import { CopyRow } from '@/session/tabs/CopyRow';
 import { showToast } from '@/shared/components/Toast';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
@@ -39,8 +41,10 @@ import {
 } from '@/shared/components/ui/select';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
+import { IMPORT_HELPER_ANCHOR } from '../openSettingsAt';
 import {
   CopyField,
+  copyText,
   EmptyState,
   ErrorAlert,
   ErrorState,
@@ -206,6 +210,9 @@ export function AgentsSection() {
 
       {error && <ErrorAlert>{error}</ErrorAlert>}
 
+      {/* Above the token list, so its loading doesn't move this card under a deep link. */}
+      <ImportHelperCard />
+
       <Card>
         <CardHeader>
           <CardTitle>Connected agents and tokens</CardTitle>
@@ -251,6 +258,105 @@ export function AgentsSection() {
       />
       {confirmElement}
     </>
+  );
+}
+
+/** Served by the API without sign-in (docs/importer.md). */
+const IMPORTER_PATH = '/api/importer/autologger-import.mjs';
+
+/** The local import helper: download, configuration and example commands (docs/importer.md). */
+function ImportHelperCard() {
+  const { show } = useActive();
+  const origin = location.origin;
+  const download = `${origin}${IMPORTER_PATH}`;
+  const showId = show?.id ?? '<showId>';
+  const run = 'node autologger-import.mjs';
+  const copy = (value: string) => void copyText(value, 'Command');
+  return (
+    <Card
+      id={IMPORT_HELPER_ANCHOR}
+      tabIndex={-1}
+      role="region"
+      aria-labelledby="settings-import-helper-title"
+      className="scroll-mt-4 outline-none"
+    >
+      <CardHeader>
+        <CardTitle id="settings-import-helper-title">Import from your computer</CardTitle>
+        <CardDescription>
+          When YouTube blocks the server’s downloads and the team’s YouTube sign-in (Settings › Team
+          details) doesn’t help, or for a private playlist, the AutoLogger import helper runs yt-dlp
+          on your computer with your browser’s YouTube sign-in and uploads only the audio. It also
+          builds compilations made to be built locally. Needs Node.js 22 or newer and yt-dlp (and
+          ffmpeg for compilations).
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <FieldGroup className="gap-4">
+          <Field>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                nativeButton={false}
+                render={<a href={download} download="autologger-import.mjs" />}
+              >
+                <DownloadIcon data-icon="inline-start" aria-hidden="true" />
+                Download autologger-import.mjs
+              </Button>
+            </div>
+            <CopyRow
+              label="Or download in a terminal"
+              value={`curl -fLO ${download}`}
+              onCopy={copy}
+            />
+          </Field>
+          <FieldSeparator />
+          <Field>
+            <CopyRow
+              label="AUTOLOGGER_URL"
+              value={`export AUTOLOGGER_URL=${origin}`}
+              onCopy={copy}
+            />
+            <CopyRow
+              label="AUTOLOGGER_TOKEN"
+              value="export AUTOLOGGER_TOKEN=<token>"
+              onCopy={copy}
+            />
+            <FieldDescription>
+              Replace &lt;token&gt; with a personal access token created above.
+            </FieldDescription>
+          </Field>
+          <FieldSeparator />
+          <Field>
+            <CopyRow
+              label="Import a playlist"
+              value={`${run} playlist '<playlist-url>' --show ${showId} --cookies-from-browser chrome`}
+              onCopy={copy}
+            />
+            <CopyRow
+              label="Import one video"
+              value={`${run} video '<video-url>' --show ${showId} --cookies-from-browser chrome`}
+              onCopy={copy}
+            />
+            <CopyRow
+              label="Build a compilation"
+              value={`${run} compile <compilationId> --cookies-from-browser chrome`}
+              onCopy={copy}
+            />
+            <FieldDescription>
+              {show && (
+                <>
+                  <code className="font-tc">--show</code> is {show.name}.{' '}
+                </>
+              )}
+              <code className="font-tc">--cookies-from-browser</code> names the browser you’re
+              signed in to YouTube with (chrome, firefox, edge, safari…). The Compilations page
+              shows the compile command of each compilation waiting for a local build. Re-running a
+              command resumes it.
+            </FieldDescription>
+          </Field>
+        </FieldGroup>
+      </CardContent>
+    </Card>
   );
 }
 

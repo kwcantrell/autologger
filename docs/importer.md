@@ -19,6 +19,12 @@ curl -fLO https://<your-autologger>/api/importer/autologger-import.mjs
 `apps/importer/autologger-import.mjs` next to the server source); the route answers 404 when it
 is missing. It is a file route like the exports, not an op.
 
+The web app points users at it: Settings › Agents › _Import from your computer_ has the download
+link, `AUTOLOGGER_URL` / `AUTOLOGGER_TOKEN` and example commands; import dialogs and the
+background jobs list link there (and to the team's YouTube sign-in, the usual fix) when an import
+fails with YouTube's bot check or a sign-in error; and the Compilations page shows a `buildLocally`
+compilation that is still queued as "Waiting for a local build" with its copyable `compile` command.
+
 ### Use
 
 ```sh
@@ -42,7 +48,7 @@ Bearer alp_…` and calls `POST /api/rpc/<op>`, so it gets the MCP surface and a
 | Step                     | Op                                                                                                                                                                                             |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Sessions for a playlist  | `media.importPlaylist` with `videos: [{url, title, durationSec?, uploadDate?}]` instead of `url`: same skipping, titles, episodes and `dryRun`, but no download jobs.                          |
-| Upload one video's audio | `media.createUpload` with `origin: "youtube"`, `youtube: {url, title?, uploadDate?, private?}` → PUT → `media.completeUpload` (transcription + waveform as usual).                             |
+| Upload one video's audio | `media.createUpload` with `origin: "youtube"`, `youtube: {url, title?, uploadDate?, private?}` → PUT → `media.completeUpload` (waveform; transcription unless `transcribe: false`).            |
 | Resume                   | `media.list`: a session whose YouTube segment is stored (status other than `uploading`) is done. A new YouTube upload replaces an unfinished one of the session.                               |
 | Build a compilation      | `compilations.create` with `buildLocally: true` (no compile job), then `compilations.createUpload` (clip plan in video seconds + presigned PUT) → PUT → `compilations.completeUpload` (ready). |
 

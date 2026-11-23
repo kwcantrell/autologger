@@ -179,7 +179,7 @@ defineOp({
 defineOp({
   name: 'events.create',
   description:
-    'Log one event. Pick the button by categoryId or category name (unknown names become free labels). Place it with `timecode` (HH:MM:SS:FF on the session clock) or `atSec` (seconds from the start, which lines up with transcript times); without either it lands at the live transport position. A timecode before the session start timecode (sessions_get) is refused with bad_request, like a negative atSec.',
+    'Log one event. Pick the button by categoryId or category name (unknown names become free labels). Place it with `timecode` (HH:MM:SS:FF on the session clock) or `atSec` (seconds from the start, which lines up with transcript times); without either it lands at the live transport position. Times are stored as whole frames: atSec snaps to the nearest frame of the session’s frame rate (frameRate in sessions_get; at 30 fps 69.975 → 69.967), and the returned atSec (rounded to ms, as in events_list) is the stored value. A timecode before the session start timecode (sessions_get) is refused with bad_request, like a negative atSec.',
   kind: 'write',
   surfaces: ['web', 'mcp', 'companion'],
   async run(ctx, { sessionId, ...input }) {
@@ -193,7 +193,7 @@ defineOp({
 defineOp({
   name: 'events.createMany',
   description:
-    'Log up to 500 events at once (same fields as events.create). All-or-nothing: an invalid item (e.g. a timecode before the session start) fails the whole call with bad_request naming its index. Use atSec to line events up with the transcript. Returns the created events in input order; pass `compact: true` to get only `[{ id, atSec, category }]` per event (atSec in seconds from the session start, category = resolved button name), which saves context on large batches.',
+    'Log up to 500 events at once (same fields as events.create). All-or-nothing: an invalid item (e.g. a timecode before the session start) fails the whole call with bad_request naming its index. Use atSec to line events up with the transcript; it snaps to the session’s frame grid like events_create, so compare returned atSec values, not the ones you sent. Returns the created events in input order; pass `compact: true` to get only `[{ id, atSec, category }]` per event (atSec in seconds from the session start, category = resolved button name), which saves context on large batches.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, events: list, compact }) {
@@ -275,7 +275,7 @@ async function updateEventRow(
 defineOp({
   name: 'events.update',
   description:
-    'Edit an event’s button, message, value or time (`atSec` in seconds from the session start, or `timecode` on the session clock; a timecode before the session start timecode is refused with bad_request).',
+    'Edit an event’s button, message, value or time (`atSec` in seconds from the session start, or `timecode` on the session clock; a timecode before the session start timecode is refused with bad_request). atSec snaps to the nearest frame of the session’s frame rate, as in events_create.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { eventId, ...patch }) {
@@ -289,7 +289,7 @@ defineOp({
 defineOp({
   name: 'events.updateMany',
   description:
-    'Edit up to 500 events of one session in one call. Each item is { id (event id from events_list), and only the fields to change: categoryId | category (button), message, value, atSec (seconds from the session start, as in transcript_text) | timecode }; omitted fields stay as they are. All-or-nothing: an unknown id or an event from another session fails the whole call with nothing changed. Each edit is its own entry in the change log, so it can be undone per event. Returns the updated events in input order; pass `compact: true` to get only `[{ id, atSec, category }]`.',
+    'Edit up to 500 events of one session in one call. Each item is { id (event id from events_list), and only the fields to change: categoryId | category (button), message, value, atSec (seconds from the session start, as in transcript_text; snaps to the session’s frame grid as in events_create) | timecode }; omitted fields stay as they are. All-or-nothing: an unknown id or an event from another session fails the whole call with nothing changed. Each edit is its own entry in the change log, so it can be undone per event. Returns the updated events in input order; pass `compact: true` to get only `[{ id, atSec, category }]`.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, events: list, compact }) {

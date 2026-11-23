@@ -15,6 +15,7 @@ import { FieldDescription, FieldGroup, FieldSeparator } from '@/shared/component
 import { Spinner } from '@/shared/components/ui/spinner';
 import { Textarea } from '@/shared/components/ui/textarea';
 import { useConfirm } from '@/shared/ui/ConfirmDialog';
+import { YOUTUBE_ACCESS_ANCHOR } from '../openSettingsAt';
 import { SettingRow } from '../parts';
 
 const when = (iso: string | null) =>
@@ -63,7 +64,13 @@ export function YoutubeAccessCard({ team }: { team: Team }) {
   }
 
   return (
-    <Card>
+    <Card
+      id={YOUTUBE_ACCESS_ANCHOR}
+      tabIndex={-1}
+      role="region"
+      aria-labelledby="settings-team-youtube-label"
+      className="scroll-mt-4 outline-none"
+    >
       <CardContent>
         <FieldGroup className="gap-4">
           <SettingRow
