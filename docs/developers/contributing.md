@@ -91,7 +91,8 @@ The plugin marketplace has contributor plugins that walk you through all of this
 ```bash
 claude plugin marketplace add kwcantrell/autologger-marketplace
 claude plugin install autologger-contribute@autologger   # onboarding, workflow, starter tasks, pre-PR check
-claude plugin install autologger-dev@autologger          # implementation guides, reviewer agent, guard hooks
+claude plugin marketplace add pbakaus/impeccable         # design skill autologger-dev depends on
+claude plugin install autologger-dev@autologger          # implementation guides, reviewer and ui-designer agents, guard hooks
 ```
 
 Then run `/autologger-contribute:start-here` for a guided first tour, or
