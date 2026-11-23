@@ -3,7 +3,7 @@
 // refetches the session's lists after a reconnect (pushes missed while offline are gone).
 
 import type { SessionServerMessage } from '@autologger/contract';
-import { type QueryClient, type QueryKey, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { setServerTime } from '@/lib/timecode';
 import { qk } from './queries';
@@ -16,29 +16,6 @@ export type LiveStatus =
   | { state: 'open' }
   | { state: 'reconnecting'; attempt: number }
   | { state: 'closed'; reason: 'access_revoked' | 'deleted' | 'unauthenticated' };
-
-const queuedRefetch = new WeakMap<QueryClient, Set<string>>();
-
-/**
- * Refetch `key` so that no response read before now has the last word. A fetch in flight may have
- * been read before a push it would then overwrite: join it (not cancel it — cancelling on every
- * push could starve a slow list under a busy log) and fetch once more when it lands.
- */
-function refetchAfterInFlight(qc: QueryClient, key: QueryKey) {
-  if (qc.getQueryState(key)?.fetchStatus !== 'fetching') {
-    void qc.invalidateQueries({ queryKey: key, exact: true });
-    return;
-  }
-  const queued = queuedRefetch.get(qc) ?? new Set<string>();
-  queuedRefetch.set(qc, queued);
-  const hash = JSON.stringify(key);
-  if (queued.has(hash)) return;
-  queued.add(hash);
-  void qc.refetchQueries({ queryKey: key, exact: true }, { cancelRefetch: false }).finally(() => {
-    queued.delete(hash);
-    void qc.invalidateQueries({ queryKey: key, exact: true });
-  });
-}
 
 const PING_MS = 25_000;
 const MAX_BACKOFF_MS = 15_000;
@@ -96,8 +73,9 @@ export function useLiveSession(sessionId: string | undefined): LiveStatus {
           // Pushes reach us only from now on: whatever was read before (on first connect, the
           // lists loaded while the socket opened; after a reconnect, everything) may be missing
           // changes. Refetch what is loaded or loading; lists never fetched just go stale.
+          // Cancelling a fetch in flight is safe here: it happens once per hello, not per push.
           for (const key of sessionKeys(sessionId))
-            if (qc.getQueryState(key)) refetchAfterInFlight(qc, key);
+            if (qc.getQueryState(key)) void qc.invalidateQueries({ queryKey: key, exact: true });
           // Change lists are keyed per view under a common prefix.
           void qc.invalidateQueries({ queryKey: qk.changesAll(sessionId) });
           attempt = 0;

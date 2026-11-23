@@ -26,6 +26,7 @@ import {
 } from '@tanstack/react-query';
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { getCapabilities, RpcError, rpc } from './rpc';
+import { journaledFetch } from './session/journal';
 import { fetchShowJobs, type ShowJobs, sameJobs, UNFINISHED } from './showJobs';
 
 export const qk = {
@@ -154,14 +155,32 @@ export const useSession = (sessionId: string | undefined) =>
     { sessionId: sessionId ?? '' },
     { enabled: !!sessionId },
   );
+/**
+ * A session list that receives live patches: fetched through the journal so a push landing
+ * mid-fetch is replayed onto the response (api/session/journal.ts).
+ */
+function useSessionList<N extends OpName>(
+  key: QueryKey,
+  name: N,
+  input: FullOpInput<N>,
+  opts: QOpts<Out<N>> = {},
+) {
+  const qc = useQueryClient();
+  return useQuery<Out<N>, RpcError, Out<N>, QueryKey>({
+    queryKey: key,
+    queryFn: ({ signal }) => journaledFetch(qc, key, () => rpc(name, input, signal)),
+    ...opts,
+  });
+}
+
 export const useEvents = (sessionId: string) =>
-  useOpQuery(qk.events(sessionId), 'events.list', { sessionId });
+  useSessionList(qk.events(sessionId), 'events.list', { sessionId });
 export const useTranscript = (sessionId: string) =>
-  useOpQuery(qk.transcript(sessionId), 'transcript.get', { sessionId });
+  useSessionList(qk.transcript(sessionId), 'transcript.get', { sessionId });
 export const useTopics = (sessionId: string) =>
-  useOpQuery(qk.topics(sessionId), 'topics.list', { sessionId });
+  useSessionList(qk.topics(sessionId), 'topics.list', { sessionId });
 export const useDashboards = (sessionId: string) =>
-  useOpQuery(qk.dashboards(sessionId), 'dashboards.list', { sessionId });
+  useSessionList(qk.dashboards(sessionId), 'dashboards.list', { sessionId });
 export const useDashboardQuery = (sessionId: string, query: DashboardQuery | undefined) =>
   useOpQuery(
     qk.dashboardQuery(sessionId, query ?? ({ name: 'summary_stats' } as DashboardQuery)),
@@ -170,9 +189,9 @@ export const useDashboardQuery = (sessionId: string, query: DashboardQuery | und
     { enabled: !!query },
   );
 export const useMedia = (sessionId: string, enabled = true) =>
-  useOpQuery(qk.media(sessionId), 'media.list', { sessionId }, { enabled, retry: false });
+  useSessionList(qk.media(sessionId), 'media.list', { sessionId }, { enabled, retry: false });
 export const useJobs = (sessionId: string) =>
-  useOpQuery(qk.jobs(sessionId), 'jobs.list', { sessionId }, { retry: false });
+  useSessionList(qk.jobs(sessionId), 'jobs.list', { sessionId }, { retry: false });
 
 const subscribeVisibility = (onChange: () => void) => {
   document.addEventListener('visibilitychange', onChange);
