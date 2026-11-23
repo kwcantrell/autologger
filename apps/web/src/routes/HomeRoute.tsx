@@ -47,6 +47,8 @@ export function HomeRoute() {
                 <Link
                   href={`/sessions/${encodeURIComponent(recent.id)}`}
                   aria-label={`Jump back in to ${recent.title}`}
+                  // The link's ::after covers the card, so the (truncated) title's tooltip lives here.
+                  title={recent.title || undefined}
                   className="mt-1.5 inline-flex items-center gap-1.5 self-start text-sm font-medium text-(--si-accent-text) outline-none after:absolute after:inset-0 after:rounded-card after:content-['']"
                 >
                   Jump back in

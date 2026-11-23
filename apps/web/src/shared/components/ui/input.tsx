@@ -29,7 +29,7 @@ function Input({
       type={type}
       data-slot="input"
       className={cn(
-        'w-full min-w-0 rounded-ctl border border-input bg-(--si-bg) px-[0.65rem] py-2 text-foreground h-(--h-ctl) outline-none transition-[border-color,background] duration-150 [font:inherit] placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring aria-invalid:border-destructive',
+        'w-full min-w-0 rounded-ctl border border-input bg-(--si-bg) px-[0.65rem] py-2 text-foreground h-(--h-ctl) outline-none transition-[border-color,background] duration-150 placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring aria-invalid:border-destructive',
         className,
       )}
       {...props}
