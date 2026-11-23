@@ -34,7 +34,7 @@ interface SessionInfo {
   episodeDate: string | null;
   /** Episode date, or the creation instant — the same "sessionDate" search returns. */
   date: string;
-  /** Position in episode order (date, then title). */
+  /** Position in episode order (episode number when every session has one, else date; then title). */
   order: number;
   frameRate: number;
   startOffsetFrames: number;
@@ -81,8 +81,11 @@ async function loadKnowledge(ctx: Ctx, showId: string): Promise<Knowledge> {
     ...s,
     date: s.episodeDate ?? s.createdAt.toISOString().replace(/\.\d{3}Z$/, 'Z'),
   }));
+  // Episode numbers when every session has one (dates are often import dates), else the date.
+  const numbered = withDate.every((s) => /^\d+$/.test(s.episode.trim()));
   withDate.sort(
     (a, b) =>
+      (numbered ? Number(a.episode) - Number(b.episode) : 0) ||
       a.date.localeCompare(b.date) ||
       a.title.localeCompare(b.title, undefined, { numeric: true }) ||
       a.id.localeCompare(b.id),
@@ -132,7 +135,9 @@ async function loadKnowledge(ctx: Ctx, showId: string): Promise<Knowledge> {
   for (const page of pageMap.values()) {
     let ord = 0;
     for (const block of wikiBlocks(page.bodyMd, page.sessionId)) {
-      const several = block.claims.length > 1;
+      // A table row is read cell by cell even with one citation: a guide row's citation is about
+      // its row's subject and its own cell, not every page linked in the other columns.
+      const several = block.claims.length > 1 || block.markdown.trimStart().startsWith('|');
       for (const { citation: c, text, links } of block.claims) {
         ord++;
         const s = sessionMap.get(c.sessionId);
@@ -271,6 +276,12 @@ async function topicMoments(ctx: Ctx, k: Knowledge, sessionIds: string[]): Promi
     };
   });
 }
+
+/**
+ * Editorial notes ("Note" events, e.g. "speakers named by hand") are about the recording, not its
+ * content: findable by query, but never tagged with entities.
+ */
+const isNote = (m: Moment) => m.kind === 'event' && m.title.trim().toLowerCase() === 'note';
 
 async function eventMoments(ctx: Ctx, k: Knowledge, sessionIds: string[]): Promise<Moment[]> {
   if (!sessionIds.length) return [];
@@ -457,7 +468,7 @@ function mergeClips(moments: Moment[], gap: number, pointSec: number): MomentCli
 defineOp({
   name: 'moments.search',
   description:
-    'Find clip-ready moments of a show: time ranges in sessions, each with what happens there and the wiki pages (people, recurring bits, topics) it is about. Sources, by `kinds` (default all): "citation" — every citation on the show wiki, described by the sentence or list item that cites it and tagged with its page plus the [[pages]] linked in that block (the richest source once a wiki exists); "topic" — chapters; "event" — logged events (no end: endSec null); "transcript" — transcript lines (only those matching query or naming an entity). Filter with `query` (full text, websearch syntax: words, "phrases", -exclude, or; when nothing matches every word, moments matching any word are returned with relaxedQuery: true), `entities` (page titles, aliases or ids — a moment must be about all of them; for topics, events and transcript lines that means naming each entity\'s title or an alias in its text) or both, and `sessionId`. With a query, best matches first; without, in episode order then time. Every moment has sessionId, startSec and endSec (seconds from the session start; archived sessions included) — cite them, as [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), or use them as compilation clips. `mergeGapSec` > 0 also returns `clips`: this page\'s moments merged per session where they overlap or are at most that many seconds apart (moments without an end count as `pointSec` long), each within compilations_create\'s limits (at least 1 s; ranges over 20 min split into parts) — pass them to compilations_create as they are. transcriptCapped: true means more transcript lines matched than one search considers (5000, best first): narrow it. Use graph_entity first to see an entity\'s aliases, related pages and the sessions it appears in. Paged: total, limit (default 30, max 500), offset / nextOffset.',
+    'Find clip-ready moments of a show: time ranges in sessions, each with what happens there and the wiki pages (people, recurring bits, topics) it is about. Sources, by `kinds` (default all): "citation" — every citation on the show wiki, described by the sentence or list item that cites it and tagged with its page plus the [[pages]] linked in that block (in a table row: its own cell and the cells before it) (the richest source once a wiki exists); "topic" — chapters; "event" — logged events (no end: endSec null; "Note" events are editorial and never tagged with entities); "transcript" — transcript lines (only those matching query or naming an entity). Filter with `query` (full text, websearch syntax: words, "phrases", -exclude, or; when nothing matches every word, moments matching any word are returned with relaxedQuery: true), `entities` (page titles, aliases or ids — a moment must be about all of them; for topics, events and transcript lines that means naming each entity\'s title or an alias in its text) or both, and `sessionId`. With a query, best matches first; without, in episode order (episode numbers when every session has one, else dates) then time. Every moment has sessionId, startSec and endSec (seconds from the session start; archived sessions included) — cite them, as [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), or use them as compilation clips. `mergeGapSec` > 0 also returns `clips`: this page\'s moments merged per session where they overlap or are at most that many seconds apart (moments without an end count as `pointSec` long), each within compilations_create\'s limits (at least 1 s; ranges over 20 min split into parts) — pass them to compilations_create as they are. transcriptCapped: true means more transcript lines matched than one search considers (5000, best first): narrow it. Use graph_entity first to see an entity\'s aliases, related pages and the sessions it appears in. Paged: total, limit (default 30, max 500), offset / nextOffset.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
@@ -504,7 +515,7 @@ defineOp({
         free.push(...lines.moments);
         transcriptCapped = lines.capped;
       }
-      for (const m of free) m.entities = matchNames(m.text);
+      for (const m of free) m.entities = isNote(m) ? [] : matchNames(m.text);
       found.push(...free);
       if (entityIds.length)
         found = found.filter((m) =>
@@ -705,7 +716,7 @@ async function graphRows(ctx: Ctx, k: Knowledge) {
     ...(await topicMoments(ctx, k, sessionIds)),
     ...(await eventMoments(ctx, k, sessionIds)),
   ];
-  for (const m of free) m.entities = matchNames(m.text);
+  for (const m of free) m.entities = isNote(m) ? [] : matchNames(m.text);
   const order = (m: Moment) => k.sessions.get(m.sessionId)!.order;
   const moments = [...k.citations, ...free]
     .sort((a, b) => order(a) - order(b) || a.startSec - b.startSec || a.id.localeCompare(b.id))

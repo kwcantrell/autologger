@@ -21,7 +21,7 @@ Everything is a projection of stored data; nothing new is persisted.
 | Graph element                                         | Comes from                                                               |
 | ----------------------------------------------------- | ------------------------------------------------------------------------ |
 | **Show** node                                         | the show                                                                 |
-| **Episode** nodes                                     | sessions (episode order: episode date, then title)                       |
+| **Episode** nodes                                     | sessions (episode order: episode numbers when every session has one, else episode date; then title) |
 | **Entity** nodes: Person, Bit, Topic, Recap, Question | live wiki pages by kind, with aliases and the first paragraph as summary |
 | `PART_OF` episode → show                              | sessions                                                                 |
 | `RECAP_OF` recap → episode                            | a session page's `sessionId`                                             |
@@ -39,8 +39,13 @@ the session start), a title, a text saying what happens, and the **entities** it
   where it sits on the page, and its entities are the citing page plus every page `[[linked]]` in
   the same block. So "- [[Carly]] reads a letter about a moose [EP_01 00:10:00](…)" on the
   _Pig Talk_ page is a moment about Pig Talk and Carly.
+  A block with several citations gives each its own sentence and that sentence's links. A table
+  row is read cell by cell: a citation is tagged with the links in its own cell and in the cells
+  before it (the row's subject), so an episode-guide row is not a moment about every segment
+  listed in its last column.
 - **Topic moments** are chapters (title — summary, start, end).
-- **Event moments** are logged events (category, message; no end).
+- **Event moments** are logged events (category, message; no end). "Note" events (editorial
+  notes such as "speakers named by hand") are found by query but never tagged with entities.
 - **Transcript moments** are transcript lines, only when searching (by query or entity name).
 
 Topics, events and transcript lines carry no links, so their entities are found by whole-word,

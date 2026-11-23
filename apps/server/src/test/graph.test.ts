@@ -146,7 +146,7 @@ describe('moments.search', () => {
     await db.insert(schema.events).values({
       id: newId('evt'),
       sessionId: ep1.id,
-      category: 'Note',
+      category: 'Quote',
       message: 'Carly early',
       color: '#a3a3a3',
       timecodeFrames: 24 * 3540,
@@ -208,6 +208,50 @@ describe('moments.search', () => {
       'EP_02',
     ]);
     expect(res.total).toBe(3);
+  });
+
+  it('tags guide rows by their own cell, skips Note events, orders by episode number', async () => {
+    const { owner, show, ep1, ep2 } = await knowledgeShow();
+    // Dates say EP_02 aired first; the episode numbers say otherwise and win.
+    await call(owner, 'sessions.update', {
+      sessionId: ep1.id,
+      episode: '1',
+      episodeDate: '2026-08-01',
+    });
+    await call(owner, 'sessions.update', {
+      sessionId: ep2.id,
+      episode: '2',
+      episodeDate: '2026-07-01',
+    });
+    await call(owner, 'wiki.upsert', {
+      showId: show.id,
+      kind: 'topic',
+      title: 'Guide',
+      bodyMd: [
+        '| Ep | Recap | What happens | Segments |',
+        '|---|---|---|---|',
+        `| 2 | [[EP_02]] | The airport story [EP_02 00:20:00](/sessions/${ep2.id}?t=1200&to=1230) | [[Pig Talk]] |`,
+      ].join('\n'),
+    });
+    await call(owner, 'events.create', {
+      sessionId: ep2.id,
+      category: 'Note',
+      message: 'Carly named by hand',
+      atSec: 10,
+    });
+    const pig = await call(owner, 'moments.search', { showId: show.id, entities: ['Pig Talk'] });
+    expect(pig.moments.some((m) => m.source?.pageTitle === 'Guide')).toBe(false);
+    const row = await call(owner, 'moments.search', {
+      showId: show.id,
+      entities: ['Guide'],
+      kinds: ['citation'],
+    });
+    expect(row.moments[0]!.entities.map((e) => e.title)).toEqual(['Guide', 'EP_02']);
+    const carly = await call(owner, 'moments.search', { showId: show.id, entities: ['Carly'] });
+    expect(carly.moments.some((m) => m.title === 'Note')).toBe(false);
+    expect(carly.moments[0]!.sessionId).toBe(ep1.id);
+    const notes = await call(owner, 'moments.search', { showId: show.id, query: 'named by hand' });
+    expect(notes.moments.map((m) => m.title)).toContain('Note');
   });
 
   it('reports unknown entities, pages, and hides other shows', async () => {

@@ -15,7 +15,10 @@ export interface BlockCitation {
   citation: WikiCitation;
   /** The sentence the citation closes (from its start up to the citation), citations removed. */
   text: string;
-  /** [[link]] targets in that sentence. */
+  /**
+   * [[link]] targets in that sentence. In a table row, also the links of the cells before the
+   * citation's cell (the row's subject, e.g. the recap a guide row is about), not those after it.
+   */
   links: string[];
 }
 
@@ -122,6 +125,23 @@ function claimStarts(masked: string): number[] {
 
 const HAS_WORD = /[\p{L}\p{N}]/u;
 
+/** The span (sorted, non-overlapping) strictly containing `offset`, by binary search. */
+function spanAt<S extends { start: number; end: number }>(
+  spans: S[],
+  offset: number,
+): S | undefined {
+  let lo = 0;
+  let hi = spans.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const s = spans[mid]!;
+    if (offset <= s.start) hi = mid - 1;
+    else if (offset >= s.end) lo = mid + 1;
+    else return s;
+  }
+  return undefined;
+}
+
 /** Longest stretch of a sentence before its citation kept as the claim. */
 const CLAIM_MAX_CHARS = 600;
 
@@ -136,6 +156,7 @@ function blockClaims(markdown: string, pageSessionId: string | null | undefined)
   const noCites = blankSpans(markdown, all);
   const masked = noCites.replace(/\[\[[^\]\n]*\]\]/g, (l) => 'x'.repeat(l.length));
   const starts = claimStarts(masked);
+  const row = markdown.trimStart().startsWith('|');
   let k = 0;
   return wikiCitationSpans(markdown, pageSessionId).map(({ start, end, ...citation }) => {
     while (k + 1 < starts.length && starts[k + 1]! <= start) k++;
@@ -146,12 +167,20 @@ function blockClaims(markdown: string, pageSessionId: string | null | undefined)
       const cut = start - CLAIM_MAX_CHARS;
       const space = masked.indexOf(' ', cut);
       from = space === -1 || space >= start ? cut : space + 1;
+      // Citations are blanked in `masked`, so the cut can land inside one: start after it.
+      const inside = spanAt(all, from);
+      if (inside && inside.end < start) from = inside.end;
     }
     const piece = markdown.slice(from, end);
+    let links = wikiLinkTargets(piece);
+    if (row) {
+      const cell = masked.lastIndexOf('|', start - 1);
+      if (cell > 0) links = [...new Set([...wikiLinkTargets(markdown.slice(0, cell)), ...links])];
+    }
     return {
       citation,
       text: plainText(piece, { citations: false }).replace(/[\s.,;:]+$/, ''),
-      links: wikiLinkTargets(piece),
+      links,
     };
   });
 }

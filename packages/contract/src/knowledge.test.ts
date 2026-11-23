@@ -77,6 +77,15 @@ describe('claims at scale', () => {
     ]);
   });
 
+  it('never starts a long claim inside a citation', () => {
+    const items = Array.from(
+      { length: 30 },
+      (_, i) => `"line ${i}" in VAH_${i} [VAH_${i} 00:01:00](@ses_abc:${i * 10}.5-${i * 10 + 9}.5)`,
+    ).join(', ');
+    const [block] = wikiBlocks(`Joe says ${items}.`, 's');
+    for (const c of block!.claims) expect(c.text).not.toMatch(/ses_|\d\.\d-|\]\(|^\S*\)/);
+  });
+
   it('stays fast on blocks with thousands of citations', () => {
     const cites = (n: number, sep: string) =>
       Array.from({ length: n }, (_, i) => `[${i}](@${i}-${i + 1})`).join(sep);
