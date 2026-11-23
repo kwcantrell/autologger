@@ -37,6 +37,7 @@ import { AudioMenu, UploadBanner } from './AudioMenu';
 import { usePlayer } from './audio/usePlayer';
 import { useRecorder } from './audio/useRecorder';
 import { WorkspaceContext, type Workspace as WorkspaceCtx, type WorkspaceTab } from './context';
+import { jumpUnavailable } from './feed';
 import { SessionDetailsButton } from './SessionDetailsDialog';
 import { TransportStrip } from './TransportStrip';
 import { EventsTab } from './tabs/EventsTab';
@@ -109,15 +110,26 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
     [navigate],
   );
 
+  // Stable across Start/Stop (it reads the latest rolling state when called): every feed row
+  // takes it, and a new identity would re-render all of them.
+  const rollingRef = useRef(session.isRolling);
+  useEffect(() => {
+    rollingRef.current = session.isRolling;
+  }, [session.isRolling]);
+  // The feeds' jump buttons read this store, so Start/Stop re-renders only them.
+  useEffect(() => {
+    jumpUnavailable.set(session.isRolling ? 'Playback is off while timecode rolls.' : null);
+    return () => jumpUnavailable.set(null);
+  }, [session.isRolling]);
   const seek = useCallback(
     (sec: number, play = true) => {
-      if (session.isRolling) {
+      if (rollingRef.current) {
         showToast('Stop timecode to play back audio.', true);
         return;
       }
       void playerSeek(sec, play);
     },
-    [playerSeek, session.isRolling],
+    [playerSeek],
   );
 
   // Below lg the tab row scrolls sideways: keep the open tab in view, so a reload or a shared
@@ -279,7 +291,6 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
             recorder={recorder}
             onTransport={transport}
           />
-
           <Tabs
             value={tab}
             onValueChange={(v) => switchTab(v as WorkspaceTab)}
@@ -320,7 +331,8 @@ export function Workspace({ session, live }: { session: Session; live: LiveStatu
                 hidden={false}
                 inert={tab !== t.id}
                 className={cn(
-                  'relative z-[1] flex min-h-0 flex-col',
+                  // tint-isolated: Start/Stop/Play doesn't restyle a long feed (tailwind.css).
+                  'tint-isolated relative z-[1] flex min-h-0 flex-col',
                   tab === t.id
                     ? 'flex-1'
                     : 'h-0 flex-none overflow-hidden [content-visibility:hidden]',

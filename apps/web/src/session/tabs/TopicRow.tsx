@@ -43,14 +43,12 @@ function parseClock(s: string): number | null {
 export function TopicRow({
   t,
   canWrite,
-  rolling,
   onJump,
   onSave,
   onDelete,
 }: {
   t: Topic;
   canWrite: boolean;
-  rolling: boolean;
   onJump: (s: number) => void;
   /** Saves an edit; rejects when it failed (the caller reports why) and the row resets. */
   onSave: (patch: Omit<OpInput<'topics.update'>, 'topicId'>) => Promise<unknown>;
@@ -78,12 +76,7 @@ export function TopicRow({
       )}
     >
       <TableCell className={cn(FEED_CELL, 'align-top pt-1 @max-md/feed:pt-[0.1rem]')}>
-        <JumpButton
-          sec={t.startSec}
-          label={fmtSec(t.startSec)}
-          onJump={onJump}
-          unavailable={rolling ? 'Playback is off while timecode rolls.' : null}
-        />
+        <JumpButton sec={t.startSec} label={fmtSec(t.startSec)} onJump={onJump} />
       </TableCell>
       {/* Stacked: start, duration and level share the meta line. */}
       <TableCell

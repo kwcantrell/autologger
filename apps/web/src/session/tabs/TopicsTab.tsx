@@ -27,7 +27,6 @@ export const TopicsTab = memo(function TopicsTab() {
     title: s.title,
     showId: s.showId,
     showName: s.showName,
-    isRolling: s.isRolling,
     sourceKind: s.sourceKind,
     sourceUrl: s.sourceUrl,
   }));
@@ -130,7 +129,6 @@ export const TopicsTab = memo(function TopicsTab() {
               key={t.id}
               t={t}
               canWrite={canWrite}
-              rolling={session.isRolling}
               onJump={(sec) => seek(sec, true)}
               onSave={(patch) =>
                 write('topics.update', { topicId: t.id, ...patch }).catch((e) => {

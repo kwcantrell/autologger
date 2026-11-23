@@ -1,6 +1,6 @@
 import type { Session, TranscriptSegment } from '@autologger/contract';
 import { FileUpIcon } from 'lucide-react';
-import { memo, useCallback, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { useJobs, useMedia, useTranscript } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { useSessionWrite } from '@/api/session/writes';
@@ -10,7 +10,7 @@ import { Button } from '@/shared/components/ui/button';
 import { Spinner } from '@/shared/components/ui/spinner';
 import { useTextPrompt } from '@/shared/ui/PromptDialog';
 import type { Player } from '../audio/usePlayer';
-import { useSessionSlice, useWorkspace } from '../context';
+import { indexAt, useSessionSlice, useWorkspace } from '../context';
 import { FeedShell, FeedTable, ToolbarCaption } from '../feed';
 import { TranscriptImportDialog } from '../TranscriptImportDialog';
 import { SEGMENT_COLUMNS, SegmentRow } from './SegmentRow';
@@ -33,7 +33,6 @@ const TranscriptRow = memo(function TranscriptRow({
   s,
   position,
   canWrite,
-  rolling,
   onSeek,
   onRenameSpeaker,
   onSaveText,
@@ -42,7 +41,6 @@ const TranscriptRow = memo(function TranscriptRow({
   /** The player's position store while this row is under the playhead, else null. */
   position: Player['position'] | null;
   canWrite: boolean;
-  rolling: boolean;
   onSeek: (sec: number) => void;
   onRenameSpeaker: (speaker: string) => void;
   onSaveText: (segmentId: string, text: string) => Promise<unknown>;
@@ -57,7 +55,6 @@ const TranscriptRow = memo(function TranscriptRow({
       active={position != null}
       playheadSec={playheadSec}
       canWrite={canWrite}
-      rolling={rolling}
       onSeek={onSeek}
       onRenameSpeaker={() => onRenameSpeaker(s.speaker)}
       onSaveText={(text) => onSaveText(s.id, text)}
@@ -69,7 +66,6 @@ export const TranscriptTab = memo(function TranscriptTab() {
   const session = useSessionSlice((s) => ({
     id: s.id,
     title: s.title,
-    isRolling: s.isRolling,
     audioSeconds: s.audioSeconds,
     transcriptStatus: s.transcriptStatus,
   }));
@@ -90,10 +86,15 @@ export const TranscriptTab = memo(function TranscriptTab() {
   );
 
   // The segment under the playhead while playing; re-renders the tab only when it changes.
+  // Segments come sorted by start: a binary search, not a scan of thousands per frame.
+  const starts = useMemo(() => segs.map((s) => s.startSec), [segs]);
   const activeId = useSyncExternalStore(player.position.subscribe, () => {
     const sec = player.isPlaying ? player.position.get() : null;
     if (sec == null) return null;
-    return segs.find((s) => sec >= s.startSec && sec < s.endSec)?.id ?? null;
+    const i = indexAt(starts, sec);
+    // The last segment starting at or before the playhead, or the one before it when they overlap.
+    for (const s of [segs[i], segs[i - 1]]) if (s && sec < s.endSec) return s.id;
+    return null;
   });
   const seekAndPlay = useCallback((sec: number) => seek(sec, true), [seek]);
   const write = useSessionWrite(session.id);
@@ -196,7 +197,6 @@ export const TranscriptTab = memo(function TranscriptTab() {
               s={s}
               position={s.id === activeId ? player.position : null}
               canWrite={canWrite}
-              rolling={session.isRolling}
               onSeek={seekAndPlay}
               onRenameSpeaker={renameSpeaker}
               onSaveText={saveSegmentText}

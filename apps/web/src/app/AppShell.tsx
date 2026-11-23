@@ -127,9 +127,12 @@ export function AppShell() {
         className="flex min-h-0 w-full min-w-0 flex-1 flex-row items-stretch overflow-hidden max-md:block max-md:overflow-visible"
       >
         <Rail activeSessionId={activeSessionId} />
+        {/* The gutter is reserved (md+), so content width doesn't change when a page starts or stops
+            scrolling: on the session page Start/Stop changes the strip's height, and the 8px
+            shift re-laid out a long transcript's whole table (#330). */}
         <main
           id="v3-main"
-          className="relative m-0 block min-h-0 w-full min-w-0 max-w-none flex-1 [overflow-x:clip] overflow-y-visible md:overflow-y-auto"
+          className="relative m-0 block min-h-0 w-full min-w-0 max-w-none flex-1 [overflow-x:clip] overflow-y-visible md:overflow-y-auto md:[scrollbar-gutter:stable]"
         >
           {showNew && (
             <ErrorBoundary>

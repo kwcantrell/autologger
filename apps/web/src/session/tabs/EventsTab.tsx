@@ -32,7 +32,7 @@ import { EventRow, eventColumns, type TimeMode } from './EventRow';
 
 const NO_CATEGORIES: Category[] = [];
 
-type EventTiming = Pick<Session, 'frameRate' | 'startOffsetFrames' | 'isRolling'>;
+type EventTiming = Pick<Session, 'frameRate' | 'startOffsetFrames'>;
 
 /** An EventRow memoized on stable, id-based handlers: a session push doesn't re-render every row. */
 const FeedEventRow = memo(function FeedEventRow({
@@ -142,11 +142,8 @@ export const EventsTab = memo(function EventsTab() {
     else rowRefs.current.delete(id);
   }, []);
   const seekAndPlay = useCallback((sec: number) => seek(sec, true), [seek]);
-  const { frameRate, startOffsetFrames, isRolling } = session;
-  const timing = useMemo(
-    () => ({ frameRate, startOffsetFrames, isRolling }),
-    [frameRate, startOffsetFrames, isRolling],
-  );
+  const { frameRate, startOffsetFrames } = session;
+  const timing = useMemo(() => ({ frameRate, startOffsetFrames }), [frameRate, startOffsetFrames]);
 
   const remove = useCallback(
     async (e: SessionEvent) => {

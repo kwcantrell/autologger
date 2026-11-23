@@ -38,7 +38,6 @@ export const SegmentRow = memo(function SegmentRow({
   active,
   playheadSec,
   canWrite,
-  rolling,
   onSeek,
   onRenameSpeaker,
   onSaveText,
@@ -47,7 +46,7 @@ export const SegmentRow = memo(function SegmentRow({
   active: boolean;
   playheadSec: number | null;
   canWrite: boolean;
-  rolling: boolean;
+  /** Seeks and plays; the workspace refuses (with a toast) while timecode rolls. */
   onSeek: (sec: number) => void;
   onRenameSpeaker: () => void;
   /** Saves edited text; rejects when it failed (the caller reports why) and the row resets. */
@@ -71,7 +70,7 @@ export const SegmentRow = memo(function SegmentRow({
   const onWordClick = (e: React.MouseEvent) => {
     const i = (e.target as HTMLElement).closest('[data-i]')?.getAttribute('data-i');
     const word = i == null ? undefined : s.words[Number(i)];
-    if (word && !rolling) onSeek(word.s);
+    if (word) onSeek(word.s);
   };
 
   return (
@@ -85,12 +84,7 @@ export const SegmentRow = memo(function SegmentRow({
       )}
     >
       <TableCell className={cn(FEED_CELL, 'align-top pt-1 @max-md/feed:pt-[0.1rem]')}>
-        <JumpButton
-          sec={s.startSec}
-          label={fmtSec(s.startSec)}
-          onJump={onSeek}
-          unavailable={rolling ? 'Playback is off while timecode rolls.' : null}
-        />
+        <JumpButton sec={s.startSec} label={fmtSec(s.startSec)} onJump={onSeek} />
       </TableCell>
       <TableCell className={cn(FEED_CELL, FEED_TC, 'align-top pt-1.5 @max-md/feed:pt-[0.1rem]')}>
         {fmtSec(s.startSec)}

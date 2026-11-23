@@ -56,7 +56,7 @@ describe('shared session pieces', () => {
     const out = row(
       <EventRow
         e={e}
-        session={{ frameRate: 30, startOffsetFrames: 0, isRolling: false }}
+        session={{ frameRate: 30, startOffsetFrames: 0 }}
         categories={[]}
         timeMode="session"
         editable={false}
@@ -93,7 +93,6 @@ describe('shared session pieces', () => {
         active={false}
         playheadSec={11.5}
         canWrite={false}
-        rolling={false}
         onSeek={noop}
         onRenameSpeaker={noop}
         onSaveText={resolved}
@@ -117,14 +116,7 @@ describe('shared session pieces', () => {
       createdAt: AT,
     };
     const out = row(
-      <TopicRow
-        t={t}
-        canWrite={false}
-        rolling={false}
-        onJump={noop}
-        onSave={resolved}
-        onDelete={noop}
-      />,
+      <TopicRow t={t} canWrite={false} onJump={noop} onSave={resolved} onDelete={noop} />,
     );
     expect(out).toContain('>Guest: Priya</textarea>');
     expect(out).toMatch(/aria-label="Title" readOnly=""/);
