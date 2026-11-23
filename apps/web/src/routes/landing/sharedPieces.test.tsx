@@ -10,7 +10,12 @@ import { Router } from 'wouter';
 import { CompilationCard } from '@/routes/compilations/CompilationCard';
 import { PlaylistResult } from '@/routes/PlaylistResult';
 import { BacklinksSection, WikiPageHeader } from '@/routes/wiki/WikiPageParts';
-import { StatWidget, TimelineWidget, WidgetFrame } from '@/session/dashboards/WidgetParts';
+import {
+  StatWidget,
+  TableWidget,
+  TimelineWidget,
+  WidgetFrame,
+} from '@/session/dashboards/WidgetParts';
 import { ExportOptions } from '@/session/tabs/ExportOptions';
 import { DashboardMock, ExportMock, ImportMock } from './mocks';
 import { CompileMock, WikiMock } from './wikiMocks';
@@ -61,6 +66,17 @@ describe('shared app pieces', () => {
       />,
     );
     expect(tl).toContain('aria-label="Jump to 4:12 Listener mail"');
+
+    // A table without columns shows atSec as a duration, not raw seconds.
+    const table: Extract<Widget, { type: 'table' }> = {
+      id: 'e',
+      type: 'table',
+      title: '',
+      span: 4,
+    };
+    const tb = html(<TableWidget widget={table} rows={[{ atSec: 48.958, label: 'Laugh' }]} />);
+    expect(tb).toContain('>0:48</td>');
+    expect(tb).not.toContain('48.96');
   });
 
   it('ExportOptions links each format only when given hrefs', () => {
@@ -86,11 +102,20 @@ describe('shared app pieces', () => {
         },
       ],
       skipped: [{ videoId: 'w', title: 'Ep. 111', reason: 'already_imported', sessionId: null }],
+      downloadCheck: { status: 'ok', message: 'ok' },
     };
     const out = html(<PlaylistResult data={data} onOpenSession={noop} />);
     expect(out).toContain(' · 1 new session will be created.');
     expect(out).toContain('#112');
     expect(out).toContain('Already in the show');
+    expect(out).not.toContain('importing would fail');
+    const blocked = html(
+      <PlaylistResult
+        data={{ ...data, downloadCheck: { status: 'blocked', message: 'Bot check.' } }}
+        onOpenSession={noop}
+      />,
+    );
+    expect(blocked).toContain('importing would fail. Bot check.');
   });
 
   it('CompilationCard shows a build in progress', () => {

@@ -5,9 +5,15 @@ import { useLocation } from 'wouter';
 import { qk, useCapabilities } from '@/api/queries';
 import { errorMessage, rpc } from '@/api/rpc';
 import { useActive } from '@/app/useActive';
+import { isYoutubeAuthError } from '@/app/YoutubeAuthHelp';
 import { NativeSelect } from '@/components/NativeSelect';
 import { FRAME_RATES, parseTimecode } from '@/lib/timecode';
 import { enqueueUpload, probeDuration } from '@/session/audio/uploads';
+import {
+  IMPORT_HELPER_ANCHOR,
+  openSettingsAt,
+  YOUTUBE_ACCESS_ANCHOR,
+} from '@/settings/openSettingsAt';
 import { showToast } from '@/shared/components/Toast';
 import { Alert, AlertDescription } from '@/shared/components/ui/alert';
 import { Button } from '@/shared/components/ui/button';
@@ -98,10 +104,25 @@ export function NewSessionModal({
           await rpc('media.importYoutube', { sessionId: s.id, url: ytUrl.trim() });
           void qc.invalidateQueries({ queryKey: qk.showJobsAll });
         } catch (err) {
-          showToast(
-            `Session created, but the YouTube import didn't start: ${errorMessage(err)}`,
-            true,
-          );
+          const message = errorMessage(err);
+          // YouTube wants a sign-in: keep the toast up, with the way to fix it.
+          const auth = isYoutubeAuthError(message);
+          showToast(`Session created, but the YouTube import didn't start: ${message}`, true, {
+            persistent: auth,
+            ...(auth
+              ? {
+                  action: active.canManageTeam
+                    ? {
+                        label: 'YouTube sign-in',
+                        onClick: () => openSettingsAt('team', YOUTUBE_ACCESS_ANCHOR),
+                      }
+                    : {
+                        label: 'Import helper',
+                        onClick: () => openSettingsAt('agents', IMPORT_HELPER_ANCHOR),
+                      },
+                }
+              : {}),
+          });
         }
       }
       onClose();

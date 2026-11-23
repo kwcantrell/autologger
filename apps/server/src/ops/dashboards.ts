@@ -144,9 +144,11 @@ export async function runDashboardQuery(
         .where(eq(events.sessionId, sessionId))
         .orderBy(asc(events.timecodeFrames))
         .limit(2000);
+      // Rounded to ms like events_list, so both report the same atSec for an event.
       return rows
         .filter((r) => !q.categories || q.categories.includes(r.category))
-        .slice(0, q.limit);
+        .slice(0, q.limit)
+        .map((r) => ({ ...r, atSec: Math.round(r.atSec * 1000) / 1000 }));
     }
     case 'summary_stats': {
       const [r] = await ctx.db
@@ -216,17 +218,20 @@ defineOp({
   description: `Create a dashboard (omit dashboardId) or replace one (to change a few widgets, use dashboards_updateWidgets). The spec is declarative JSON:
 { title, description?, widgets: [{ id, type, title, span (1-4 of a 4-column grid), ... }] }.
 Widget types: stat {value|data+field, unit?, caption?}; bar {x, y, horizontal?}; line {x, y}; pie {label, value};
-table {columns?: [{key,label?,format?}]}; timeline {at (seconds field), label, duration?}; markdown {markdown}.
+table {columns?: [{key,label?,format?}]} (without columns, an atSec column shows as a duration); timeline {at (seconds field), label, duration?}; markdown {markdown}.
 Unknown fields are rejected with bad_request naming their path (e.g. spec.widgets[4].foo), never silently dropped.
 Data widgets take either static \`data\` rows you computed, or a live \`query\` re-evaluated on every view:
 events_by_category → {category,color,count}; events_over_time {bucketSec} → {atSec,category,count};
 speaker_talk_time → {speaker,seconds,turns}; topics {maxLevel?} → {atSec,durationSec,label,level,summary} (maxLevel 1 = chapters only, best for a timeline);
-events {categories?,limit} → {atSec,label,category,message,value,color}; summary_stats → {events,topics,speakers,words,audioSec,speechSec,wpm}
+events {categories?,limit} → {atSec (rounded to ms, as in events_list),label,category,message,value,color}; summary_stats → {events,topics,speakers,words,audioSec,speechSec,wpm}
 (speechSec = last transcript segment end − first segment start, 0 without a transcript; wpm = words per minute
 over speechSec, rounded, null when speechSec is 0 — use it for speaking pace);
 category_count {categories: [button names]} → one row {count} = events in those categories, 0 when none — the live
 count of one category on a stat, e.g. { type: "stat", query: { name: "category_count", categories: ["Key insight"] } }.
 Optional format on stat, bar/line and pie values and on table columns: duration (s → M:SS/H:MM:SS) | minutes (s → min, 1 decimal) | number | percent (0–1 ratio); bar labelMaxChars truncates labels (full text in tooltip).
+Empty state on any data widget: emptyText (≤200 chars, e.g. "No speech in this session") replaces the widget's content when
+its query returns no rows (a stat: its value is null, e.g. wpm without a transcript); hideWhenEmpty: true hides the widget instead.
+Use them when one layout is applied to many sessions, some without speech, topics or events.
 Prefer live queries for counts so the dashboard stays current. Markdown is rendered without HTML.
 Returns the saved dashboard including its spec; pass compact: true to get only { id, revision } (revision starts at 1 and
 increases on every save), which saves context.`,

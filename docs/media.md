@@ -92,11 +92,14 @@ expired", set fresh ones. `YTDLP_PROXY`
 A bot check (or a private, members-only or age-restricted video) is a permanent error: the
 `youtube_import` or `compile` job fails at once with "YouTube is blocking this server's downloads
 (bot check) …" or "YouTube requires a signed-in account …" instead of retrying.
-`media.importYoutube` and `media.importPlaylist` (not on `dryRun`) first run a metadata-only
+`media.importYoutube` and `media.importPlaylist` first run a metadata-only
 probe of the (first) video with the download's format selection (`--skip-download`, 15 s timeout,
 at most 4 at once per app process) and fail with `bad_request`, creating no sessions or jobs,
 when it hits that error. Any other probe outcome (yt-dlp missing on the app host, timeout, busy)
-lets the import go ahead, so an app host without yt-dlp never blocks imports.
+lets the import go ahead, so an app host without yt-dlp never blocks imports. A playlist `dryRun`
+runs the same probe and reports it as `downloadCheck: {status: "ok" | "blocked" | "skipped",
+message}` instead of failing (the web import dialog shows "blocked" on its preview). With a team
+sign-in, every probe is recorded on it (`media.youtubeAccess` `lastOkAt` / `lastFailedAt`).
 
 When cookies or a proxy are not an option, or the video or playlist is private, users can run the
 **local import helper** on their own computer instead: it downloads with their browser cookies

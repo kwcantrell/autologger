@@ -1,7 +1,7 @@
 // Value helpers for dashboard widgets. Spec values are plain data: they are only ever coerced to
 // numbers or rendered as text, never executed or injected as markup.
 
-import type { DashboardRows, ValueFormat } from '@autologger/contract';
+import type { DashboardRows, ValueFormat, Widget } from '@autologger/contract';
 import { useSyncExternalStore } from 'react';
 import { fmtShort } from '@/lib/timecode';
 
@@ -75,6 +75,18 @@ export function fmtFormat(v: Scalar | undefined, format: ValueFormat): string {
 /** A cell or slice value: the spec `format` when given, else the default for its field name. */
 export function fmtField(v: Scalar | undefined, key: string, format?: ValueFormat): string {
   return format ? fmtFormat(v, format) : fmtValue(v, key);
+}
+
+/**
+ * Whether a data widget has nothing to show: no rows, or for a stat no fixed value and a null (or
+ * missing) first-row value, e.g. wpm on a session without speech.
+ */
+export function isEmptyWidget(widget: Exclude<Widget, { type: 'markdown' }>, rows: Row[]): boolean {
+  if (widget.type !== 'stat') return rows.length === 0;
+  if (widget.value != null) return false;
+  const first = rows[0];
+  const key = widget.field ?? (first ? Object.keys(first)[0] : undefined);
+  return !first || !key || first[key] == null;
 }
 
 /** Shorten a label to at most `max` characters, ending in an ellipsis when cut. */

@@ -133,13 +133,17 @@ describe('YouTube sign-in errors', () => {
 describe('import probe', () => {
   it('fails the import without creating sessions or jobs when YouTube blocks downloads', async () => {
     const { owner, show, session } = await studio();
-    // The dry run only lists the playlist, which YouTube still allows.
+    // Listing still works; the dry run reports the blocked download instead of failing.
     const preview = await call(owner, 'media.importPlaylist', {
       showId: show.id,
       url: PLAYLIST,
       dryRun: true,
     });
     expect(preview.created).toHaveLength(1);
+    expect(preview.downloadCheck).toMatchObject({
+      status: 'blocked',
+      message: expect.stringMatching(/bot check/),
+    });
 
     await expect(
       call(owner, 'media.importPlaylist', { showId: show.id, url: PLAYLIST }),
@@ -156,6 +160,26 @@ describe('import probe', () => {
     );
     expect(await call(owner, 'sessions.list', { showId: show.id })).toHaveLength(1);
     expect(await call(owner, 'jobs.list', { showId: show.id })).toHaveLength(0);
+  });
+
+  it("dry runs record the check on the team's sign-in", async () => {
+    const { owner, show } = await studio();
+    const dryRun = () =>
+      call(owner, 'media.importPlaylist', { showId: show.id, url: PLAYLIST, dryRun: true });
+    await setMode('ok');
+    await call(owner, 'media.setYoutubeCookies', { showId: show.id, cookies: SIGNED_IN });
+    expect((await dryRun()).downloadCheck.status).toBe('ok');
+    let access = await call(owner, 'media.youtubeAccess', { showId: show.id });
+    expect(access).toMatchObject({ lastOkAt: expect.any(String), lastFailedAt: null });
+
+    await setMode('bot');
+    expect((await dryRun()).downloadCheck.status).toBe('blocked');
+    access = await call(owner, 'media.youtubeAccess', { showId: show.id });
+    expect(access).toMatchObject({
+      lastFailedAt: expect.any(String),
+      lastError: expect.stringMatching(/bot check/),
+    });
+    expect(await call(owner, 'sessions.list', { showId: show.id })).toHaveLength(1);
   });
 });
 

@@ -79,6 +79,7 @@ describe('media.importPlaylist', () => {
     // dryRun previews the same lists and writes nothing.
     const preview = await call(agent, 'media.importPlaylist', { ...input, dryRun: true });
     expect(preview.dryRun).toBe(true);
+    expect(preview.downloadCheck.status).toBe('ok');
     expect(preview.created.map((c) => [c.title, c.sessionId, c.jobId])).toEqual([
       ['Tom Talks #2: Oldest talk', null, null],
       ['Tom Talks #3: Newest talk', null, null],
@@ -150,6 +151,34 @@ describe('media.importPlaylist', () => {
       ['ddddddddddd', 'already_imported', manual.id],
       ['ccccccccccc', 'already_imported', first.created[0]!.sessionId],
     ]);
+  });
+
+  it('creates each session with its own key terms before its job is queued', async () => {
+    const { owner, show } = await studio();
+    const agent = asAgent(owner);
+    await playlist([entry('aaaaaaaaaaa', 'Guest A'), entry('bbbbbbbbbbb', 'Guest B')]);
+    const input = { showId: show.id, url: PLAYLIST };
+    // A videoId that is not in the playlist (a typo) fails, also on dryRun, and creates nothing.
+    for (const dryRun of [true, false])
+      await failsWith(
+        call(agent, 'media.importPlaylist', {
+          ...input,
+          dryRun,
+          keyTerms: { zzzzzzzzzzz: ['Nobody'] },
+        }),
+        'bad_request',
+      );
+    expect(await call(agent, 'sessions.list', { showId: show.id })).toHaveLength(1);
+
+    const out = await call(agent, 'media.importPlaylist', {
+      ...input,
+      keyTerms: { aaaaaaaaaaa: ['Olu Dara', 'Olu Dara', 'tau'] },
+    });
+    const terms = async (i: number) =>
+      (await call(agent, 'sessions.get', { sessionId: out.created[i]!.sessionId! })).keyTerms;
+    expect(await terms(0)).toEqual(['Olu Dara', 'tau']);
+    expect(await terms(1)).toEqual([]);
+    expect(out.created.every((c) => c.jobId)).toBe(true);
   });
 
   it('fills the title template in one pass', async () => {

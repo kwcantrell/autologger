@@ -31,17 +31,40 @@ const aggregates = {
   segTotal: sql<number>`(select count(*)::int from audio_segments a where a.session_id = ${sessions.id})`,
   segDone: sql<number>`(select count(*)::int from audio_segments a where a.session_id = ${sessions.id} and a.status = 'transcribed')`,
   segFailed: sql<number>`(select count(*)::int from audio_segments a where a.session_id = ${sessions.id} and a.status = 'failed')`,
+  /** A session-level transcript (transcript.import without an audio segment) exists. */
+  imported: sql<boolean>`exists (select 1 from transcript_segments t where t.session_id = ${sessions.id} and t.audio_segment_id is null)`,
 };
 
 function transcriptStatus(
   total: number,
   done: number,
   failed: number,
+  imported: boolean,
 ): Session['transcriptStatus'] {
+  // An imported session-level transcript stands for the whole session.
+  if (imported) return 'done';
   if (total === 0) return 'none';
   if (done === total) return 'done';
   if (failed > 0 && done + failed === total) return done > 0 ? 'partial' : 'failed';
   return done > 0 ? 'partial' : 'pending';
+}
+
+/** One session's transcriptStatus (as in sessions.get), without loading the session. */
+export async function sessionTranscriptStatus(
+  ctx: Ctx,
+  sessionId: string,
+): Promise<Session['transcriptStatus']> {
+  const a = schema.audioSegments;
+  const [row] = await ctx.db
+    .select({
+      segTotal: sql<number>`count(*)::int`,
+      segDone: sql<number>`(count(*) filter (where ${a.status} = 'transcribed'))::int`,
+      segFailed: sql<number>`(count(*) filter (where ${a.status} = 'failed'))::int`,
+      imported: sql<boolean>`exists (select 1 from transcript_segments t where t.session_id = ${sessionId} and t.audio_segment_id is null)`,
+    })
+    .from(a)
+    .where(eq(a.sessionId, sessionId));
+  return row ? transcriptStatus(row.segTotal, row.segDone, row.segFailed, row.imported) : 'none';
 }
 
 export async function loadSessions(
@@ -65,7 +88,7 @@ export async function loadSessions(
   );
   return rows
     .filter((r) => access.has(r.show.id))
-    .map(({ s, show, eventCount, audioSeconds, segTotal, segDone, segFailed }) => ({
+    .map(({ s, show, eventCount, audioSeconds, segTotal, segDone, segFailed, imported }) => ({
       id: s.id,
       showId: s.showId,
       showName: show.name,
@@ -81,7 +104,7 @@ export async function loadSessions(
       take: s.take,
       eventCount,
       audioSeconds,
-      transcriptStatus: transcriptStatus(segTotal, segDone, segFailed),
+      transcriptStatus: transcriptStatus(segTotal, segDone, segFailed, imported),
       sourceKind: s.sourceKind,
       sourceUrl: s.sourceUrl,
       keyTerms: s.keyTerms,
@@ -176,7 +199,7 @@ defineOp({
 defineOp({
   name: 'sessions.get',
   description:
-    'One session: metadata, transport state, frame rate, event count and transcript status. transcriptJob is the queued or running background job that will produce the transcript, or null when none is (then transcriptStatus is final: done, partial, failed or none): {id, kind, status, queuePosition?, etaSec?}. kind is "transcribe", or "youtube_import" while a YouTube import is still downloading (its transcription is queued when the download finishes). With several (one per audio segment) it is the one expected to finish last. queuePosition means the same as in jobs.list; etaSec is a rough estimate in seconds until the transcript is ready: for a youtube_import it includes the expected transcription time when the video length was read at import (media.importPlaylist and media.importYoutube read it; if YouTube did not say, it covers the download only, an underestimate); wait for the job with jobs.list (sessionId, waitSec, kinds ["youtube_import","transcribe"]). Waveform jobs (timeline drawing only) never count as transcriptJob.',
+    'One session: metadata, transport state, frame rate, event count and transcript status. transcriptJob is the queued or running background job that will produce the transcript, or null when none is (then transcriptStatus is final: done, partial, failed or none; done only means transcription finished — it may have found no speech, e.g. a music-only video, which transcript_text reports as "(transcript is empty: no speech detected)"): {id, kind, status, queuePosition?, etaSec?}. kind is "transcribe", or "youtube_import" while a YouTube import is still downloading (its transcription is queued when the download finishes). With several (one per audio segment) it is the one expected to finish last. queuePosition means the same as in jobs.list; etaSec is a rough estimate in seconds until the transcript is ready: for a youtube_import it includes the expected transcription time when the video length was read at import (media.importPlaylist and media.importYoutube read it; if YouTube did not say, it covers the download only, an underestimate); wait for the job with jobs.list (sessionId, waitSec, kinds ["youtube_import","transcribe"]). Waveform jobs (timeline drawing only) never count as transcriptJob.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId }): Promise<SessionDetail> {
