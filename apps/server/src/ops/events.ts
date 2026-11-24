@@ -194,7 +194,7 @@ defineOp({
 defineOp({
   name: 'events.createMany',
   description:
-    'Log up to 500 events at once (same fields as events_create). All-or-nothing: an invalid item (e.g. a timecode before the session start) fails the whole call with bad_request naming its index. Use atSec to line events up with the transcript; it snaps to the session’s frame grid like events_create (by at most half a frame). Agents get `{ ids, freeLabels }` by default (compact): the new event ids in input order, and `[{ category, indexes }]` for each category name that matched no button of the show and so became a free label, with the input indexes that used it (intended, or fix them with events_updateMany); stored atSec values are in events_list. Pass `compact: false` for the created events.',
+    '`events`: up to 500 items, each with the fields of events_create — logs them in one session (sessionId) at once. All-or-nothing: an invalid item (e.g. a timecode before the session start) fails the whole call with bad_request naming its index. Use atSec to line events up with the transcript; it snaps to the session’s frame grid like events_create (by at most half a frame). Agents get `{ ids, freeLabels }` by default (compact): the new event ids in input order, and `[{ category, indexes }]` for each category name that matched no button of the show and so became a free label, with the input indexes that used it (intended, or fix them with events_updateMany); stored atSec values are in events_list. Pass `compact: false` for the created events.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, events: list, compact }) {
@@ -307,7 +307,7 @@ defineOp({
 defineOp({
   name: 'events.updateMany',
   description:
-    'Edit up to 500 events of one session in one call. Each item is { id (event id from events_list), and only the fields to change: categoryId | category (button), message, value, atSec (seconds from the session start, as in transcript_text; snaps to the session’s frame grid as in events_create) | timecode }; omitted fields stay as they are. All-or-nothing: an unknown id or an event from another session fails the whole call with nothing changed. Each edit is its own entry in the change log, so it can be undone per event. Agents get `{ ids, freeLabels }` by default (compact): ids in input order, and `[{ category, indexes }]` for new category names that matched no button and became free labels. Pass `compact: false` for the updated events.',
+    '`events`: up to 500 items, each `{ id, …fields to change }` — edits events of one session (sessionId) in one call. Each item is { id (event id from events_list), and only the fields to change: categoryId | category (button), message, value, atSec (seconds from the session start, as in transcript_text; snaps to the session’s frame grid as in events_create) | timecode }; omitted fields stay as they are. All-or-nothing: an unknown id or an event from another session fails the whole call with nothing changed. Each edit is its own entry in the change log, so it can be undone per event. Agents get `{ ids, freeLabels }` by default (compact): ids in input order, and `[{ category, indexes }]` for new category names that matched no button and became free labels. Pass `compact: false` for the updated events.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, events: list, compact }) {

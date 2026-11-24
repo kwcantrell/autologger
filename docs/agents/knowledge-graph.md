@@ -40,14 +40,18 @@ which split both search and the graph.
 ## 3. Per session — one read
 
 One agent per few sessions; each reads the whole transcript **once** (`transcript_text`
-`{format: "compact", stampEverySec: 0}`, ~30-minute pages) and then, from that read:
+`{format: "compact", stampEverySec: 0}`, ~30-minute pages, no `ids` — every `@seconds` stamp is a
+segment ref the transcript edit tools accept, e.g. `segmentId: "@183.4"` with the `sessionId`) and
+then, from that read:
 
 1. **Cleans** it (the `transcript-cleanup` skill): speakers per the roster, misheard names,
    words spilled across speaker changes.
 2. **Chapters** it (`topics_replace`): specific titles (who/what) and a one-line summary each —
    topic summaries are matched against entity names, so name people and bits in them.
 3. **Logs events** (`events_createMany`) with the show's buttons; put names in the message.
-4. **Writes the recap** (`wiki_upsert` kind `session`) following the moment rules below.
+4. **Writes the recap** (`wiki_upsert` kind `session`) following the moment rules below. A recap
+   drafted in a local file goes up as a file (`wiki_createUpload`, PUT, then `bodyUploadId`)
+   instead of being pasted into the call.
 5. **Writes notes** for stage 4: facts about recurring people and bits, with long-form citations.
 
 ## 4. Shared pages

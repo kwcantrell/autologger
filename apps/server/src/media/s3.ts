@@ -125,7 +125,12 @@ export function compilationKeyFor(showId: string, compilationId: string): string
   return `shows/${showId}/compilations/${compilationId}.mp4`;
 }
 
-/** Every stored object of a show itself (compilations) lives under this prefix. */
+/** A page body uploaded for wiki.upsert / wiki.patch (wiki.createUpload); removed once used. */
+export function wikiUploadKeyFor(showId: string, uploadId: string): string {
+  return `shows/${showId}/wiki-uploads/${uploadId}.md`;
+}
+
+/** Every stored object of a show itself (compilations, wiki uploads) lives under this prefix. */
 export function showPrefix(showId: string): string {
   return `shows/${showId}/`;
 }
@@ -422,6 +427,23 @@ export async function getObjectStream(
     body: r.Body.transformToWebStream() as ReadableStream<Uint8Array>,
     size: r.ContentLength ?? null,
   };
+}
+
+/** A small object's bytes, or null when it does not exist. */
+export async function getObjectBytes(key: string): Promise<Uint8Array | null> {
+  try {
+    const r = await server().send(new GetObjectCommand({ Bucket: bucket(), Key: key }));
+    return r.Body ? await r.Body.transformToByteArray() : new Uint8Array();
+  } catch (e) {
+    const err = e as { name?: string; $metadata?: { httpStatusCode?: number } };
+    if (
+      err.name === 'NotFound' ||
+      err.name === 'NoSuchKey' ||
+      err.$metadata?.httpStatusCode === 404
+    )
+      return null;
+    throw e;
+  }
 }
 
 export async function putObjectFromFile(

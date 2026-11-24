@@ -117,6 +117,15 @@ const TopicFields = {
 /** `compact: true`: a small acknowledgement / listing instead of full entities (see CompactOpOutputs). */
 const compact = z.boolean().default(false);
 
+/**
+ * A transcript segment: its id, or `@<seconds>` — its start as transcript.text prints it (one
+ * decimal, e.g. "@183.4"), resolved within the op's session.
+ */
+const segmentRef = z.union([
+  z.string().regex(/^@\d+(\.\d+)?$/, 'A segment ref is a segment id or "@<seconds>"'),
+  id,
+]);
+
 export const opInputs = {
   // ── me / auth ─────────────────────────────────────────────
   'me.get': z.object({}),
@@ -280,7 +289,9 @@ export const opInputs = {
     stampEverySec: z.number().min(0).max(3600).default(60),
   }),
   'transcript.updateSegment': z.object({
-    segmentId: id,
+    segmentId: segmentRef,
+    /** Needed when segmentId is an "@<seconds>" ref. */
+    sessionId: id.optional(),
     text: z.string().max(20000).optional(),
     speaker: z.string().trim().max(80).optional(),
   }),
@@ -315,7 +326,7 @@ export const opInputs = {
     updates: z
       .array(
         z.object({
-          segmentId: id,
+          segmentId: segmentRef,
           text: z.string().max(20000).optional(),
           speaker: z.string().trim().max(80).optional(),
         }),
@@ -340,12 +351,16 @@ export const opInputs = {
     }),
   // Segment structure fixes (merge / split).
   'transcript.mergeSegments': z.object({
-    segmentIds: z.array(id).min(2).max(50),
+    segmentIds: z.array(segmentRef).min(2).max(50),
+    /** Needed when segmentIds holds "@<seconds>" refs. */
+    sessionId: id.optional(),
     speaker: z.string().trim().max(80).optional(),
   }),
   'transcript.splitSegment': z
     .object({
-      segmentId: id,
+      segmentId: segmentRef,
+      /** Needed when segmentId is an "@<seconds>" ref. */
+      sessionId: id.optional(),
       atWord: z.number().int().min(1).max(100000).optional(),
       atText: z.string().trim().min(1).max(500).optional(),
       atSec: sec.optional(),
@@ -424,29 +439,49 @@ export const opInputs = {
     showId: id.optional(),
     title: z.string().optional(),
   }),
-  'wiki.upsert': z.object({
-    showId: id,
-    pageId: id.optional(),
-    kind: z.enum(['person', 'topic', 'bit', 'session', 'question']),
-    title: z.string().trim().min(1).max(200),
-    bodyMd: z.string().max(100_000),
-    aliases: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
-    sessionId: id.optional(),
-    /** The revision the edit started from; a page that moved on since fails with conflict. */
-    baseRevision: z.number().int().min(1).optional(),
-    compact,
-  }),
-  'wiki.patch': z.object({
-    pageId: id,
-    edits: z
-      .array(z.object({ find: z.string().min(1).max(10_000), replace: z.string().max(100_000) }))
-      .max(50)
-      .default([]),
-    append: z.string().max(100_000).optional(),
-    /** The revision the edit started from; a page that moved on since fails with conflict. */
-    baseRevision: z.number().int().min(1).optional(),
-    compact,
-  }),
+  'wiki.upsert': z
+    .object({
+      showId: id,
+      pageId: id.optional(),
+      kind: z.enum(['person', 'topic', 'bit', 'session', 'question']),
+      title: z.string().trim().min(1).max(200),
+      bodyMd: z.string().max(100_000).optional(),
+      /** Instead of bodyMd: a file PUT to the uploadUrl of wiki.createUpload. */
+      bodyUploadId: id.optional(),
+      aliases: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
+      sessionId: id.optional(),
+      /** The revision the edit started from; a page that moved on since fails with conflict. */
+      baseRevision: z.number().int().min(1).optional(),
+      compact,
+    })
+    .refine((v) => (v.bodyMd === undefined) !== (v.bodyUploadId === undefined), {
+      message: 'Pass exactly one of bodyMd or bodyUploadId',
+    }),
+  'wiki.patch': z
+    .object({
+      pageId: id,
+      edits: z
+        .array(
+          z.object({
+            find: z.string().min(1).max(10_000),
+            replace: z.string().max(100_000),
+            /** Replace every occurrence (at least one) instead of exactly one. */
+            all: z.boolean().default(false),
+          }),
+        )
+        .max(50)
+        .default([]),
+      append: z.string().max(100_000).optional(),
+      /** Instead of append: a file PUT to the uploadUrl of wiki.createUpload. */
+      appendUploadId: id.optional(),
+      /** The revision the edit started from; a page that moved on since fails with conflict. */
+      baseRevision: z.number().int().min(1).optional(),
+      compact,
+    })
+    .refine((v) => v.append === undefined || v.appendUploadId === undefined, {
+      message: 'Pass at most one of append or appendUploadId',
+    }),
+  'wiki.createUpload': z.object({ showId: id }),
   'wiki.delete': z.object({ pageId: id }),
   'wiki.revisions': z.object({ pageId: id }),
   'wiki.restore': z.object({ pageId: id, revision: z.number().int().min(1) }),
@@ -856,6 +891,15 @@ export interface UploadTarget {
   expiresAt: string;
 }
 
+/** wiki.createUpload: where to PUT a page body, and the id that wiki.upsert / wiki.patch take. */
+export interface WikiUpload {
+  uploadId: string;
+  uploadUrl: string;
+  headers: Record<string, string>;
+  /** When uploadUrl stops working (ISO time). */
+  expiresAt: string;
+}
+
 /** compilations.createUpload: what the local import helper downloads, and where it PUTs the MP4. */
 export interface CompilationUpload extends UploadTarget {
   compilation: Compilation;
@@ -991,6 +1035,7 @@ export interface OpOutputs {
   'wiki.revisions': WikiRevision[];
   'wiki.restore': WikiPage;
   'wiki.lint': WikiLint;
+  'wiki.createUpload': WikiUpload;
   'media.list': AudioSegment[];
   'media.createUpload': UploadTarget & { segment: AudioSegment };
   'media.completeUpload': AudioSegment;
