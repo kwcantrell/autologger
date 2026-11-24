@@ -61,15 +61,38 @@ titles before writing so writers can link each other's pages. Split writers so n
 same page. Each page: what it is, a "By episode" list with one cited item per appearance, notable
 moments, and every alias.
 
+### Team wiki — entities that span shows
+
+A team has a shared **team wiki** besides each show's wiki. Put a person, bit or topic that
+appears in more than one show of the team there (`wiki_upsert {teamId}`), or promote an existing
+show page with `wiki_move {pageId, teamId}` (keeps its id, history and links). Show pages link team
+pages with an ordinary `[[Title]]`: links resolve to the show's own pages first, then the team's.
+A team page can link down to a show page (a hub, a recap, a bit) the same way, as long as only one
+show of the team has a page of that name — otherwise the link stays unresolved; link a more
+specific title or alias. Team pages are never recaps; they cite any show's sessions with `[label](@<sessionId>:<start>-<end>)`.
+Every team member can read and edit the team wiki; its changes are listed with
+`changes_list {teamId}`. `moments_search {teamId}` and `graph_entity {teamId}` search every show
+of the team at once.
+
 ## Moment rules — how to write pages that search well
 
-The graph reads each paragraph, list item and table row as a **block**; every citation in a block
-becomes a moment described by that block's text and tagged with the page plus the pages linked in
-the block.
+The graph reads each paragraph, list item and table row as a **block**. Every citation becomes a
+moment tagged with its page plus the `[[pages]]` linked in its **claim**: the stretch of text from
+the last `.`, `!`, `?` or `;` before the citation (or the start of the block) up to the citation.
+So a link only tags the citations that follow it in the same clause, never earlier ones, and a
+`;` starts a new clause. Exceptions: in a list item with at most 3 citations (one story) every link
+in the item tags every citation; in a table row a cell also takes the links of the cells before it
+(a guide row's episode link); a citation with no words before it in its clause (right after a full
+stop) takes the previous clause.
 
 - **One claim per block, with its own citation.** Prefer a list item per story, quote or
   appearance over a paragraph with five citations — five citations in one paragraph become five
   moments with the same description.
+- **Keep links next to the citations they describe.** In a synthesis sentence that walks through
+  several episodes, end each part with its own citation and separate the parts with `;` or full
+  stops — `[[Dana]] hosts the first three [c1]; [[Carly]] takes over in EP 4 [c2]` tags c2 with
+  Carly only, while `[[Dana]] hosts the first three and [[Carly]] takes over in EP 4 [c1] [c2]`
+  tags both citations with both.
 - **Link every entity the claim is about**, every time: `- [[Carly]] reads a [[Pig Talk]] letter
   about a moose [VAH_0006 00:20:00](/sessions/…?t=1200&to=1260)`. An unlinked name is invisible to
   entity search on that moment.

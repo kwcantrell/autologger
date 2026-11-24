@@ -26,6 +26,7 @@ import {
   searchPageHref,
   showAndDate,
   untitled,
+  wikiHitPlace,
 } from './searchLinks';
 
 /** Results fetched per palette search (all kinds, ranked together); each group shows 5. */
@@ -162,7 +163,7 @@ export function PaletteBody({ onDone }: { onDone: () => void }) {
                     className="size-3.5 shrink-0 self-center text-si-dim"
                   />
                   <span className="truncate font-medium">{h.title}</span>
-                  <span className="ml-auto shrink-0 text-xs text-si-dim">{h.showName}</span>
+                  <span className="ml-auto shrink-0 text-xs text-si-dim">{wikiHitPlace(h)}</span>
                 </span>
                 {h.snippet && <SearchSnippet text={h.snippet} className="line-clamp-2 text-xs" />}
               </CommandItem>

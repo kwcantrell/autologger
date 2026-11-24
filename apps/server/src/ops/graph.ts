@@ -19,15 +19,23 @@ import {
   wikiBlocks,
   wikiSections,
 } from '@autologger/contract';
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { requireShow } from '../core/authz.ts';
+import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { readableShowCondition, requireShow, requireTeamRole } from '../core/authz.ts';
 import { notFound } from '../core/errors.ts';
 import { type Ctx, defineOp } from '../core/op.ts';
 import { schema } from '../db/client.ts';
 import { env } from '../env.ts';
-import { firstParagraph } from './wiki.ts';
+import { firstParagraph, teamShowNames } from './wiki.ts';
 
-const { wikiPages: pages, sessions, topics, events, transcriptSegments: segments } = schema;
+const {
+  wikiPages: pages,
+  sessions,
+  shows,
+  teams,
+  topics,
+  events,
+  transcriptSegments: segments,
+} = schema;
 
 interface SessionInfo {
   id: string;
@@ -44,6 +52,8 @@ interface SessionInfo {
 
 interface PageInfo {
   id: string;
+  /** Null for a team wiki page. */
+  showId: string | null;
   title: string;
   kind: WikiKind;
   aliases: string[];
@@ -54,11 +64,23 @@ interface PageInfo {
 }
 
 interface Knowledge {
-  show: { id: string; name: string; code: string };
+  /** The show of a show graph; null for a team graph (every show of the team the actor reads). */
+  show: { id: string; name: string; code: string } | null;
+  team: { id: string; name: string };
   sessions: Map<string, SessionInfo>;
+  /** The scope's show pages and the team wiki's pages. */
   pages: Map<string, PageInfo>;
-  /** Normalised title or alias → page id (titles win over aliases). */
+  /**
+   * Normalised title or alias → page id, for entity names given by the caller and found in free
+   * text: in a show graph a show page wins over a team page; in a team graph a team page wins,
+   * then the first show's. Titles win over aliases within a wiki.
+   */
   names: Map<string, string>;
+  /**
+   * The page a [[link]] on `from` names: on a show page its show's pages first, then the team
+   * wiki's; on a team page the team wiki's, then a show page whose name only one show uses.
+   */
+  resolve(from: PageInfo, target: string): string | undefined;
   /** Every citation of a session of this show, as a moment (rank 0). */
   citations: Moment[];
 }
@@ -68,8 +90,46 @@ const STORY_CITATIONS = 3;
 
 const entityOf = (p: PageInfo): MomentEntity => ({ pageId: p.id, title: p.title, kind: p.kind });
 
-async function loadKnowledge(ctx: Ctx, showId: string): Promise<Knowledge> {
-  const { show } = await requireShow(ctx, showId, 'read');
+/** Normalised title or alias → page id over some pages (titles win over aliases). */
+function namesOf(list: PageInfo[]): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const p of list) names.set(normTitle(p.title), p.id);
+  for (const p of list)
+    for (const a of p.aliases) if (!names.has(normTitle(a))) names.set(normTitle(a), p.id);
+  return names;
+}
+
+/**
+ * Load a show graph ({ showId }: its sessions, its wiki and the team wiki) or a team graph
+ * ({ teamId }: every show of the team the actor can read, their wikis and the team wiki).
+ */
+async function loadKnowledge(
+  ctx: Ctx,
+  scope: { showId?: string; teamId?: string },
+): Promise<Knowledge> {
+  let show: Knowledge['show'] = null;
+  let teamId: string;
+  let showIds: string[];
+  if (scope.showId) {
+    const r = await requireShow(ctx, scope.showId, 'read');
+    show = { id: r.show.id, name: r.show.name, code: r.show.code };
+    teamId = r.show.teamId;
+    showIds = [r.show.id];
+  } else {
+    teamId = scope.teamId!;
+    await requireTeamRole(ctx, teamId, 'member');
+    showIds = (
+      await ctx.db
+        .select({ id: shows.id })
+        .from(shows)
+        .where(and(eq(shows.teamId, teamId), readableShowCondition(ctx, shows.id)))
+    ).map((r) => r.id);
+  }
+  const [team] = await ctx.db
+    .select({ id: teams.id, name: teams.name })
+    .from(teams)
+    .where(eq(teams.id, teamId));
+  if (!team) throw notFound('Team');
   const sessionRows = await ctx.db
     .select({
       id: sessions.id,
@@ -81,13 +141,13 @@ async function loadKnowledge(ctx: Ctx, showId: string): Promise<Knowledge> {
       startOffsetFrames: sessions.startOffsetFrames,
     })
     .from(sessions)
-    .where(eq(sessions.showId, showId));
+    .where(showIds.length ? inArray(sessions.showId, showIds) : sql`false`);
   const withDate = sessionRows.map((s) => ({
     ...s,
     date: s.episodeDate ?? s.createdAt.toISOString().replace(/\.\d{3}Z$/, 'Z'),
   }));
   // Episode numbers when every session has one (dates are often import dates), else the date.
-  const numbered = withDate.every((s) => /^\d+$/.test(s.episode.trim()));
+  const numbered = show !== null && withDate.every((s) => /^\d+$/.test(s.episode.trim()));
   withDate.sort(
     (a, b) =>
       (numbered ? Number(a.episode) - Number(b.episode) : 0) ||
@@ -114,13 +174,22 @@ async function loadKnowledge(ctx: Ctx, showId: string): Promise<Knowledge> {
   const pageRows = await ctx.db
     .select()
     .from(pages)
-    .where(and(eq(pages.showId, showId), isNull(pages.deletedAt)))
+    .where(
+      and(
+        isNull(pages.deletedAt),
+        or(
+          showIds.length ? inArray(pages.showId, showIds) : undefined,
+          and(isNull(pages.showId), eq(pages.teamId, teamId)),
+        ),
+      ),
+    )
     .orderBy(asc(pages.kind), asc(pages.title));
   const pageMap = new Map<string, PageInfo>(
     pageRows.map((p) => [
       p.id,
       {
         id: p.id,
+        showId: p.showId,
         title: p.title,
         kind: p.kind,
         aliases: p.aliases,
@@ -131,10 +200,21 @@ async function loadKnowledge(ctx: Ctx, showId: string): Promise<Knowledge> {
       },
     ]),
   );
+  const all = [...pageMap.values()];
+  const teamNames = namesOf(all.filter((p) => !p.showId));
+  const showNames = new Map(showIds.map((id) => [id, namesOf(all.filter((p) => p.showId === id))]));
+  // Team pages also link down to show pages by names only one show of the team uses (counted over
+  // every show, not just those loaded); a target outside this graph resolves to nothing.
+  const downNames = await teamShowNames(ctx.db, teamId);
+  const resolve = (from: PageInfo, target: string) => {
+    const n = normTitle(target);
+    if (from.showId) return showNames.get(from.showId)?.get(n) ?? teamNames.get(n);
+    const id = teamNames.get(n) ?? downNames.get(n);
+    return id && pageMap.has(id) ? id : undefined;
+  };
   const names = new Map<string, string>();
-  for (const p of pageMap.values()) names.set(normTitle(p.title), p.id);
-  for (const p of pageMap.values())
-    for (const a of p.aliases) if (!names.has(normTitle(a))) names.set(normTitle(a), p.id);
+  const layers = show ? [teamNames, showNames.get(show.id)!] : [...showNames.values()].reverse();
+  for (const m of show ? layers : [...layers, teamNames]) for (const [n, id] of m) names.set(n, id);
 
   const citations: Moment[] = [];
   for (const page of pageMap.values()) {
@@ -157,7 +237,7 @@ async function loadKnowledge(ctx: Ctx, showId: string): Promise<Knowledge> {
             ? links
             : block.links
         )
-          .map((t) => names.get(normTitle(t)))
+          .map((t) => resolve(page, t))
           .filter((id): id is string => Boolean(id) && id !== page.id);
         citations.push({
           kind: 'citation',
@@ -182,13 +262,7 @@ async function loadKnowledge(ctx: Ctx, showId: string): Promise<Knowledge> {
       }
     }
   }
-  return {
-    show: { id: show.id, name: show.name, code: show.code },
-    sessions: sessionMap,
-    pages: pageMap,
-    names,
-    citations,
-  };
+  return { show, team, sessions: sessionMap, pages: pageMap, names, resolve, citations };
 }
 
 /** Resolve page titles, aliases or ids to page ids; unknown values are returned separately. */
@@ -544,13 +618,13 @@ function compactMoment(m: Moment): CompactMoment {
 defineOp({
   name: 'moments.search',
   description:
-    'Find clip-ready moments of a show: time ranges in sessions, each with what happens there and the wiki pages (people, recurring bits, topics) it is about. Sources, by `kinds` (default all): "citation" — every citation on the show wiki, described by the sentence or list item that cites it and tagged with its page plus the [[pages]] linked in that list item (in a list item with more than 3 citations or a paragraph with several: its own sentence; in a table row: its own cell and the cells before it) (the richest source once a wiki exists); "topic" — chapters; "event" — logged events (no end: endSec null; "Note" events are editorial and never tagged with entities); "transcript" — transcript lines (only those matching query or naming an entity). Filter with `query` (full text, websearch syntax: words, "phrases", -exclude, or; page titles and headings weigh most; when nothing matches every word, moments matching at least half the words are returned, ranked by how many, with relaxedQuery: true), `entities` (page titles, aliases or ids — a moment must be about all of them; for topics, events and transcript lines that means naming each entity\'s title or an alias in its text) or both, and `sessionId`. With a query, best matches first; without, in episode order (episode numbers when every session has one, else dates) then time. Every moment has sessionId, startSec and endSec (seconds from the session start; archived sessions included) — cite them, as [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), or use them as compilation clips. `mergeGapSec` > 0 also returns `clips`: this page\'s moments merged per session where they overlap or are at most that many seconds apart (moments without an end count as `pointSec` long), at most `maxClipSec` long (default 180; a moment longer than that, like a whole-segment topic, is left out where tighter moments cover it) and at least 1 s — pass them to compilations_create as they are; `clipsOnly: true` returns just the clips. Agents get compact results by default (text trimmed to 160 characters, entities and page as titles, clips with a moment count); pass `compact: false` for full moments (context, headings, entity ids). transcriptCapped: true means more transcript lines matched than one search considers (5000, best first): narrow it. Use graph_entity first to see an entity\'s aliases, related pages and the sessions it appears in. Paged: total, limit (default 30, max 500), offset / nextOffset.',
+    'Find clip-ready moments of a show (showId) — or of every show of a team you can read (teamId, from teams_list) to search across shows: time ranges in sessions, each with what happens there and the wiki pages (people, recurring bits, topics) it is about. Sources, by `kinds` (default all): "citation" — every citation on the show wiki and on the team\'s shared wiki (team pages citing this show\'s sessions), described by the sentence or list item that cites it and tagged with its page plus the [[pages]] linked in that list item (in a list item with more than 3 citations or a paragraph with several: its own sentence; in a table row: its own cell and the cells before it) (the richest source once a wiki exists); "topic" — chapters; "event" — logged events (no end: endSec null; "Note" events are editorial and never tagged with entities); "transcript" — transcript lines (only those matching query or naming an entity). Filter with `query` (full text, websearch syntax: words, "phrases", -exclude, or; page titles and headings weigh most; when nothing matches every word, moments matching at least half the words are returned, ranked by how many, with relaxedQuery: true), `entities` (page titles, aliases or ids — a moment must be about all of them; for topics, events and transcript lines that means naming each entity\'s title or an alias in its text) or both, and `sessionId`. With a query, best matches first; without, in episode order (episode numbers when every session has one, else dates) then time. Every moment has sessionId, startSec and endSec (seconds from the session start; archived sessions included) — cite them, as [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), or use them as compilation clips. `mergeGapSec` > 0 also returns `clips`: this page\'s moments merged per session where they overlap or are at most that many seconds apart (moments without an end count as `pointSec` long), at most `maxClipSec` long (default 180; a moment longer than that, like a whole-segment topic, is left out where tighter moments cover it) and at least 1 s — pass them to compilations_create as they are; `clipsOnly: true` returns just the clips. Agents get compact results by default (text trimmed to 160 characters, entities and page as titles, clips with a moment count); pass `compact: false` for full moments (context, headings, entity ids). transcriptCapped: true means more transcript lines matched than one search considers (5000, best first): narrow it. Use graph_entity first to see an entity\'s aliases, related pages and the sessions it appears in. Paged: total, limit (default 30, max 500), offset / nextOffset.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
-    const k = await loadKnowledge(ctx, input.showId);
+    const k = await loadKnowledge(ctx, input);
     if (input.sessionId && !k.sessions.has(input.sessionId))
-      throw notFound('No such session in this show.');
+      throw notFound(`No such session in this ${k.show ? 'show' : 'team'}.`);
     const { ids: entityIds, unknown } = resolveEntities(k, input.entities ?? []);
     const empty = {
       total: 0,
@@ -663,15 +737,18 @@ defineOp({
 defineOp({
   name: 'graph.entity',
   description:
-    'One wiki page of a show seen as a knowledge-graph entity (a person, recurring bit, topic, session recap or question): its kind, aliases and summary, how many moments are about it, the sessions it appears in (episode order, with a count and its first moment each), and related pages — pages it links to, pages linking to it, and pages co-cited with it in the same wiki blocks — strongest first. `entity` is a page title, alias or page id. Use it to orient before moments_search (which takes the same entity names), e.g. "who is X, where do they appear, who do they come up with". Moments come from wiki citations, so an entity with no citing pages has momentCount 0.',
+    "One wiki page seen as a knowledge-graph entity, in a show graph (showId: the show's wiki plus the team's shared wiki, a show page winning a name both use) or the team graph (teamId: every show of the team you can read; moments from all of them, a team page winning a shared name) — (a person, recurring bit, topic, session recap or question): its kind, aliases and summary, how many moments are about it, the sessions it appears in (episode order, with a count and its first moment each), and related pages — pages it links to, pages linking to it, and pages co-cited with it in the same wiki blocks — strongest first. `entity` is a page title, alias or page id; showId / teamId on the result say which wiki holds the page. For a person or bit of the team wiki, the team graph lists every show's sessions they appear in. Use it to orient before moments_search (which takes the same entity names), e.g. \"who is X, where do they appear, who do they come up with\". Moments come from wiki citations, so an entity with no citing pages has momentCount 0.",
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, input): Promise<GraphEntity> {
-    const k = await loadKnowledge(ctx, input.showId);
+    const k = await loadKnowledge(ctx, input);
     const {
       ids: [pageId],
     } = resolveEntities(k, [input.entity]);
-    if (!pageId) throw notFound(`No wiki page titled or aliased "${input.entity}" in this show.`);
+    if (!pageId)
+      throw notFound(
+        `No wiki page titled or aliased "${input.entity}" in this ${k.show ? 'show or its team wiki' : 'team'}.`,
+      );
     const page = k.pages.get(pageId)!;
     const about = mergeSameRange(
       k.citations.filter((m) => m.entities.some((e) => e.pageId === pageId)),
@@ -714,7 +791,7 @@ defineOp({
       new Set(
         wikiSections(p.bodyMd, p.sessionId)
           .flatMap((s) => s.links)
-          .map((t) => k.names.get(normTitle(t)))
+          .map((t) => k.resolve(p, t))
           .filter((id): id is string => Boolean(id)),
       );
     for (const id of linksOf(page)) bump(id, 3, 'links');
@@ -724,7 +801,8 @@ defineOp({
 
     return {
       pageId,
-      showId: k.show.id,
+      showId: page.showId,
+      teamId: page.showId ? null : k.team.id,
       title: page.title,
       kind: page.kind,
       aliases: page.aliases,
@@ -752,8 +830,9 @@ const NODE_LABEL: Record<WikiKind, string> = {
 
 /** Property-graph rows: nodes, edges, moments (citations, topics, events) and wiki chunks. */
 async function graphRows(ctx: Ctx, k: Knowledge) {
+  const show = k.show!;
   const nodes: Record<string, unknown>[] = [
-    { type: 'node', id: k.show.id, label: 'Show', name: k.show.name, code: k.show.code },
+    { type: 'node', id: show.id, label: 'Show', name: show.name, code: show.code },
   ];
   for (const s of [...k.sessions.values()].sort((a, b) => a.order - b.order))
     nodes.push({
@@ -771,6 +850,8 @@ async function graphRows(ctx: Ctx, k: Knowledge) {
       id: p.id,
       label: NODE_LABEL[p.kind],
       name: p.title,
+      /** "team": a page of the team's shared wiki, which the show's pages link. */
+      wiki: p.showId ? 'show' : 'team',
       aliases: p.aliases,
       summary: firstParagraph(p.bodyMd),
       sessionId: p.sessionId,
@@ -780,14 +861,14 @@ async function graphRows(ctx: Ctx, k: Knowledge) {
 
   const edges: Record<string, unknown>[] = [];
   for (const s of k.sessions.values())
-    edges.push({ type: 'edge', label: 'PART_OF', from: s.id, to: k.show.id });
+    edges.push({ type: 'edge', label: 'PART_OF', from: s.id, to: show.id });
   for (const p of k.pages.values()) {
     if (p.sessionId && k.sessions.has(p.sessionId))
       edges.push({ type: 'edge', label: 'RECAP_OF', from: p.id, to: p.sessionId });
     const targets = new Set(
       wikiSections(p.bodyMd, p.sessionId)
         .flatMap((s) => s.links)
-        .map((t) => k.names.get(normTitle(t)))
+        .map((t) => k.resolve(p, t))
         .filter((id): id is string => Boolean(id) && id !== p.id),
     );
     for (const to of targets) edges.push({ type: 'edge', label: 'LINKS_TO', from: p.id, to });
@@ -820,7 +901,7 @@ async function graphRows(ctx: Ctx, k: Knowledge) {
   const chunks: Record<string, unknown>[] = [];
   for (const p of k.pages.values())
     for (const s of wikiSections(p.bodyMd, p.sessionId)) {
-      const path = [k.show.name, p.title, ...s.headings];
+      const path = [p.showId ? show.name : k.team.name, p.title, ...s.headings];
       chunks.push({
         type: 'chunk',
         id: `${p.id}#s${s.ord}`,
@@ -842,9 +923,7 @@ async function graphRows(ctx: Ctx, k: Knowledge) {
             label: c.label,
           })),
         entities: [
-          ...new Set(
-            s.links.map((t) => k.names.get(normTitle(t))).filter((id): id is string => Boolean(id)),
-          ),
+          ...new Set(s.links.map((t) => k.resolve(p, t)).filter((id): id is string => Boolean(id))),
         ].map((id) => entityOf(k.pages.get(id)!)),
       });
     }
@@ -855,6 +934,7 @@ const AL = 'https://autologger.app/ns#';
 
 /** One schema.org JSON-LD document; `al:` terms cover what schema.org has no word for. */
 function jsonLd(k: Knowledge, rows: Awaited<ReturnType<typeof graphRows>>) {
+  const show = k.show!;
   // Instances are IRIs on this server (relative to @base); `al:` is only for vocabulary terms.
   const iri = (id: string) =>
     id.startsWith('ses_')
@@ -865,10 +945,10 @@ function jsonLd(k: Knowledge, rows: Awaited<ReturnType<typeof graphRows>>) {
   const ref = (id: string) => ({ '@id': iri(id) });
   const graph: Record<string, unknown>[] = [
     {
-      '@id': iri(k.show.id),
+      '@id': iri(show.id),
       '@type': 'PodcastSeries',
-      name: k.show.name,
-      'al:code': k.show.code,
+      name: show.name,
+      'al:code': show.code,
     },
   ];
   for (const s of [...k.sessions.values()].sort((a, b) => a.order - b.order))
@@ -879,7 +959,7 @@ function jsonLd(k: Knowledge, rows: Awaited<ReturnType<typeof graphRows>>) {
       ...(s.episode ? { episodeNumber: s.episode } : {}),
       ...(s.episodeDate ? { datePublished: s.episodeDate } : {}),
       position: s.order + 1,
-      partOfSeries: ref(k.show.id),
+      partOfSeries: ref(show.id),
     });
   const type: Record<WikiKind, string | string[]> = {
     person: 'Person',
@@ -902,7 +982,7 @@ function jsonLd(k: Knowledge, rows: Awaited<ReturnType<typeof graphRows>>) {
       dateModified: p.updatedAt,
       ...(p.sessionId ? { about: ref(p.sessionId) } : {}),
       ...(linksFrom.get(p.id)?.length ? { mentions: linksFrom.get(p.id)!.map(ref) } : {}),
-      isPartOf: ref(k.show.id),
+      ...(p.showId ? { isPartOf: ref(show.id) } : {}),
     });
   for (const m of rows.moments)
     graph.push({
@@ -936,11 +1016,11 @@ function jsonLd(k: Knowledge, rows: Awaited<ReturnType<typeof graphRows>>) {
 defineOp({
   name: 'graph.export',
   description:
-    'Export a show\'s knowledge graph, built live from its sessions, wiki pages ([[links]], aliases, citations), topics and events. format "jsonl" (default) returns property-graph rows, paged with limit/offset: `section` "nodes" (show, episodes, wiki pages with summaries), "edges" (PART_OF, RECAP_OF, LINKS_TO, APPEARS_IN with a moment count), "moments" (citations, topics and events as clip ranges tagged with entities — what moments_search searches) or "chunks" (each wiki section with its heading path, plain text, citations and entities: ready for a vector index), or "all" (in that order). format "jsonld" returns one schema.org JSON-LD document (PodcastSeries, PodcastEpisode, Person, Clip with startOffset/endOffset and about) — large: prefer the file download GET /api/shows/<showId>/export/graph.jsonld (also graph.jsonl, moments.jsonl, chunks.jsonl) with the same bearer token. To query rather than copy the graph, use moments_search and graph_entity.',
+    'Export a show\'s knowledge graph, built live from its sessions, wiki pages (the show\'s and the team wiki\'s; nodes carry wiki "show" or "team") ([[links]], aliases, citations), topics and events. format "jsonl" (default) returns property-graph rows, paged with limit/offset: `section` "nodes" (show, episodes, wiki pages with summaries), "edges" (PART_OF, RECAP_OF, LINKS_TO, APPEARS_IN with a moment count), "moments" (citations, topics and events as clip ranges tagged with entities — what moments_search searches) or "chunks" (each wiki section with its heading path, plain text, citations and entities: ready for a vector index), or "all" (in that order). format "jsonld" returns one schema.org JSON-LD document (PodcastSeries, PodcastEpisode, Person, Clip with startOffset/endOffset and about) — large: prefer the file download GET /api/shows/<showId>/export/graph.jsonld (also graph.jsonl, moments.jsonl, chunks.jsonl) with the same bearer token. To query rather than copy the graph, use moments_search and graph_entity.',
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
-    const k = await loadKnowledge(ctx, input.showId);
+    const k = await loadKnowledge(ctx, { showId: input.showId });
     const rows = await graphRows(ctx, k);
     if (input.format === 'jsonld') return { format: 'jsonld' as const, document: jsonLd(k, rows) };
     const all =

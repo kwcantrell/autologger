@@ -137,6 +137,7 @@ describe('shared session pieces', () => {
       summary: 'Laugh',
       sessionId: 's',
       showId: 'sh',
+      teamId: null,
       revertedAt: null,
       revertOf: null,
       groupId: 'g1',

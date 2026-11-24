@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  check,
   customType,
   date,
   doublePrecision,
@@ -349,13 +350,18 @@ export const dashboards = pgTable(
   (t) => [index('dashboards_session').on(t.sessionId)],
 );
 
+/**
+ * Wiki pages live in one of two layers: a show's wiki (showId set) or its team's wiki (teamId set,
+ * showId null) for people, bits and topics shared across shows. Exactly one of the two is set. A
+ * show page's [[links]] resolve to the show's pages first, then the team's; a team page's to team
+ * pages only.
+ */
 export const wikiPages = pgTable(
   'wiki_pages',
   {
     id: text('id').primaryKey(),
-    showId: text('show_id')
-      .notNull()
-      .references(() => shows.id, { onDelete: 'cascade' }),
+    showId: text('show_id').references(() => shows.id, { onDelete: 'cascade' }),
+    teamId: text('team_id').references(() => teams.id, { onDelete: 'cascade' }),
     kind: text('kind', { enum: ['person', 'topic', 'bit', 'session', 'question'] }).notNull(),
     title: text('title').notNull(),
     titleNorm: text('title_norm').notNull(),
@@ -376,7 +382,11 @@ export const wikiPages = pgTable(
   (t) => [
     // Titles are unique among live pages only, so a deleted page's title can be reused.
     uniqueIndex('wiki_pages_title').on(t.showId, t.titleNorm).where(sql`deleted_at is null`),
+    uniqueIndex('wiki_pages_team_title')
+      .on(t.teamId, t.titleNorm)
+      .where(sql`deleted_at is null and team_id is not null`),
     index('wiki_pages_search').using('gin', t.search),
+    check('wiki_pages_layer', sql`(show_id is null) <> (team_id is null)`),
   ],
 );
 
@@ -478,9 +488,9 @@ export const changes = pgTable(
     kind: text('kind', { enum: ['create', 'update', 'delete'] }).notNull(),
     summary: text('summary').notNull(),
     sessionId: text('session_id').references(() => sessions.id, { onDelete: 'cascade' }),
-    showId: text('show_id')
-      .notNull()
-      .references(() => shows.id, { onDelete: 'cascade' }),
+    /** Null only for team-level changes (team wiki pages), which carry teamId instead. */
+    showId: text('show_id').references(() => shows.id, { onDelete: 'cascade' }),
+    teamId: text('team_id').references(() => teams.id, { onDelete: 'cascade' }),
     before: jsonb('before'),
     after: jsonb('after'),
     revertedAt: ts('reverted_at'),
@@ -491,6 +501,7 @@ export const changes = pgTable(
   (t) => [
     index('changes_session').on(t.sessionId, t.at),
     index('changes_show').on(t.showId, t.at),
+    index('changes_team').on(t.teamId, t.at).where(sql`team_id is not null`),
     index('changes_entity').on(t.entity, t.entityId, t.at),
     index('changes_group').on(t.groupId),
     // The show's MCP clients and Companion devices (shows.get): a skip scan over this index reads
@@ -498,6 +509,7 @@ export const changes = pgTable(
     index('changes_show_client')
       .on(t.showId, t.via, t.clientName)
       .where(sql`${t.clientName} is not null`),
+    check('changes_scope', sql`show_id is not null or team_id is not null`),
   ],
 );
 

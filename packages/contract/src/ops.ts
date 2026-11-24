@@ -423,25 +423,34 @@ export const opInputs = {
   'dashboards.query': z.object({ sessionId: id, query: DashboardQuery }),
 
   // ── wiki ──────────────────────────────────────────────────
-  'wiki.list': z.object({
-    showId: id,
-    kind: z.enum(['person', 'topic', 'bit', 'session', 'question']).optional(),
-    include: z.enum(['summary', 'body']).optional(),
-    linksTo: id.optional(),
-    citesSession: id.optional(),
-    /** With citesSession: per-page `citationCount` instead of the `citations` ranges. */
-    countOnly: z.boolean().optional(),
-    limit: z.number().int().min(1).max(200).optional(),
-    offset: z.number().int().min(0).optional(),
-  }),
+  'wiki.list': z
+    .object({
+      /** A show's wiki, or (teamId) its team's shared wiki; exactly one. */
+      showId: id.optional(),
+      teamId: id.optional(),
+      kind: z.enum(['person', 'topic', 'bit', 'session', 'question']).optional(),
+      include: z.enum(['summary', 'body']).optional(),
+      linksTo: id.optional(),
+      citesSession: id.optional(),
+      /** With citesSession: per-page `citationCount` instead of the `citations` ranges. */
+      countOnly: z.boolean().optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+      offset: z.number().int().min(0).optional(),
+    })
+    .refine((v) => (v.showId === undefined) !== (v.teamId === undefined), {
+      message: 'Pass exactly one of showId or teamId',
+    }),
   'wiki.get': z.object({
     pageId: id.optional(),
     showId: id.optional(),
+    teamId: id.optional(),
     title: z.string().optional(),
   }),
   'wiki.upsert': z
     .object({
-      showId: id,
+      /** The page's wiki: a show's, or (teamId) the team's shared wiki; exactly one. */
+      showId: id.optional(),
+      teamId: id.optional(),
       pageId: id.optional(),
       kind: z.enum(['person', 'topic', 'bit', 'session', 'question']),
       title: z.string().trim().min(1).max(200),
@@ -456,6 +465,9 @@ export const opInputs = {
     })
     .refine((v) => (v.bodyMd === undefined) !== (v.bodyUploadId === undefined), {
       message: 'Pass exactly one of bodyMd or bodyUploadId',
+    })
+    .refine((v) => (v.showId === undefined) !== (v.teamId === undefined), {
+      message: 'Pass exactly one of showId or teamId',
     }),
   'wiki.patch': z
     .object({
@@ -481,11 +493,30 @@ export const opInputs = {
     .refine((v) => v.append === undefined || v.appendUploadId === undefined, {
       message: 'Pass at most one of append or appendUploadId',
     }),
-  'wiki.createUpload': z.object({ showId: id }),
+  'wiki.createUpload': z
+    .object({ showId: id.optional(), teamId: id.optional() })
+    .refine((v) => (v.showId === undefined) !== (v.teamId === undefined), {
+      message: 'Pass exactly one of showId or teamId',
+    }),
+  'wiki.move': z
+    .object({
+      pageId: id,
+      /** Move into this show's wiki, or (teamId) into the team's shared wiki; exactly one. */
+      showId: id.optional(),
+      teamId: id.optional(),
+      compact,
+    })
+    .refine((v) => (v.showId === undefined) !== (v.teamId === undefined), {
+      message: 'Pass exactly one of showId or teamId',
+    }),
   'wiki.delete': z.object({ pageId: id }),
   'wiki.revisions': z.object({ pageId: id }),
   'wiki.restore': z.object({ pageId: id, revision: z.number().int().min(1) }),
-  'wiki.lint': z.object({ showId: id }),
+  'wiki.lint': z
+    .object({ showId: id.optional(), teamId: id.optional() })
+    .refine((v) => (v.showId === undefined) !== (v.teamId === undefined), {
+      message: 'Pass exactly one of showId or teamId',
+    }),
 
   // ── media ─────────────────────────────────────────────────
   'media.list': z.object({ sessionId: id }),
@@ -680,7 +711,9 @@ export const opInputs = {
   // ── knowledge graph ───────────────────────────────────────
   'moments.search': z
     .object({
-      showId: id,
+      /** A show's graph (its wiki plus the team wiki), or (teamId) every show of the team; exactly one. */
+      showId: id.optional(),
+      teamId: id.optional(),
       /** Full-text query (websearch syntax). Optional when `entities` is given. */
       query: z.string().trim().min(1).max(200).optional(),
       /** Page titles, aliases or page ids; a moment must be about all of them. */
@@ -706,14 +739,22 @@ export const opInputs = {
       clipsOnly: z.boolean().default(false),
       compact,
     })
-    .refine((v) => v.query || v.entities, { message: 'Pass query, entities or both.' }),
-  'graph.entity': z.object({
-    showId: id,
-    /** Page title, alias or page id. */
-    entity: z.string().trim().min(1).max(200),
-    /** Max related pages returned. */
-    relatedLimit: z.number().int().min(0).max(200).default(25),
-  }),
+    .refine((v) => v.query || v.entities, { message: 'Pass query, entities or both.' })
+    .refine((v) => (v.showId === undefined) !== (v.teamId === undefined), {
+      message: 'Pass exactly one of showId or teamId',
+    }),
+  'graph.entity': z
+    .object({
+      showId: id.optional(),
+      teamId: id.optional(),
+      /** Page title, alias or page id. */
+      entity: z.string().trim().min(1).max(200),
+      /** Max related pages returned. */
+      relatedLimit: z.number().int().min(0).max(200).default(25),
+    })
+    .refine((v) => (v.showId === undefined) !== (v.teamId === undefined), {
+      message: 'Pass exactly one of showId or teamId',
+    }),
   'graph.export': z.object({
     showId: id,
     /** "jsonl": property-graph rows (nodes, edges, moments, chunks), paged. "jsonld": one schema.org JSON-LD document. */
@@ -731,6 +772,8 @@ export const opInputs = {
       /** null: only show-level changes (wiki pages, event buttons), which belong to no session. */
       sessionId: id.nullable().optional(),
       showId: id.optional(),
+      /** Only the team's own changes (team wiki pages), which belong to no show. */
+      teamId: id.optional(),
       /** One surface or a list of them (any of). */
       via: z
         .union([
@@ -760,9 +803,16 @@ export const opInputs = {
       grouped: z.boolean().default(false),
       limit: z.number().int().min(1).max(500).default(100),
     })
-    .refine((v) => !v.grouped || typeof v.sessionId === 'string' || v.showId !== undefined, {
-      message: 'grouped: true needs a sessionId or showId.',
-    }),
+    .refine(
+      (v) =>
+        !v.grouped ||
+        typeof v.sessionId === 'string' ||
+        v.showId !== undefined ||
+        v.teamId !== undefined,
+      {
+        message: 'grouped: true needs a sessionId, showId or teamId.',
+      },
+    ),
   'changes.revert': z.object({ changeId: id }),
   'changes.revertGroup': z.object({ groupId: id }),
 
@@ -1036,6 +1086,7 @@ export interface OpOutputs {
   'wiki.restore': WikiPage;
   'wiki.lint': WikiLint;
   'wiki.createUpload': WikiUpload;
+  'wiki.move': WikiPage & WikiSavedCitations;
   'media.list': AudioSegment[];
   'media.createUpload': UploadTarget & { segment: AudioSegment };
   'media.completeUpload': AudioSegment;
@@ -1090,6 +1141,7 @@ export interface CompactOpOutputs {
   'dashboards.updateWidgets': CompactDashboard;
   'wiki.upsert': CompactWikiPage;
   'wiki.patch': CompactWikiPage;
+  'wiki.move': CompactWikiPage;
   'moments.search': CompactMomentSearch;
 }
 

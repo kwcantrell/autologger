@@ -207,3 +207,39 @@ export function setCitationEnds(
   }
   return out + bodyMd.slice(last);
 }
+
+/**
+ * A body with citation labels rewritten: `labelFor` gets each citation (resolved like
+ * wikiCitations) and its label as written in the Markdown (escapes kept), and returns the new
+ * written label or undefined to keep it. Bare `[@…]` forms have no label and are skipped; links
+ * inside code are left alone.
+ */
+export function setCitationLabels(
+  bodyMd: string,
+  labelFor: (c: WikiCitation, written: string) => string | undefined,
+  pageSessionId?: string | null,
+): string {
+  const blank = (code: string) => code.replace(/[^\n]/g, ' ');
+  const masked = bodyMd.replace(FENCED_CODE, blank).replace(CODE_SPAN, blank);
+  let out = '';
+  let last = 0;
+  for (const m of masked.matchAll(new RegExp(CITATION_LINK.source, 'gd'))) {
+    if (m[1] === undefined) continue;
+    const c = citationOf(m, pageSessionId);
+    if (!c?.sessionId) continue;
+    const [from, until] = m.indices![1]!;
+    const next = labelFor(
+      {
+        sessionId: c.sessionId,
+        startSec: c.startSec,
+        ...(c.endSec !== undefined ? { endSec: c.endSec } : {}),
+        label: c.label,
+      },
+      bodyMd.slice(from, until),
+    );
+    if (next === undefined) continue;
+    out += bodyMd.slice(last, from) + next;
+    last = until;
+  }
+  return out + bodyMd.slice(last);
+}

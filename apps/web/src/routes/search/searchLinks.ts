@@ -20,6 +20,10 @@ export const showAndDate = (h: SearchHit): string => {
   return date ? `${h.showName} · ${date}` : h.showName;
 };
 
+/** Where a wiki hit lives: its show, or "<team> · Team wiki" for a team wiki page. */
+export const wikiHitPlace = (h: SearchHit): string =>
+  h.teamId ? `${h.showName} · Team wiki` : h.showName;
+
 export const sessionHref = (sessionId: string) => `/sessions/${encodeURIComponent(sessionId)}`;
 export const wikiHref = (pageId: string) => `/wiki/${encodeURIComponent(pageId)}`;
 export const searchPageHref = (q: string) => `/search?q=${encodeURIComponent(q.trim())}`;

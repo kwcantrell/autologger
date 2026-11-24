@@ -25,11 +25,13 @@ export interface ShowMoments {
 export function momentsByShow(moments: MomentHit[]): ShowMoments[] {
   const by = new Map<string, ShowMoments>();
   for (const m of moments) {
-    if (!m.sessionId || m.atSec == null) continue;
-    let g = by.get(m.showId);
+    // Moments are session hits, which always have a show (team wiki pages have none).
+    const showId = m.showId;
+    if (!m.sessionId || m.atSec == null || !showId) continue;
+    let g = by.get(showId);
     if (!g) {
-      g = { showId: m.showId, showName: m.showName, moments: [] };
-      by.set(m.showId, g);
+      g = { showId, showName: m.showName, moments: [] };
+      by.set(showId, g);
     }
     g.moments.push(m);
   }

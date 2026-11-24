@@ -1,12 +1,17 @@
 import type { SearchHit } from '@autologger/contract';
 import { sql } from 'drizzle-orm';
-import { readableShowCondition, requireSession, requireShow } from '../core/authz.ts';
+import {
+  memberTeamCondition,
+  readableShowCondition,
+  requireSession,
+  requireShow,
+} from '../core/authz.ts';
 import { defineOp } from '../core/op.ts';
 
 defineOp({
   name: 'search',
   description:
-    'Full-text search across everything you can access: events, transcript lines, topics, wiki pages and sessions. Narrow by show, session or kinds. Hits carry sessionId and atSec so you can jump to the moment (transcript lines and topics also endSec, where they end; null otherwise), plus sessionTitle and sessionDate (episode date, or creation time) to tell sessions apart. Hits come best match first, in a stable order; limit defaults to 30 (max 500), so getting exactly `limit` hits means there may be more — narrow by show, session, kinds or more words, raise the limit, or ask for the next page with offset (the number of hits already read).',
+    "Full-text search across everything you can access: events, transcript lines, topics, wiki pages (team wiki pages too: showId null, teamId set, showName the team's name) and sessions. Narrow by show (its team's wiki pages included), session or kinds. Hits carry sessionId and atSec so you can jump to the moment (transcript lines and topics also endSec, where they end; null otherwise), plus sessionTitle and sessionDate (episode date, or creation time) to tell sessions apart. Hits come best match first, in a stable order; limit defaults to 30 (max 500), so getting exactly `limit` hits means there may be more — narrow by show, session, kinds or more words, raise the limit, or ask for the next page with offset (the number of hits already read).",
   kind: 'read',
   surfaces: ['web', 'mcp'],
   async run(ctx, { query, showId, sessionId, kinds, limit, offset }) {
@@ -27,27 +32,34 @@ defineOp({
     if (want.has('event'))
       parts.push(sql`select 'event' as kind, e.id, e.session_id, s.show_id, s.title as session_title, ${sessionDate} as session_date, sh.name as show_name,
         e.category as title, ${hl(sql`e.message || ' ' || coalesce(e.value,'')`)} as snippet,
-        greatest(0, (e.timecode_frames - s.start_offset_frames)::float / s.frame_rate) as at_sec, null::float as end_sec, ts_rank(e.search, ${q}) as rank
+        greatest(0, (e.timecode_frames - s.start_offset_frames)::float / s.frame_rate) as at_sec, null::float as end_sec, ts_rank(e.search, ${q}) as rank, null::text as team_id
         from events e join sessions s on s.id = e.session_id join shows sh on sh.id = s.show_id
         where e.search @@ ${q} and ${scope(sql`s.show_id`, sql`e.session_id`)}`);
     if (want.has('transcript'))
       parts.push(sql`select 'transcript', t.id, t.session_id, s.show_id, s.title, ${sessionDate}, sh.name,
-        coalesce(nullif(t.speaker,''),'Speaker'), ${hl(sql`t.text`)}, t.start_sec, t.end_sec, ts_rank(t.search, ${q})
+        coalesce(nullif(t.speaker,''),'Speaker'), ${hl(sql`t.text`)}, t.start_sec, t.end_sec, ts_rank(t.search, ${q}), null::text
         from transcript_segments t join sessions s on s.id = t.session_id join shows sh on sh.id = s.show_id
         where t.search @@ ${q} and ${scope(sql`s.show_id`, sql`t.session_id`)}`);
     if (want.has('topic'))
       parts.push(sql`select 'topic', p.id, p.session_id, s.show_id, s.title, ${sessionDate}, sh.name,
-        p.title, ${hl(sql`p.title || ' — ' || p.summary`)}, p.start_sec, case when p.duration_sec > 0 then p.start_sec + p.duration_sec end, ts_rank(p.search, ${q}) * 1.5
+        p.title, ${hl(sql`p.title || ' — ' || p.summary`)}, p.start_sec, case when p.duration_sec > 0 then p.start_sec + p.duration_sec end, ts_rank(p.search, ${q}) * 1.5, null::text
         from topics p join sessions s on s.id = p.session_id join shows sh on sh.id = s.show_id
         where p.search @@ ${q} and ${scope(sql`s.show_id`, sql`p.session_id`)}`);
     if (want.has('wiki'))
       parts.push(sql`select 'wiki', w.id, w.session_id, w.show_id, null, null, sh.name,
-        w.title, ${hl(sql`w.body_md`)}, null::float, null::float, ts_rank(w.search, ${q}) * 1.5
+        w.title, ${hl(sql`w.body_md`)}, null::float, null::float, ts_rank(w.search, ${q}) * 1.5, null::text
         from wiki_pages w join shows sh on sh.id = w.show_id
         where w.deleted_at is null and w.search @@ ${q} and ${scope(sql`w.show_id`, sql`w.session_id`)}`);
+    if (want.has('wiki') && !sessionId)
+      parts.push(sql`select 'wiki', w.id, null, null, null, null, t.name,
+        w.title, ${hl(sql`w.body_md`)}, null::float, null::float, ts_rank(w.search, ${q}) * 1.5, w.team_id
+        from wiki_pages w join teams t on t.id = w.team_id
+        where w.show_id is null and w.deleted_at is null and w.search @@ ${q}
+          and ${memberTeamCondition(ctx, sql`w.team_id`)}
+          ${showId ? sql`and w.team_id = (select team_id from shows where id = ${showId})` : sql``}`);
     if (want.has('session'))
       parts.push(sql`select 'session', s.id, s.id, s.show_id, s.title, ${sessionDate}, sh.name,
-        s.title, ${hl(sql`s.title || ' ' || s.notes`)}, null::float, null::float, ts_rank(s.search, ${q}) * 2
+        s.title, ${hl(sql`s.title || ' ' || s.notes`)}, null::float, null::float, ts_rank(s.search, ${q}) * 2, null::text
         from sessions s join shows sh on sh.id = s.show_id
         where s.search @@ ${q} and ${scope(sql`s.show_id`, sql`s.id`)}`);
     if (parts.length === 0) return [];
@@ -57,7 +69,8 @@ defineOp({
       kind: SearchHit['kind'];
       id: string;
       session_id: string | null;
-      show_id: string;
+      show_id: string | null;
+      team_id: string | null;
       session_title: string | null;
       session_date: string | null;
       show_name: string;
@@ -70,7 +83,7 @@ defineOp({
       // Name the columns here: a union takes its names from its first part, which varies with `kinds`.
       // Ties in rank are common, so kind and id break them: pages taken with offset never overlap.
       sql`select * from (${union}) hits(kind, id, session_id, show_id, session_title, session_date,
-        show_name, title, snippet, at_sec, end_sec, rank) order by rank desc, kind, id
+        show_name, title, snippet, at_sec, end_sec, rank, team_id) order by rank desc, kind, id
         limit ${limit} offset ${offset}`,
     );
     return rows.map((r) => ({
@@ -78,6 +91,7 @@ defineOp({
       id: r.id,
       sessionId: r.session_id,
       showId: r.show_id,
+      ...(r.team_id ? { teamId: r.team_id } : {}),
       sessionTitle: r.session_title,
       sessionDate: r.session_date,
       showName: r.show_name,

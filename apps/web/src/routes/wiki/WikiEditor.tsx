@@ -3,6 +3,7 @@
 
 import { XIcon } from 'lucide-react';
 import { useId, useState } from 'react';
+import type { WikiScope } from '@/api/queries';
 import { Badge } from '@/shared/components/ui/badge';
 import { Button } from '@/shared/components/ui/button';
 import { Input } from '@/shared/components/ui/input';
@@ -23,13 +24,14 @@ interface Props {
   onChange: (draft: WikiDraft) => void;
   showAliases: boolean;
   resolve: WikiResolver;
-  showId: string;
+  /** The page's wiki: whose sessions its citations name. */
+  scope: WikiScope | undefined;
   /** The page's own session, which short citations resolve to. */
   sessionId?: string | null;
 }
 
-export function WikiEditor({ draft, onChange, showAliases, resolve, showId, sessionId }: Props) {
-  const sessionTitle = useSessionTitles(showId, draft.body, sessionId);
+export function WikiEditor({ draft, onChange, showAliases, resolve, scope, sessionId }: Props) {
+  const sessionTitle = useSessionTitles(scope, draft.body, sessionId);
   const titleId = useId();
   const aliasId = useId();
   const [alias, setAlias] = useState('');

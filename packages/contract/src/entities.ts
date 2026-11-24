@@ -350,7 +350,10 @@ export type WikiKind = 'person' | 'topic' | 'bit' | 'session' | 'question';
 
 export interface WikiPageSummary {
   id: string;
-  showId: string;
+  /** The show whose wiki holds the page; null for a team wiki page. */
+  showId: string | null;
+  /** The team whose shared wiki holds the page; null for a show wiki page. */
+  teamId: string | null;
   kind: WikiKind;
   title: string;
   aliases: string[];
@@ -421,12 +424,18 @@ export interface WikiSavedCitations {
    * then differs from what was sent there (e.g. `to=6184.8` instead of `to=6185`).
    */
   clampedCitations: (Required<WikiCitation> & { sentEndSec: number })[];
+  /**
+   * Citations whose label started with a timecode (HH:MM:SS or a range) that was not their range:
+   * the save rewrote that timecode to the cited start (and end), in body order. `label` is the
+   * stored label, `sentLabel` the label as sent. The stored body then differs from what was sent.
+   */
+  relabeledCitations: (WikiCitation & { sentLabel: string })[];
 }
 
 export interface WikiPage extends WikiPageSummary {
   bodyMd: string;
   /** Pages that link to this one via [[Title]] or an alias, by title; the first 50. */
-  backlinks: { id: string; title: string; kind: WikiKind }[];
+  backlinks: { id: string; title: string; kind: WikiKind; showId: string | null }[];
   /** How many pages link to this one (backlinks lists at most 50). */
   backlinkCount: number;
 }
@@ -465,7 +474,9 @@ export interface Change {
   kind: 'create' | 'update' | 'delete';
   summary: string;
   sessionId: string | null;
-  showId: string;
+  /** Null for team-level changes (team wiki pages), which carry teamId. */
+  showId: string | null;
+  teamId: string | null;
   revertedAt: string | null;
   revertOf: string | null;
   /** Shared by every change one op call wrote; null on changes logged before groups existed. */
@@ -611,7 +622,10 @@ export interface SearchHit {
   kind: 'event' | 'transcript' | 'topic' | 'wiki' | 'session';
   id: string;
   sessionId: string | null;
-  showId: string;
+  /** Null for a team wiki page (showName is then the team's name). */
+  showId: string | null;
+  /** Set for a team wiki page. */
+  teamId?: string;
   sessionTitle: string | null;
   /**
    * The session's episode date (`YYYY-MM-DD`), or its creation time (ISO instant) when it has no
@@ -757,7 +771,9 @@ export interface CompactMomentSearch {
 /** One page of the show wiki seen as a graph node, with its neighbourhood and where it is cited. */
 export interface GraphEntity {
   pageId: string;
-  showId: string;
+  /** The page's wiki: a show (showId) or the team's shared wiki (teamId); the other is null. */
+  showId: string | null;
+  teamId: string | null;
   title: string;
   kind: WikiKind;
   aliases: string[];

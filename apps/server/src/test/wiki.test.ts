@@ -438,7 +438,9 @@ describe('wiki link index', () => {
       .select()
       .from(schema.wikiPages)
       .where(eq(schema.wikiPages.showId, show.id));
-    const byName = await db.transaction((tx) => wikiNames(tx, show.id));
+    const byName = await db.transaction((tx) =>
+      wikiNames(tx, { showId: show.id, teamId: show.teamId }),
+    );
     for (const p of all) {
       const linking = all
         .filter((o) => o.id !== p.id)
@@ -603,7 +605,7 @@ describe('question pages and citations', () => {
     );
   });
 
-  it('reports citation count and timecode labels that do not match the range on save', async () => {
+  it('counts citations and rewrites timecode labels that do not match the range on save', async () => {
     const { owner, show, session } = await studio();
     const cite = (label: string, q: string) => `[${label}](/sessions/${session.id}?${q})`;
     const page = await call(owner, 'wiki.upsert', {
@@ -620,23 +622,33 @@ describe('question pages and citations', () => {
         cite('\\[01:01:01–01:02:00\\]', 't=3661&to=3700'),
       ].join('\n'),
     });
-    const wrong = [
-      { sessionId: session.id, startSec: 3661.5, endSec: 3700, label: '00:01:01' },
-      { sessionId: session.id, startSec: 3661, endSec: 3700, label: '[01:01:01–01:02:00]' },
-    ].map((c) => ({ ...c, problem: 'label_mismatch' }));
-    expect(page).toMatchObject({ citationCount: 6, badCitations: wrong, backlinkCount: 0 });
-    expect((await call(owner, 'wiki.lint', { showId: show.id })).badCitations).toEqual([
-      expect.objectContaining({ pageId: page.id, citations: wrong }),
+    expect(page).toMatchObject({ citationCount: 6, badCitations: [], backlinkCount: 0 });
+    expect(page.relabeledCitations).toEqual([
+      {
+        sessionId: session.id,
+        startSec: 3661.5,
+        endSec: 3700,
+        label: '01:01:01',
+        sentLabel: '00:01:01',
+      },
+      {
+        sessionId: session.id,
+        startSec: 3661,
+        endSec: 3700,
+        label: '[01:01:01–01:01:40]',
+        sentLabel: '[01:01:01–01:02:00]',
+      },
     ]);
+    expect(page.bodyMd).toContain(cite('\\[01:01:01–01:01:40\\]', 't=3661&to=3700'));
+    expect((await call(owner, 'wiki.lint', { showId: show.id })).badCitations).toEqual([]);
 
+    // A patch that moves a range relabels it too; nothing to fix by hand.
     const fixed = await call(asAgent(owner), 'wiki.patch', {
       pageId: page.id,
-      edits: [
-        { find: '[00:01:01]', replace: '[01:01:01]' },
-        { find: '01:02:00\\]', replace: '01:01:40\\]' },
-      ],
+      edits: [{ find: 't=3661.5&to=3700', replace: 't=3600&to=3640', all: true }],
     });
     expect(fixed).toMatchObject({ revision: 2, citationCount: 6, badCitations: [] });
+    expect(fixed.relabeledCitations.map((c) => c.label)).toEqual(['01:00:00', '01:00:00']);
     await failsWith(
       call(await makeUser('stranger@example.com'), 'wiki.patch', { pageId: page.id, append: 'x' }),
       'not_found',

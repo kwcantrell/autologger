@@ -125,9 +125,17 @@ export function compilationKeyFor(showId: string, compilationId: string): string
   return `shows/${showId}/compilations/${compilationId}.mp4`;
 }
 
-/** A page body uploaded for wiki.upsert / wiki.patch (wiki.createUpload); removed once used. */
-export function wikiUploadKeyFor(showId: string, uploadId: string): string {
-  return `shows/${showId}/wiki-uploads/${uploadId}.md`;
+/**
+ * A page body uploaded for wiki.upsert / wiki.patch (wiki.createUpload); removed once used. Show
+ * wikis keep them under the show, the team wiki under `teams/<teamId>/`.
+ */
+export function wikiUploadKeyFor(
+  wiki: { showId: string } | { teamId: string },
+  uploadId: string,
+): string {
+  return 'showId' in wiki
+    ? `shows/${wiki.showId}/wiki-uploads/${uploadId}.md`
+    : `teams/${wiki.teamId}/wiki-uploads/${uploadId}.md`;
 }
 
 /** Every stored object of a show itself (compilations, wiki uploads) lives under this prefix. */

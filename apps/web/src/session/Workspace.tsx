@@ -397,7 +397,7 @@ function SessionWikiButton({ session }: { session: Session }) {
   const open = async () => {
     setBusy(true);
     try {
-      const pages = await listAllWikiPages(session.showId, 'session');
+      const pages = await listAllWikiPages({ showId: session.showId }, 'session');
       const existing = pages.find((p) => p.sessionId === session.id);
       if (existing) {
         navigate(`/wiki/${encodeURIComponent(existing.id)}`);

@@ -162,6 +162,13 @@
       "when": 1795421006961,
       "tag": "0022_changes_show_client",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795492085657,
+      "tag": "0023_team_wiki",
+      "breakpoints": true
     }
   ]
 }
