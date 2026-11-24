@@ -119,6 +119,7 @@ function mockChange(
     summary,
     sessionId: 'mock',
     showId: 'mock',
+    teamId: null,
     revertedAt: null,
     revertOf: null,
     groupId: groupSize ? `grp-${minutesAgo}` : null,

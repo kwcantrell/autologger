@@ -43,6 +43,7 @@ import {
   sessionHref,
   showAndDate,
   untitled,
+  wikiHitPlace,
 } from './searchLinks';
 
 const PAGE_LIMIT = 100;
@@ -441,7 +442,7 @@ export function SearchRoute() {
                       className="size-3.5 shrink-0 self-center text-si-dim"
                     />
                     <span className="truncate font-medium text-si-fg">{h.title}</span>
-                    <span className="ml-auto shrink-0 text-xs text-si-dim">{h.showName}</span>
+                    <span className="ml-auto shrink-0 text-xs text-si-dim">{wikiHitPlace(h)}</span>
                   </span>
                   {h.snippet && <SearchSnippet text={h.snippet} className="text-sm" />}
                 </ResultLink>

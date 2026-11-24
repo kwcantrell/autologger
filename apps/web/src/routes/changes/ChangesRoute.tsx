@@ -85,7 +85,10 @@ const KIND_LABEL: Record<Kind, string> = {
   audio_segment: 'Recording status',
 };
 
-/** `all`: the whole show; `show`: only show-level changes; otherwise a session id. */
+/**
+ * `all`: the whole show; `show`: only show-level changes; `team`: the team wiki's changes (team
+ * pages, which belong to no show); otherwise a session id.
+ */
 type Where = 'all' | 'show' | (string & {});
 
 interface Filters {
@@ -196,7 +199,7 @@ function ChangeContext({ c, sessions }: { c: Change; sessions: Map<string, Sessi
   const gone = c.entity === 'wiki_page' && c.kind === 'delete' && !c.revertedAt;
   return (
     <span>
-      Show wiki
+      {c.showId ? 'Show wiki' : 'Team wiki'}
       {c.entity === 'wiki_page' && !gone && (
         <>
           {' · '}
@@ -211,11 +214,13 @@ function ChangeContext({ c, sessions }: { c: Change; sessions: Map<string, Sessi
 
 function ChangeLog({
   showId,
+  teamId,
   canWrite,
   filters,
   setFilters,
 }: {
   showId: string;
+  teamId: string;
   canWrite: boolean;
   filters: Filters;
   setFilters: (f: Filters) => void;
@@ -227,10 +232,13 @@ function ChangeLog({
   );
   const showQ = useShow(showId);
   const [, navigate] = useLocation();
+  const team = filters.where === 'team';
   const query: ShowChangesFilter = {
     ...(filters.where === 'all'
       ? {}
-      : { sessionId: filters.where === 'show' ? null : filters.where }),
+      : team
+        ? { teamId }
+        : { sessionId: filters.where === 'show' ? null : filters.where }),
     ...(filters.kind === 'all' ? {} : { entity: filters.kind }),
     ...whoFilter(filters.who),
   };
@@ -255,6 +263,7 @@ function ChangeLog({
   // An undo may touch any content of the show: refetch whatever of it is on screen.
   const touched = () => [
     ['show-changes', showId],
+    ['wiki', `team:${teamId}`],
     ['changes'],
     ['wiki', showId],
     ['wiki-page'],
@@ -327,6 +336,7 @@ function ChangeLog({
   const sessionOptions: [Where, string][] = [
     ['all', 'Whole show'],
     ['show', 'Show-level only (wiki, event buttons)'],
+    ['team', 'Team wiki'],
     ...(sessionsQ.data ?? []).map((s): [Where, string] => [s.id, s.title || 'Untitled session']),
   ];
   // A session filter from a link may name a session that is not in the list (yet).
@@ -349,7 +359,7 @@ function ChangeLog({
     <>
       <FilterMenu
         title="Where"
-        label={filters.where === 'show' ? 'Show-level only' : whereLabel}
+        label={filters.where === 'show' ? 'Show-level only' : team ? 'Team wiki' : whereLabel}
         value={filters.where}
         options={sessionOptions}
         onChange={(where) => setFilters({ ...filters, where })}
@@ -413,7 +423,8 @@ function ChangeLog({
               now={now}
               sec={c.sessionId && sessions.has(c.sessionId) ? (c.atSec ?? null) : null}
               onJump={(sec) => c.sessionId && navigate(sessionHref(c.sessionId, sec))}
-              canWrite={canWrite}
+              // Every team member edits the team wiki.
+              canWrite={canWrite || (!c.showId && c.teamId === teamId)}
               busy={
                 (revert.isPending && revert.variables?.changeId === c.id) ||
                 (revertGroup.isPending &&
@@ -468,6 +479,7 @@ export function ChangesRoute() {
           <ChangeLog
             key={show.id}
             showId={show.id}
+            teamId={show.teamId}
             canWrite={canWriteShow}
             filters={filters}
             setFilters={(f) => navigate(filtersUrl(f), { replace: true })}

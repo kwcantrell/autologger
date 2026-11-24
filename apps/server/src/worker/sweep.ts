@@ -14,7 +14,8 @@
 //   MEDIA_SWEEP_LIVE_SESSIONS of them, continuing after the last session the previous run of this
 //   process checked (in id order, wrapping around).
 //
-// - Wiki body uploads (wiki.createUpload) no save used within the upload age.
+// - Wiki body uploads (wiki.createUpload) no save used within the upload age, under a show or
+//   under `teams/<id>/` (team wiki); a deleted team's whole prefix.
 //
 // Under an existing session, only objects no segment row points at; under an existing show, only
 // compilation MP4s whose compilation row is gone and unused wiki uploads. Orphans are removed only when the newest object under them is
@@ -34,7 +35,7 @@ import {
   listObjects,
 } from '../media/s3.ts';
 
-const { audioSegments, compilations, sessions, shows } = schema;
+const { audioSegments, compilations, sessions, shows, teams } = schema;
 
 const HOUR_MS = 3600_000;
 /** Floor for both ages: a PUT URL lasts 15 minutes, imports and compiles well under an hour. */
@@ -288,6 +289,34 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
           }
           result.objects.push(o.key);
           console.log(`${tag} ${o.key} (compilation no longer exists)`);
+        }
+      }
+    }
+
+    // 3b. Team prefixes: only team wiki uploads live there.
+    for (const batch of chunks(idsUnder(await listChildPrefixes('teams/')), ID_BATCH)) {
+      const live = new Set(
+        (await tx.select({ id: teams.id }).from(teams).where(inArray(teams.id, batch))).map(
+          (r) => r.id,
+        ),
+      );
+      for (const teamId of batch) {
+        if (!live.has(teamId)) {
+          await removePrefix(`teams/${teamId}/`, 'team no longer exists');
+          continue;
+        }
+        for (const o of await listObjects(`teams/${teamId}/wiki-uploads/`)) {
+          if (o.lastModified.getTime() >= uploadCutoff) continue;
+          if (!dryRun) {
+            try {
+              await deleteObject(o.key);
+            } catch (e) {
+              console.warn(`media sweep: could not delete ${o.key}: ${(e as Error).message}`);
+              continue;
+            }
+          }
+          result.objects.push(o.key);
+          console.log(`${tag} ${o.key} (wiki upload never used)`);
         }
       }
     }

@@ -207,6 +207,7 @@ describe('compact responses for bulk writes', () => {
       citationCount: 0,
       badCitations: [],
       clampedCitations: [],
+      relabeledCitations: [],
     });
     const updated = await call(agent, 'wiki.upsert', {
       showId: show.id,
@@ -256,6 +257,7 @@ describe('compact responses for bulk writes', () => {
       citationCount: 0,
       badCitations: [],
       clampedCitations: [],
+      relabeledCitations: [],
     });
   });
 

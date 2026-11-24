@@ -21,6 +21,7 @@ import {
   type UseQueryOptions,
   useInfiniteQuery,
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
@@ -62,7 +63,8 @@ export const qk = {
   showChangesAll: (showId: string) => ['show-changes', showId] as const,
   showChanges: (showId: string, filter: ShowChangesFilter) =>
     ['show-changes', showId, filter] as const,
-  wikiList: (showId: string) => ['wiki', showId] as const,
+  /** A wiki's page lists: key with wikiScopeKey (a show id, or `team:<teamId>`). */
+  wikiList: (scopeKey: string) => ['wiki', scopeKey] as const,
   wikiPage: (pageId: string) => ['wiki-page', pageId] as const,
   wikiRevisions: (pageId: string) => ['wiki-revisions', pageId] as const,
   compilations: (showId: string) => ['compilations', showId] as const,
@@ -152,6 +154,22 @@ export const useSessions = (showId: string | undefined) =>
     { showId, includeArchived: true, limit: 500 },
     { enabled: !!showId },
   );
+/**
+ * Sessions of several shows (a team wiki page cites any show of its team), from the same cached
+ * sessions.list per show as useSessions. `data` is undefined until every list has loaded.
+ */
+export function useSessionsOf(showIds: string[]) {
+  return useQueries({
+    queries: showIds.map((showId) => ({
+      queryKey: qk.sessions(showId),
+      queryFn: () => rpc('sessions.list', { showId, includeArchived: true, limit: 500 }),
+    })),
+    combine: (results) => ({
+      data: results.every((r) => r.data) ? results.flatMap((r) => r.data!) : undefined,
+      isError: results.some((r) => r.isError),
+    }),
+  });
+}
 /** The session query (sessions.get), for observers that select a slice of it. */
 export const sessionQuery = (sessionId: string) => ({
   queryKey: qk.session(sessionId),
@@ -299,17 +317,35 @@ export interface ShowChangesFilter {
   via?: Via | Via[];
   /** One MCP client (Change.clientName). */
   clientName?: string;
+  /** Instead of the show's changes: the team wiki's (the show's team). */
+  teamId?: string;
 }
 export const useShowChanges = (showId: string, filter: ShowChangesFilter) =>
   useOpQuery(
     qk.showChanges(showId, filter),
     'changes.list',
-    { showId, ...filter, grouped: true, limit: 300 },
+    { ...(filter.teamId ? {} : { showId }), ...filter, grouped: true, limit: 300 },
     { placeholderData: keepPreviousData },
   );
-/** Every page of a show's wiki (wiki.list is paged; the screens need all of it for links). */
+/** A wiki: a show's, or its team's shared wiki. */
+export type WikiScope =
+  | { showId: string; teamId?: undefined }
+  | { teamId: string; showId?: undefined };
+
+/** The scope of the wiki holding a page (or of a backlink, change or search hit). */
+export const wikiScopeOf = (p: {
+  showId: string | null;
+  teamId?: string | null;
+}): WikiScope | undefined =>
+  p.showId ? { showId: p.showId } : p.teamId ? { teamId: p.teamId } : undefined;
+
+/** Query-key part for a wiki scope: the show id, or `team:<teamId>`. */
+export const wikiScopeKey = (scope: WikiScope | undefined) =>
+  !scope ? '' : scope.showId ? scope.showId : `team:${scope.teamId}`;
+
+/** Every page of a wiki (wiki.list is paged; the screens need all of it for links). */
 export async function listAllWikiPages(
-  showId: string,
+  scope: WikiScope,
   kind?: WikiKind,
   linksTo?: string,
   citesSession?: string,
@@ -317,7 +353,7 @@ export async function listAllWikiPages(
   const out: WikiListItem[] = [];
   for (let offset: number | null = 0; offset !== null; ) {
     const page: WikiList = await rpc('wiki.list', {
-      showId,
+      ...(scope.showId ? { showId: scope.showId } : { teamId: scope.teamId }),
       ...(kind ? { kind } : {}),
       ...(linksTo ? { linksTo } : {}),
       ...(citesSession ? { citesSession } : {}),
@@ -329,27 +365,46 @@ export async function listAllWikiPages(
   }
   return out;
 }
-export const useWikiList = (showId: string | undefined, kind?: WikiKind) =>
+export const useWikiList = (scope: WikiScope | undefined, kind?: WikiKind) =>
   useQuery<WikiListItem[], RpcError>({
-    queryKey: [...qk.wikiList(showId ?? ''), kind ?? 'all'],
-    queryFn: () => listAllWikiPages(showId ?? '', kind),
-    enabled: !!showId,
+    queryKey: [...qk.wikiList(wikiScopeKey(scope)), kind ?? 'all'],
+    queryFn: () => listAllWikiPages(scope!, kind),
+    enabled: !!scope,
   });
-/** Every page linking to a page (wiki.get lists only the first 50 backlinks), by title. */
-export const useWikiBacklinks = (showId: string, pageId: string, enabled: boolean) =>
+/**
+ * The page lists of several wikis at once (e.g. every show of a team, for links on a team page):
+ * `data` is one list per scope in order, undefined until all have loaded.
+ */
+export function useWikiLists(scopes: WikiScope[]) {
+  return useQueries({
+    queries: scopes.map((scope) => ({
+      queryKey: [...qk.wikiList(wikiScopeKey(scope)), 'all'],
+      queryFn: () => listAllWikiPages(scope),
+    })),
+    combine: (results) => ({
+      data: results.every((r) => r.data) ? results.map((r) => r.data!) : undefined,
+    }),
+  });
+}
+/**
+ * Every page linking to a page (wiki.get lists only the first 50 backlinks), by title, from the
+ * given wikis: the page's own, plus for a team page each show of the team (their pages link it).
+ */
+export const useWikiBacklinks = (scopes: WikiScope[], pageId: string, enabled: boolean) =>
   useQuery<WikiListItem[], RpcError>({
-    queryKey: [...qk.wikiList(showId), 'linksTo', pageId],
-    queryFn: async () =>
-      (await listAllWikiPages(showId, undefined, pageId)).sort((a, b) =>
-        a.title.localeCompare(b.title),
-      ),
+    queryKey: [...qk.wikiList(wikiScopeKey(scopes[0])), 'linksTo', pageId, scopes.length],
+    queryFn: async () => {
+      const lists = await Promise.all(scopes.map((s) => listAllWikiPages(s, undefined, pageId)));
+      const byId = new Map(lists.flat().map((p) => [p.id, p]));
+      return [...byId.values()].sort((a, b) => a.title.localeCompare(b.title));
+    },
     enabled,
   });
 /** Every page citing a session, each with its cited ranges of it (wiki.list citesSession). */
 export const useWikiCiting = (showId: string, sessionId: string) =>
   useQuery<WikiListItem[], RpcError>({
     queryKey: [...qk.wikiList(showId), 'citesSession', sessionId],
-    queryFn: () => listAllWikiPages(showId, undefined, undefined, sessionId),
+    queryFn: () => listAllWikiPages({ showId }, undefined, undefined, sessionId),
   });
 export const useWikiPage = (pageId: string | undefined) =>
   useOpQuery(

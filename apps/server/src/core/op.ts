@@ -42,7 +42,10 @@ export interface RecordChange {
   entityId: string;
   kind: 'create' | 'update' | 'delete';
   summary: string;
-  showId: string;
+  /** Null for a team-level change (a team wiki page), which gives teamId instead. */
+  showId: string | null;
+  /** The team, for team-level changes (and changes that move a page between show and team). */
+  teamId?: string | null;
   sessionId?: string | null;
   before?: unknown;
   after?: unknown;
@@ -236,6 +239,7 @@ async function runInTransaction<N extends OpName>(
           summary: c.summary.slice(0, 500),
           sessionId: c.sessionId ?? null,
           showId: c.showId,
+          teamId: c.teamId ?? null,
           before: c.before ?? null,
           after: c.after ?? null,
           revertOf: c.revertOf ?? null,
@@ -245,12 +249,12 @@ async function runInTransaction<N extends OpName>(
         for (let i = 0; i < rows.length; i += 1000)
           await tx.insert(schema.changes).values(rows.slice(i, i + 1000));
         // Show-level changes (wiki pages, event buttons) reach the show socket's change log.
+        // Team-level changes have no socket; the team's change list refetches on its own.
         for (const c of list)
-          outbox.push(
-            c.sessionId
-              ? [`session:${c.sessionId}`, { type: 'invalidate', entity: 'change' }]
-              : [`show:${c.showId}`, { type: 'invalidate', entity: 'change' }],
-          );
+          if (c.sessionId)
+            outbox.push([`session:${c.sessionId}`, { type: 'invalidate', entity: 'change' }]);
+          else if (c.showId)
+            outbox.push([`show:${c.showId}`, { type: 'invalidate', entity: 'change' }]);
         return rows.map((r) => r.id);
       },
     };

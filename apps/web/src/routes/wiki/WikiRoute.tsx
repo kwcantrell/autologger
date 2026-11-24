@@ -1,11 +1,13 @@
-// `/wiki`: the active show's wiki. One fetch of the show's pages; the line tabs split them by kind
-// and the filter matches titles and aliases (case- and accent-insensitive).
+// `/wiki`: the active show's wiki, and `/teams/:teamId/wiki`: the team's shared wiki (people, bits
+// and topics spanning its shows). One fetch of the wiki's pages; the line tabs split them by kind
+// and the filter matches titles and aliases (case- and accent-insensitive). The show wiki also
+// lists, per kind, the team wiki's pages its [[links]] reach (those it has no page of its own for).
 
-import type { WikiKind, WikiPageSummary } from '@autologger/contract';
-import { HistoryIcon, PlusIcon, SearchIcon } from 'lucide-react';
+import { normTitle, type WikiKind, type WikiPageSummary } from '@autologger/contract';
+import { HistoryIcon, LibraryIcon, PlusIcon, SearchIcon } from 'lucide-react';
 import { type ReactNode, useMemo, useState } from 'react';
 import { Link } from 'wouter';
-import { useWikiList } from '@/api/queries';
+import { useMe, useWikiList, type WikiScope } from '@/api/queries';
 import { errorMessage } from '@/api/rpc';
 import { useActive } from '@/app/useActive';
 import { PageFrame, RouteLoadingState } from '@/components/RouteState';
@@ -17,7 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui
 import { LoadErrorAlert } from '@/shared/ui/LoadErrorAlert';
 import { Tooltip } from '@/shared/ui/Tooltip';
 import { NewWikiPageDialog } from './NewWikiPageDialog';
-import { fmtDate, fold, wikiHref } from './wikiShared';
+import { fmtDate, fold, teamWikiHref, wikiHref } from './wikiShared';
 
 const TABS: { id: WikiKind; label: string; empty: string }[] = [
   { id: 'person', label: 'People', empty: 'No people yet' },
@@ -67,26 +69,40 @@ function Status({ children }: { children: ReactNode }) {
   );
 }
 
+const byTitle = (a: WikiPageSummary, b: WikiPageSummary) => TITLE_ORDER.compare(a.title, b.title);
+
 function PageList({
-  showId,
+  scope,
+  teamId,
   tab,
   needle,
   filterText,
 }: {
-  showId: string;
+  scope: WikiScope;
+  /** For a show wiki: its team, whose shared pages are listed below the show's. */
+  teamId?: string;
   tab: (typeof TABS)[number];
   needle: string;
   filterText: string;
 }) {
-  const { data, isPending, isError, error, refetch, isRefetching } = useWikiList(showId);
+  const { data, isPending, isError, error, refetch, isRefetching } = useWikiList(scope);
+  const team = useWikiList(teamId ? { teamId } : undefined);
   const ofKind = useMemo(
-    () =>
-      (data ?? [])
-        .filter((p) => p.kind === tab.id)
-        .sort((a, b) => TITLE_ORDER.compare(a.title, b.title)),
+    () => (data ?? []).filter((p) => p.kind === tab.id).sort(byTitle),
     [data, tab.id],
   );
+  // Team pages the show's links reach: none of the show's pages takes their title.
+  const teamOfKind = useMemo(() => {
+    const own = new Set((data ?? []).flatMap((p) => [p.title, ...p.aliases].map(normTitle)));
+    return (team.data ?? [])
+      .filter((p) => p.kind === tab.id && !own.has(normTitle(p.title)))
+      .sort(byTitle);
+  }, [data, team.data, tab.id]);
   const pages = useMemo(() => ofKind.filter((p) => matches(p, needle)), [ofKind, needle]);
+  const teamPages = useMemo(
+    () => teamOfKind.filter((p) => matches(p, needle)),
+    [teamOfKind, needle],
+  );
 
   if (isError)
     return (
@@ -105,7 +121,7 @@ function PageList({
         <Spinner role="presentation" aria-hidden="true" className="size-4" /> Loading pages…
       </Status>
     );
-  if (ofKind.length === 0)
+  if (ofKind.length === 0 && teamOfKind.length === 0)
     return (
       <Empty className="py-10">
         <EmptyHeader className="max-w-[26rem]">
@@ -117,38 +133,126 @@ function PageList({
         </EmptyHeader>
       </Empty>
     );
-  if (pages.length === 0)
+  if (pages.length === 0 && teamPages.length === 0)
     return (
       <p className="m-0 py-10 text-center text-sm text-si-muted">
         No pages match “{filterText.trim()}”.
       </p>
     );
   return (
-    <ul aria-label={`${tab.label} pages`} className="m-0 flex list-none flex-col p-0">
-      {pages.map((p) => (
-        <PageRow key={p.id} page={p} />
-      ))}
-    </ul>
+    <>
+      {pages.length > 0 && (
+        <ul aria-label={`${tab.label} pages`} className="m-0 flex list-none flex-col p-0">
+          {pages.map((p) => (
+            <PageRow key={p.id} page={p} />
+          ))}
+        </ul>
+      )}
+      {teamId && teamPages.length > 0 && (
+        <section
+          aria-labelledby={`team-${tab.id}`}
+          className="mt-3 flex flex-col gap-1 border-t border-si-line pt-3"
+        >
+          <h2
+            id={`team-${tab.id}`}
+            className="m-0 px-3 text-xs font-semibold tracking-wide text-si-dim uppercase"
+          >
+            From the team wiki
+          </h2>
+          <ul aria-label={`Team ${tab.label} pages`} className="m-0 flex list-none flex-col p-0">
+            {teamPages.map((p) => (
+              <PageRow key={p.id} page={p} />
+            ))}
+          </ul>
+        </section>
+      )}
+    </>
+  );
+}
+
+/** Filter, kind tabs and page lists of one wiki, plus its New page dialog. */
+function WikiIndex({
+  scope,
+  teamId,
+  tabs,
+  creating,
+  onCreatingChange,
+}: {
+  scope: WikiScope;
+  teamId?: string;
+  tabs: typeof TABS;
+  creating: boolean;
+  onCreatingChange: (open: boolean) => void;
+}) {
+  const [tab, setTab] = useState<WikiKind>('person');
+  const [filter, setFilter] = useState('');
+  const needle = fold(filter.trim());
+  return (
+    <>
+      <InputGroup>
+        <InputGroupInput
+          type="search"
+          aria-label="Filter pages"
+          placeholder="Filter by title or alias"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+        <InputGroupAddon className="text-si-dim">
+          <SearchIcon aria-hidden="true" />
+        </InputGroupAddon>
+      </InputGroup>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as WikiKind)} className="min-w-0">
+        <div className="flex min-w-0 max-md:overflow-x-auto max-md:[scrollbar-width:none]">
+          <TabsList variant="line" aria-label="Page kinds">
+            {tabs.map((t) => (
+              <TabsTrigger key={t.id} value={t.id}>
+                {t.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+        {tabs.map((t) => (
+          <TabsContent key={t.id} value={t.id} className="pt-3">
+            <PageList scope={scope} teamId={teamId} tab={t} needle={needle} filterText={filter} />
+          </TabsContent>
+        ))}
+      </Tabs>
+      <NewWikiPageDialog
+        scope={scope}
+        open={creating}
+        onOpenChange={onCreatingChange}
+        initialKind={tab}
+      />
+    </>
   );
 }
 
 export function WikiRoute() {
-  const { show, showsLoading, canWriteShow } = useActive();
-  const [tab, setTab] = useState<WikiKind>('person');
-  const [filter, setFilter] = useState('');
+  const { show, team, showsLoading, canWriteShow } = useActive();
   const [creating, setCreating] = useState(false);
-  const needle = fold(filter.trim());
 
   if (showsLoading) return <RouteLoadingState label="Loading wiki" />;
 
   return (
     <PageFrame className="max-md:px-3">
       <div data-slot="wiki-route" className="contents">
-        <div className="flex min-w-0 items-start gap-3">
+        <div className="flex min-w-0 flex-wrap items-start gap-3">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <h1 className="m-0 text-[1.35rem] font-semibold text-si-fg">Wiki</h1>
             {show && <p className="m-0 truncate text-sm text-si-muted">{show.name}</p>}
           </div>
+          {show && (
+            <Tooltip content={`Pages shared by every show of ${show.teamName}`}>
+              <Button
+                variant="outline"
+                nativeButton={false}
+                render={<Link href={teamWikiHref(show.teamId)} />}
+              >
+                <LibraryIcon data-icon="inline-start" />
+                Team wiki
+              </Button>
+            </Tooltip>
+          )}
           {show && (
             <Tooltip content="Wiki edits and deletes, with undo">
               <Button
@@ -176,46 +280,82 @@ export function WikiRoute() {
           <Empty>
             <EmptyHeader>
               <EmptyTitle>No show chosen</EmptyTitle>
-              <EmptyDescription>Choose a show in the top bar to see its wiki.</EmptyDescription>
+              <EmptyDescription>
+                Choose a show in the top bar to see its wiki
+                {team ? (
+                  <>
+                    , or open{' '}
+                    <Link href={teamWikiHref(team.id)} className="underline underline-offset-2">
+                      {team.name}’s team wiki
+                    </Link>
+                  </>
+                ) : null}
+                .
+              </EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
-          <>
-            <InputGroup>
-              <InputGroupInput
-                type="search"
-                aria-label="Filter pages"
-                placeholder="Filter by title or alias"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-              />
-              <InputGroupAddon className="text-si-dim">
-                <SearchIcon aria-hidden="true" />
-              </InputGroupAddon>
-            </InputGroup>
-            <Tabs value={tab} onValueChange={(v) => setTab(v as WikiKind)} className="min-w-0">
-              <div className="flex min-w-0 max-md:overflow-x-auto max-md:[scrollbar-width:none]">
-                <TabsList variant="line" aria-label="Page kinds">
-                  {TABS.map((t) => (
-                    <TabsTrigger key={t.id} value={t.id}>
-                      {t.label}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </div>
-              {TABS.map((t) => (
-                <TabsContent key={t.id} value={t.id} className="pt-3">
-                  <PageList showId={show.id} tab={t} needle={needle} filterText={filter} />
-                </TabsContent>
-              ))}
-            </Tabs>
-            <NewWikiPageDialog
-              showId={show.id}
-              open={creating}
-              onOpenChange={setCreating}
-              initialKind={tab}
-            />
-          </>
+          <WikiIndex
+            key={show.id}
+            scope={{ showId: show.id }}
+            teamId={show.teamId}
+            tabs={TABS}
+            creating={creating}
+            onCreatingChange={setCreating}
+          />
+        )}
+      </div>
+    </PageFrame>
+  );
+}
+
+const TEAM_TABS = TABS.filter((t) => t.id !== 'session');
+
+/** `/teams/:teamId/wiki`: the team's shared wiki; every member reads and edits it. */
+export function TeamWikiRoute({ teamId }: { teamId: string }) {
+  const { teams } = useActive();
+  const me = useMe();
+  const team = teams.find((t) => t.id === teamId) ?? null;
+  const [creating, setCreating] = useState(false);
+
+  if (me.isPending) return <RouteLoadingState label="Loading wiki" />;
+
+  return (
+    <PageFrame className="max-md:px-3">
+      <div data-slot="wiki-route" className="contents">
+        <div className="flex min-w-0 flex-wrap items-start gap-3">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <h1 className="m-0 text-[1.35rem] font-semibold text-si-fg">Team wiki</h1>
+            {team && (
+              <p className="m-0 truncate text-sm text-si-muted">
+                {team.name} · people, bits and topics shared by its shows
+              </p>
+            )}
+          </div>
+          {team && (
+            <Button onClick={() => setCreating(true)}>
+              <PlusIcon data-icon="inline-start" />
+              New page
+            </Button>
+          )}
+        </div>
+        {!team ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>Team not found</EmptyTitle>
+              <EmptyDescription>
+                You aren’t a member of this team, or it no longer exists.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <WikiIndex
+            key={team.id}
+            scope={{ teamId: team.id }}
+            tabs={TEAM_TABS}
+            creating={creating}
+            onCreatingChange={setCreating}
+          />
         )}
       </div>
     </PageFrame>

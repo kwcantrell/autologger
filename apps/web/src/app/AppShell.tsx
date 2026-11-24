@@ -27,6 +27,9 @@ const SearchRoute = lazy(() =>
 const WikiRoute = lazy(() =>
   import('@/routes/wiki/WikiRoute').then((m) => ({ default: m.WikiRoute })),
 );
+const TeamWikiRoute = lazy(() =>
+  import('@/routes/wiki/WikiRoute').then((m) => ({ default: m.TeamWikiRoute })),
+);
 const WikiPageView = lazy(() =>
   import('@/routes/wiki/WikiPageView').then((m) => ({ default: m.WikiPageView })),
 );
@@ -155,6 +158,9 @@ export function AppShell() {
                   <HomeRoute />
                 </Route>
                 <Route path="/teams" component={TeamsRoute} />
+                <Route path="/teams/:teamId/wiki">
+                  {(p) => <TeamWikiRoute key={p.teamId} teamId={decodeURIComponent(p.teamId)} />}
+                </Route>
                 <Route path="/sessions/:id">
                   {(p) => <SessionRoute key={p.id} sessionId={decodeURIComponent(p.id)} />}
                 </Route>

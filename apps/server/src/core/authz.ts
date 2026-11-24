@@ -155,6 +155,16 @@ export function readableShowCondition(
   )`;
 }
 
+/**
+ * SQL condition selecting the teams the actor is a member of (any role); pass the team id column.
+ * Team-level data (the team wiki) is readable by every member.
+ */
+export function memberTeamCondition(ctx: Ctx, teamIdCol: SQL | typeof teamMembers.teamId): SQL {
+  if (ctx.actor.device) return sql`false`;
+  if (ctx.actor.user.isSuperadmin) return sql`true`;
+  return sql`${teamIdCol} in (select team_id from team_members where user_id = ${ctx.actor.user.id})`;
+}
+
 /** Access level for many shows at once (for list ops). */
 export async function showAccessMap(
   ctx: Ctx,

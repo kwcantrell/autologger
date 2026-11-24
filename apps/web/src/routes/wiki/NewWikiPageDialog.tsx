@@ -1,11 +1,13 @@
 // "New page": kind and title (and the session, for a session page). `wiki.upsert` without a pageId
 // would silently update a page holding the same title or alias, so the title is checked first
-// (`wiki.get` by showId + title); a collision links to the existing page instead of creating.
+// (`wiki.get` by showId + title, which also finds the team wiki's page of that name, as a show
+// page can't take it); a collision links to the existing page instead of creating. In the team
+// wiki there are no session pages.
 
 import type { WikiKind } from '@autologger/contract';
 import { type FormEvent, useId, useState } from 'react';
 import { Link, useLocation } from 'wouter';
-import { useSessions } from '@/api/queries';
+import { useSessions, type WikiScope } from '@/api/queries';
 import { errorMessage, RpcError, rpc } from '@/api/rpc';
 import { Button } from '@/shared/components/ui/button';
 import { Field, FieldLabel } from '@/shared/components/ui/field';
@@ -25,26 +27,26 @@ import { useWikiUpsert, WIKI_KIND_LABEL, wikiHref } from './wikiShared';
 const KINDS: WikiKind[] = ['person', 'topic', 'bit', 'session', 'question'];
 
 interface Props {
-  showId: string;
+  scope: WikiScope;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialKind: WikiKind;
 }
 
-export function NewWikiPageDialog({ showId, open, onOpenChange, initialKind }: Props) {
+export function NewWikiPageDialog({ scope, open, onOpenChange, initialKind }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange} title="New page">
-      {open && (
-        <NewPageForm showId={showId} initialKind={initialKind} onOpenChange={onOpenChange} />
-      )}
+      {open && <NewPageForm scope={scope} initialKind={initialKind} onOpenChange={onOpenChange} />}
     </Dialog>
   );
 }
 
-function NewPageForm({ showId, initialKind, onOpenChange }: Omit<Props, 'open'>) {
+function NewPageForm({ scope, initialKind, onOpenChange }: Omit<Props, 'open'>) {
   const ids = useId();
   const [, navigate] = useLocation();
-  const [kind, setKind] = useState<WikiKind>(initialKind);
+  const showId = scope.showId;
+  const kinds = showId ? KINDS : KINDS.filter((k) => k !== 'session');
+  const [kind, setKind] = useState<WikiKind>(kinds.includes(initialKind) ? initialKind : 'person');
   const [title, setTitle] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,9 +63,12 @@ function NewPageForm({ showId, initialKind, onOpenChange }: Omit<Props, 'open'>)
     setError(null);
     try {
       try {
-        const existing = await rpc('wiki.get', { showId, title: trimmed });
+        const existing = await rpc('wiki.get', { ...scope, title: trimmed });
         setError({
-          message: `A page called “${existing.title}” already exists.`,
+          message:
+            existing.teamId && showId
+              ? `The team wiki has a page called “${existing.title}”; this show’s links already reach it.`
+              : `A page called “${existing.title}” already exists.`,
           pageId: existing.id,
         });
         return;
@@ -71,7 +76,7 @@ function NewPageForm({ showId, initialKind, onOpenChange }: Omit<Props, 'open'>)
         if (!(err instanceof RpcError && err.code === 'not_found')) throw err;
       }
       const page = await create.mutateAsync({
-        showId,
+        ...scope,
         kind,
         title: trimmed,
         bodyMd: '',
@@ -101,7 +106,7 @@ function NewPageForm({ showId, initialKind, onOpenChange }: Omit<Props, 'open'>)
           onValueChange={(v) => setKind(v as WikiKind)}
           className="flex flex-wrap gap-4"
         >
-          {KINDS.map((k) => (
+          {kinds.map((k) => (
             <span key={k} className="flex items-center gap-2">
               <RadioGroupItem id={`${ids}-${k}`} value={k} aria-label={WIKI_KIND_LABEL[k]} />
               <label htmlFor={`${ids}-${k}`} className="text-sm text-si-fg">

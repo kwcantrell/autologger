@@ -52,13 +52,21 @@ export function WikiPageHeader({
   );
 }
 
-/** "Linked from": the backlinks given; `children` adds list items after them ("and N more"). */
+/**
+ * "Linked from": the backlinks given; `children` adds list items after them ("and N more").
+ * `wikiOf` names the wiki a backlink comes from when it isn't the page's own (a show page linking
+ * a team page).
+ */
 export function BacklinksSection({
   backlinks,
   children,
+  wikiOf,
 }: {
-  backlinks: WikiPage['backlinks'];
+  backlinks: (Pick<WikiPage['backlinks'][number], 'id' | 'title' | 'kind'> & {
+    showId?: string | null;
+  })[];
   children?: ReactNode;
+  wikiOf?: (showId: string | null) => string | undefined;
 }) {
   return (
     <section
@@ -80,7 +88,10 @@ export function BacklinksSection({
             >
               {b.title}
             </Link>
-            <span className="text-xs text-si-dim">{WIKI_KIND_LABEL[b.kind]}</span>
+            <span className="text-xs text-si-dim">
+              {WIKI_KIND_LABEL[b.kind]}
+              {b.showId !== undefined && wikiOf?.(b.showId) ? ` · ${wikiOf(b.showId)}` : ''}
+            </span>
           </li>
         ))}
         {children}

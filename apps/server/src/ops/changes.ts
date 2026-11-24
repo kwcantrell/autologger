@@ -27,7 +27,13 @@ import {
   sql,
 } from 'drizzle-orm';
 import { alias, type PgTable } from 'drizzle-orm/pg-core';
-import { readableShowCondition, requireSession, requireShow } from '../core/authz.ts';
+import {
+  memberTeamCondition,
+  readableShowCondition,
+  requireSession,
+  requireShow,
+  requireTeamRole,
+} from '../core/authz.ts';
 import { conflict, notFound } from '../core/errors.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { schema } from '../db/client.ts';
@@ -180,6 +186,7 @@ async function toChanges(
     summary: r.summary,
     sessionId: r.sessionId,
     showId: r.showId,
+    teamId: r.teamId,
     revertedAt: iso(r.revertedAt),
     revertOf: r.revertOf,
     groupId: r.groupId,
@@ -197,14 +204,19 @@ async function toChanges(
 defineOp({
   name: 'changes.list',
   description:
-    'The change log: who changed what, from where (web, mcp agent, companion), newest first. Filter by session, show, surface (via: one value or a list, e.g. ["web", "companion"] for operators), MCP client or Companion device (clientName, as shown on each change: the MCP client name or the device name; shows_get lists a show\'s mcpClients and companionDevices), item kind (entity) or groupId. Changes to session content carry atSec — seconds from the session start (as in transcript_text) of the event, topic or transcript segment they touched, read from the change\'s after snapshot (before for a delete); absent for other kinds and untimed events. entity audio_segment is a recording\'s transcription status (transcript_import with audioSegmentId marks it transcribed; undoing the import puts it back). sessionId: null lists only show-level changes — show wiki pages and event buttons (category), which belong to no session; with showId, that show\'s. Every change one op call wrote shares a groupId (a bulk call such as transcript_renameSpeaker writes one change per segment). grouped: true (needs sessionId or showId) folds each group into one row — its newest change, with groupSize (how many changes match the filter, set when the group has more than one), groupUndone (how many of those are already undone) and, when the group also reaches other sessions, groupTotal (its size everywhere); revertedAt is then set only when the whole group is undone, and limit counts rows. Undo one change with changes_revert(changeId) or a whole op call with changes_revertGroup(groupId).',
+    "The change log: who changed what, from where (web, mcp agent, companion), newest first. Filter by session, show, surface (via: one value or a list, e.g. [\"web\", \"companion\"] for operators), MCP client or Companion device (clientName, as shown on each change: the MCP client name or the device name; shows_get lists a show's mcpClients and companionDevices), item kind (entity) or groupId. Changes to session content carry atSec — seconds from the session start (as in transcript_text) of the event, topic or transcript segment they touched, read from the change's after snapshot (before for a delete); absent for other kinds and untimed events. entity audio_segment is a recording's transcription status (transcript_import with audioSegmentId marks it transcribed; undoing the import puts it back). sessionId: null lists only show-level changes — show wiki pages and event buttons (category), which belong to no session; with showId, that show's. teamId lists the team wiki's changes (team pages, and pages moved between a show and the team wiki). Every change one op call wrote shares a groupId (a bulk call such as transcript_renameSpeaker writes one change per segment). grouped: true (needs sessionId, showId or teamId) folds each group into one row — its newest change, with groupSize (how many changes match the filter, set when the group has more than one), groupUndone (how many of those are already undone) and, when the group also reaches other sessions, groupTotal (its size everywhere); revertedAt is then set only when the whole group is undone, and limit counts rows. Undo one change with changes_revert(changeId) or a whole op call with changes_revertGroup(groupId).",
   kind: 'read',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { sessionId, showId, via, clientName, entity, groupId, grouped, limit }) {
+  async run(ctx, { sessionId, showId, teamId, via, clientName, entity, groupId, grouped, limit }) {
     if (sessionId) await requireSession(ctx, sessionId, 'read');
     if (showId) await requireShow(ctx, showId, 'read');
+    if (teamId) await requireTeamRole(ctx, teamId, 'member');
     const where = and(
-      readableShowCondition(ctx, changes.showId as never),
+      or(
+        readableShowCondition(ctx, changes.showId as never),
+        and(isNull(changes.showId), memberTeamCondition(ctx, changes.teamId as never)),
+      ),
+      teamId ? eq(changes.teamId, teamId) : undefined,
       sessionId ? eq(changes.sessionId, sessionId) : undefined,
       sessionId === null ? isNull(changes.sessionId) : undefined,
       showId ? eq(changes.showId, showId) : undefined,
@@ -336,7 +348,8 @@ defineOp({
     if (entries.length === 0) throw notFound('Change group');
     // A group comes from one op call, so this is usually a single session or show.
     const scopes = new Map<string, ChangeRow>();
-    for (const c of entries) scopes.set(c.sessionId ?? `${c.showId}:${c.entity === 'category'}`, c);
+    for (const c of entries)
+      scopes.set(c.sessionId ?? `${c.showId}:${c.teamId}:${c.entity === 'category'}`, c);
     for (const c of scopes.values()) await requireRevertAccess(ctx, c);
     const pending = entries.filter((c) => !c.revertedAt);
     if (pending.length === 0) throw conflict('This group was already undone.');
@@ -384,7 +397,9 @@ defineOp({
 
 async function requireRevertAccess(ctx: Ctx, c: ChangeRow): Promise<void> {
   if (c.sessionId) await requireSession(ctx, c.sessionId, 'write');
-  else await requireShow(ctx, c.showId, c.entity === 'category' ? 'manage' : 'write');
+  else if (c.showId) await requireShow(ctx, c.showId, c.entity === 'category' ? 'manage' : 'write');
+  // Team wiki changes (and moves between a show and the team wiki) also need team membership.
+  if (c.teamId) await requireTeamRole(ctx, c.teamId, 'member');
 }
 
 /** Restore the item to `c.before`, mark `c` undone and record the undo; returns its change id. */
@@ -451,6 +466,7 @@ async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
     kind: c.kind === 'create' ? 'delete' : c.kind === 'delete' ? 'create' : 'update',
     summary: `Undid: ${c.summary}`,
     showId: c.showId,
+    teamId: c.teamId,
     sessionId: c.sessionId,
     before: snapshot(pickFields(current as Record<string, unknown> | undefined, fields)),
     after: snapshot(pickFields(restored, fields)),
@@ -463,7 +479,7 @@ async function undoChange(ctx: Ctx, c: ChangeRow): Promise<string> {
     ctx.publish(`session:${c.sessionId}`, { type: 'invalidate', entity: 'session' });
   // The session's transcriptStatus is derived from its recordings' statuses.
   if (c.sessionId && c.entity === 'audio_segment') await publishSession(ctx, c.sessionId);
-  if (c.entity === 'category')
+  if (c.entity === 'category' && c.showId)
     ctx.publish(`show:${c.showId}`, {
       type: 'show_changed',
       showId: c.showId,
