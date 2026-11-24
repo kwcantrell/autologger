@@ -118,7 +118,7 @@ describe('media sweep', () => {
     });
     expect(log).toHaveBeenLastCalledWith(
       expect.stringMatching(
-        /^media sweep: 0 stuck uploads, 2 orphan prefixes, 1 compilation object, 0 unreferenced live-session objects removed; 2 orphans within grace; checked 0 of \d+ live sessions?; \d+ s$/,
+        /^media sweep: 0 stuck uploads, 2 orphan prefixes, 1 show object, 0 unreferenced live-session objects removed; 2 orphans within grace; checked 0 of \d+ live sessions?; \d+ s$/,
       ),
     );
     log.mockRestore();
@@ -187,7 +187,7 @@ describe('media sweep', () => {
     const r = await sweepMedia({ dryRun: true });
     expect(log).toHaveBeenLastCalledWith(
       expect.stringMatching(
-        /^media sweep \(dry run\): 1 stuck upload, 1 orphan prefix, 0 compilation objects, 0 unreferenced live-session objects would be removed; 0 orphans within grace; checked 1 of 1 live session; \d+ s$/,
+        /^media sweep \(dry run\): 1 stuck upload, 1 orphan prefix, 0 show objects, 0 unreferenced live-session objects would be removed; 0 orphans within grace; checked 1 of 1 live session; \d+ s$/,
       ),
     );
     log.mockRestore();

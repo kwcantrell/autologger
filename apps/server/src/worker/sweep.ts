@@ -14,8 +14,10 @@
 //   MEDIA_SWEEP_LIVE_SESSIONS of them, continuing after the last session the previous run of this
 //   process checked (in id order, wrapping around).
 //
+// - Wiki body uploads (wiki.createUpload) no save used within the upload age.
+//
 // Under an existing session, only objects no segment row points at; under an existing show, only
-// compilation MP4s whose compilation row is gone. Orphans are removed only when the newest object under them is
+// compilation MP4s whose compilation row is gone and unused wiki uploads. Orphans are removed only when the newest object under them is
 // older than the grace period, so an in-flight import or compile is not hit. Workers run it on an
 // interval (src/worker/main.ts); a transaction-level advisory lock lets only one at a time sweep.
 
@@ -64,7 +66,10 @@ export interface SweepResult {
   multipartUploads: string[];
   /** Whole prefixes removed: `sessions/<id>/` and `shows/<id>/` of deleted sessions and shows. */
   prefixes: string[];
-  /** Single objects removed: compilation MP4s of deleted compilations under a live show. */
+  /**
+   * Single objects removed under a live show: compilation MP4s of deleted compilations and wiki
+   * body uploads older than the upload age.
+   */
   objects: string[];
   /** Live sessions whose objects were checked against their segment rows. */
   liveSessionsChecked: number;
@@ -222,7 +227,9 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
     }
 
     // 3. Show prefixes: the whole prefix of a deleted show; under a live show, compilation
-    //    MP4s whose compilation was deleted. Any other key shape under a live show is kept.
+    //    MP4s whose compilation was deleted and wiki uploads older than the upload age (each is
+    //    deleted by the save that uses it). Any other key shape under a live show is kept.
+    const uploadCutoff = now.getTime() - uploadAgeMs;
     for (const batch of chunks(idsUnder(await listChildPrefixes('shows/')), ID_BATCH)) {
       const live = new Set(
         (await tx.select({ id: shows.id }).from(shows).where(inArray(shows.id, batch))).map(
@@ -233,6 +240,19 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
         if (!live.has(showId)) {
           await removePrefix(`shows/${showId}/`, 'show no longer exists');
           continue;
+        }
+        for (const o of await listObjects(`shows/${showId}/wiki-uploads/`)) {
+          if (o.lastModified.getTime() >= uploadCutoff) continue;
+          if (!dryRun) {
+            try {
+              await deleteObject(o.key);
+            } catch (e) {
+              console.warn(`media sweep: could not delete ${o.key}: ${(e as Error).message}`);
+              continue;
+            }
+          }
+          result.objects.push(o.key);
+          console.log(`${tag} ${o.key} (wiki upload never used)`);
         }
         const dir = `shows/${showId}/compilations/`;
         const objs = await listObjects(dir);
@@ -295,7 +315,7 @@ export async function sweepMedia(opts: SweepOptions = {}): Promise<SweepResult> 
 
 /**
  * One line per run, so an operator can tell the sweep ran even when it found nothing:
- * `media sweep (dry run): 0 stuck uploads, 1 orphan prefix, 0 compilation objects would be
+ * `media sweep (dry run): 0 stuck uploads, 1 orphan prefix, 0 show objects would be
  * removed; 1 orphan within grace; 12 s`.
  */
 export function summaryLine(r: SweepResult, elapsedMs: number): string {
@@ -314,7 +334,7 @@ export function summaryLine(r: SweepResult, elapsedMs: number): string {
         ]
       : []),
     n(r.prefixes.length, 'orphan prefix', 'orphan prefixes'),
-    n(r.objects.length, 'compilation object', 'compilation objects'),
+    n(r.objects.length, 'show object', 'show objects'),
     n(
       r.liveObjects.length,
       'unreferenced live-session object',

@@ -267,3 +267,102 @@ describe('transcript.renameSpeaker', () => {
     expect(await call(owner, 'transcript.get', { sessionId: session.id })).toEqual(before);
   });
 });
+
+describe('"@seconds" segment refs (#377)', () => {
+  it('edit tools accept the starts transcript.text prints in place of ids', async () => {
+    const { owner, session } = await studio();
+    const agent = asAgent(owner);
+    const [a, b] = await seed(session.id, [
+      { start: 0, end: 2.5, speaker: 'Dana', words: [['one', 0, 2.5]] },
+      { start: 2.54, end: 5, speaker: 'Dana', words: [['tow', 2.54, 5]] },
+      {
+        start: 5,
+        end: 9,
+        speaker: 'Dana',
+        words: [
+          ['three', 5, 6],
+          ['Tom', 6, 7],
+          ['four', 7, 9],
+        ],
+      },
+    ]);
+    const { text } = await call(agent, 'transcript.text', {
+      sessionId: session.id,
+      format: 'compact',
+      stampEverySec: 0,
+    });
+    expect(text).toBe('@0.0 Dana: one [@2.5] tow [@5.0] three Tom four');
+
+    const sessionId = session.id;
+    expect(
+      await call(agent, 'transcript.updateSegments', {
+        sessionId,
+        updates: [{ segmentId: '@2.5', text: 'two' }],
+      }),
+    ).toEqual({ updated: 1, ids: [b] });
+    // Refs need the session; an unknown start is not_found; ref and id of one segment clash.
+    await failsWith(
+      call(agent, 'transcript.updateSegment', { segmentId: '@0', text: 'x' }),
+      'bad_request',
+    );
+    await failsWith(
+      call(agent, 'transcript.updateSegments', {
+        sessionId,
+        updates: [{ segmentId: '@1.0', text: 'x' }],
+      }),
+      'not_found',
+    );
+    await failsWith(
+      call(agent, 'transcript.updateSegments', {
+        sessionId,
+        updates: [
+          { segmentId: '@0', text: 'x' },
+          { segmentId: a!, text: 'y' },
+        ],
+      }),
+      'bad_request',
+    );
+    // An id from another session than the one given is not_found.
+    const other = await call(owner, 'sessions.create', { showId: session.showId, title: 'Other' });
+    await failsWith(
+      call(agent, 'transcript.updateSegment', { sessionId: other.id, segmentId: a!, text: 'x' }),
+      'not_found',
+    );
+
+    const [, second] = await call(agent, 'transcript.splitSegment', {
+      sessionId,
+      segmentId: '@5',
+      atText: 'Tom',
+      speaker: 'Tom',
+    });
+    expect(second!.startSec).toBe(6);
+    const merged = await call(agent, 'transcript.mergeSegments', {
+      sessionId,
+      segmentIds: ['@0.0', '@2.5'],
+    });
+    expect(merged).toMatchObject({ id: a, text: 'one two' });
+    await call(agent, 'transcript.updateSegment', {
+      sessionId,
+      segmentId: '@6.0',
+      text: 'Tom: four',
+    });
+    expect((await call(agent, 'transcript.get', { sessionId })).map((s) => s.text)).toEqual([
+      'one two',
+      'three',
+      'Tom: four',
+    ]);
+
+    // Two segments starting in the same tenth of a second make the ref ambiguous.
+    await seed(session.id, [
+      { start: 20.01, end: 21, speaker: 'Dana', words: [['x', 20.01, 21]] },
+      { start: 20.04, end: 21, speaker: 'Tom', words: [['y', 20.04, 21]] },
+    ]);
+    await failsWith(
+      call(agent, 'transcript.updateSegments', {
+        sessionId,
+        updates: [{ segmentId: '@20.0', text: 'z' }],
+      }),
+      'bad_request',
+    );
+  });
+});

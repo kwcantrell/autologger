@@ -60,6 +60,54 @@ defineOp({
   },
 });
 
+const isRef = (ref: string) => ref.startsWith('@');
+
+/**
+ * Segment ids for `refs`, in order: ids pass through; an `@<seconds>` ref is the one segment of
+ * `sessionId` whose start transcript.text prints as those seconds (one decimal). Unknown or
+ * ambiguous refs fail the call. Ids are not checked here; the callers load and authorize them.
+ */
+async function resolveSegmentRefs(
+  ctx: Ctx,
+  sessionId: string | undefined,
+  refs: string[],
+): Promise<string[]> {
+  const secs = [...new Set(refs.filter(isRef).map((r) => Number(r.slice(1)).toFixed(1)))];
+  if (secs.length === 0) return refs;
+  if (!sessionId) throw badRequest('Pass sessionId with "@<seconds>" segment refs.');
+  await requireSession(ctx, sessionId, 'read');
+  // Within ±0.06 s, then exactly what transcript.text prints (toFixed), so floats round alike.
+  const rows = await ctx.db
+    .select({ id: ts.id, startSec: ts.startSec })
+    .from(ts)
+    .where(
+      and(
+        eq(ts.sessionId, sessionId),
+        or(
+          ...secs.map((v) =>
+            and(gte(ts.startSec, Number(v) - 0.06), lt(ts.startSec, Number(v) + 0.06)),
+          ),
+        ),
+      ),
+    );
+  const byStart = new Map<string, string[]>();
+  for (const r of rows) {
+    const at = r.startSec.toFixed(1);
+    byStart.set(at, [...(byStart.get(at) ?? []), r.id]);
+  }
+  return refs.map((ref) => {
+    if (!isRef(ref)) return ref;
+    const at = Number(ref.slice(1)).toFixed(1);
+    const ids = byStart.get(at) ?? [];
+    if (ids.length === 0) throw notFound(`Transcript segment starting at @${at}`);
+    if (ids.length > 1)
+      throw badRequest(
+        `@${at} matches ${ids.length} segments (${ids.join(', ')}); use one of their ids.`,
+      );
+    return ids[0]!;
+  });
+}
+
 type TextRow = { id: string; startSec: number; speaker: string; text: string };
 
 /** One line per segment: `[HH:MM:SS @123.4s] Speaker: text`, optionally prefixed with the id. */
@@ -109,7 +157,8 @@ defineOp({
     '`format: "compact"` is much shorter (use it to read long sessions): consecutive segments by the same speaker are merged into one paragraph `@123.4 Speaker: text text ...`, with an inline `[@183.4]` stamp inside long paragraphs at the first segment starting `stampEverySec` (default 60) or more after the previous stamp. ' +
     '`stampEverySec: 0` stamps every segment start (`... text [@183.4] text [@185.2] text`) — still far shorter than lines (no clock, no speaker per line). Use it, in one read, when you need exact start times for topics, events or wiki citations; the default 60 is enough to skim. ' +
     'The @seconds values are what atSec / startSec fields in events.create and topics.create expect, and the start of a citation range. ' +
-    "`ids: true` adds segment ids for targeting edits (transcript.updateSegments, mergeSegments, splitSegment): the lines format prefixes each line with its id (`seg_… [HH:MM:SS @123.4s] Speaker: text`), the compact format puts `{seg_…}` before each segment's text, `{seg_…@183.4}` where a stamp is due. " +
+    'Every @seconds value printed at a segment start (`@123.4` or `[@183.4]` in compact, `@123.4s` in lines) is also a segment ref: the edit tools (transcript.updateSegment, updateSegments, mergeSegments, splitSegment) accept "@183.4" in place of a segment id, with the sessionId. So to read and fix a transcript in one pass, read it with `format: "compact", stampEverySec: 0` (every segment stamped) and edit by those refs — no ids needed. A ref matching two segments (both starting in the same tenth of a second) fails with bad_request listing their ids. ' +
+    "`ids: true` adds segment ids, which cost far more output (use pages of ~10 minutes with them; prefer the @seconds refs above): the lines format prefixes each line with its id (`seg_… [HH:MM:SS @123.4s] Speaker: text`), the compact format puts `{seg_…}` before each segment's text, `{seg_…@183.4}` where a stamp is due. " +
     'Paging: fromSec/toSec (seconds from session start) select the segments that START in [fromSec, toSec), so consecutive pages (0-1500, 1500-3000, ...) never repeat a line. ' +
     'Returns `{ text, segments, chars, totalSegments, durationSec, transcriptStatus }`: segments and chars describe this page; totalSegments and durationSec (end of the last segment) describe the whole session, so the first call tells you how to page; transcriptStatus is as in sessions.get. Over MCP the text comes first, then the numbers as JSON. ' +
     'When the page has no segments, the MCP text says why instead: "(transcript is empty: no speech detected)" when transcription finished (status done) but found no speech, e.g. a music-only video — final, do not wait or retranscribe; "(no transcript yet: …)" while it is pending or there is no audio yet; "(no transcript: transcription failed …)" when it failed; "(no segments start in this range …)" for an empty fromSec/toSec page of a non-empty transcript.',
@@ -205,15 +254,16 @@ async function editSegment(
 defineOp({
   name: 'transcript.updateSegment',
   description:
-    'Correct the text or speaker of one transcript segment (segmentId from transcript.find or transcript.get). ' +
+    'Correct the text or speaker of one transcript segment (segmentId from transcript.find or transcript.get, or an "@<seconds>" ref from transcript.text with sessionId). ' +
     'Unchanged words keep their recorded word timings; only inserted or replaced words get ' +
     'interpolated timings, so prefer small targeted edits over rewriting a whole segment. ' +
     'Returns the segment with word timings. To fix many lines, use transcript.updateSegments instead.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { segmentId, text, speaker }) {
-    const [row] = await ctx.db.select().from(ts).where(eq(ts.id, segmentId));
-    if (!row) throw notFound('Transcript segment');
+  async run(ctx, { segmentId: ref, sessionId, text, speaker }) {
+    const [segmentId] = await resolveSegmentRefs(ctx, sessionId, [ref]);
+    const [row] = await ctx.db.select().from(ts).where(eq(ts.id, segmentId!));
+    if (!row || (sessionId && row.sessionId !== sessionId)) throw notFound('Transcript segment');
     const { session } = await requireSession(ctx, row.sessionId, 'write');
     return toTranscriptSegment(await editSegment(ctx, session, row, { text, speaker }));
   },
@@ -382,13 +432,17 @@ defineOp({
 defineOp({
   name: 'transcript.updateSegments',
   description:
-    'Correct the text and/or speaker of up to 500 transcript segments of one session in a single call (ids from transcript.find or transcript.get). All edits apply in one transaction: if any segmentId is unknown or belongs to another session, nothing changes. Each changed segment is its own entry in the change log (undoable one by one); all entries of one call share a groupId, so changes_revertGroup undoes the whole call at once (the Agents tab shows it as one row with "Undo all"). Entries that change nothing are skipped. Unchanged words keep their recorded word timings; only inserted or replaced words get interpolated ones. Returns `{ updated, segments }` with `{ id, startSec, endSec, speaker, text, edited }` lines (no word timings), in the order given. Agents get only `{ updated, ids }` (the segment ids actually changed, in the order given) by default (compact); pass `compact: false` for the updated segments.',
+    'Correct the text and/or speaker of up to 500 transcript segments of one session in a single call: `updates: [{ segmentId, text?, speaker? }]`, segmentId from transcript.find or transcript.get, or an "@<seconds>" ref — a segment start as transcript.text prints it, e.g. "@183.4" (see transcript_text). All edits apply in one transaction: if any segmentId or ref is unknown or belongs to another session, nothing changes. Each changed segment is its own entry in the change log (undoable one by one); all entries of one call share a groupId, so changes_revertGroup undoes the whole call at once (the Agents tab shows it as one row with "Undo all"). Entries that change nothing are skipped. Unchanged words keep their recorded word timings; only inserted or replaced words get interpolated ones. Returns `{ updated, segments }` with `{ id, startSec, endSec, speaker, text, edited }` lines (no word timings), in the order given. Agents get only `{ updated, ids }` (the segment ids actually changed, in the order given) by default (compact); pass `compact: false` for the updated segments.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
   async run(ctx, { sessionId, updates, compact }) {
     const { session } = await requireSession(ctx, sessionId, 'write');
-    const ids = updates.map((u) => u.segmentId);
-    if (new Set(ids).size !== ids.length) throw badRequest('Each segmentId may appear only once.');
+    const ids = await resolveSegmentRefs(
+      ctx,
+      sessionId,
+      updates.map((u) => u.segmentId),
+    );
+    if (new Set(ids).size !== ids.length) throw badRequest('Each segment may appear only once.');
     const rows = await ctx.db
       .select()
       .from(ts)
@@ -399,8 +453,8 @@ defineOp({
 
     const changed: string[] = [];
     const segments: TranscriptLine[] = [];
-    for (const u of updates) {
-      const row = byId.get(u.segmentId)!;
+    for (const [i, u] of updates.entries()) {
+      const row = byId.get(ids[i]!)!;
       const changes =
         (u.text !== undefined && u.text !== row.text) ||
         (u.speaker !== undefined && u.speaker !== row.speaker);
@@ -516,17 +570,19 @@ function splitIndexOfSec(words: SegmentRow['words'], atSec: number): number {
 defineOp({
   name: 'transcript.mergeSegments',
   description:
-    'Merge 2 to 50 transcript segments (ids from transcript.find or transcript.get) into one, e.g. to rejoin a phrase split mid-sentence or two overlapping segments that read in the wrong order. The segments must belong to the same session and audio recording and be adjacent in time order (no other segment starts between them) or overlap. The merged segment keeps the id of the earliest-starting segment and spans the earliest start to the latest end (seconds from session start); its words are all words sorted by start time and its text is rebuilt from those words, so make text fixes after merging. Because words are interleaved by start time, merging overlapping segments from different speakers mixes their words into one line: do not merge overlaps from different speakers. Speaker comes from the earliest segment unless `speaker` is given. The other segments are deleted. Change log: one entry per row (an update for the kept segment and a delete per removed segment), not one entry for the merge; to undo the merge, revert all of them together (Agents tab or changes.revert, any order) to restore the originals exactly. Reverting only some leaves duplicate or missing lines. Returns the merged segment with word timings.',
+    'Merge 2 to 50 transcript segments (ids from transcript.find or transcript.get, or "@<seconds>" refs from transcript.text with sessionId) into one, e.g. to rejoin a phrase split mid-sentence or two overlapping segments that read in the wrong order. The segments must belong to the same session and audio recording and be adjacent in time order (no other segment starts between them) or overlap. The merged segment keeps the id of the earliest-starting segment and spans the earliest start to the latest end (seconds from session start); its words are all words sorted by start time and its text is rebuilt from those words, so make text fixes after merging. Because words are interleaved by start time, merging overlapping segments from different speakers mixes their words into one line: do not merge overlaps from different speakers. Speaker comes from the earliest segment unless `speaker` is given. The other segments are deleted. Change log: one entry per row (an update for the kept segment and a delete per removed segment), not one entry for the merge; to undo the merge, revert all of them together (Agents tab or changes.revert, any order) to restore the originals exactly. Reverting only some leaves duplicate or missing lines. Returns the merged segment with word timings.',
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { segmentIds, speaker }) {
+  async run(ctx, { segmentIds: refs, sessionId: givenSession, speaker }) {
+    const segmentIds = await resolveSegmentRefs(ctx, givenSession, refs);
     if (new Set(segmentIds).size !== segmentIds.length)
-      throw badRequest('Each segmentId may appear only once.');
+      throw badRequest('Each segment may appear only once.');
     const rows = await ctx.db.select().from(ts).where(inArray(ts.id, segmentIds));
     const sessionId = rows[0]?.sessionId;
     if (
       rows.length !== segmentIds.length ||
       !sessionId ||
+      (givenSession && sessionId !== givenSession) ||
       rows.some((r) => r.sessionId !== sessionId)
     )
       throw notFound('Transcript segment');
@@ -614,12 +670,13 @@ defineOp({
 defineOp({
   name: 'transcript.splitSegment',
   description:
-    "Split one transcript segment (segmentId from transcript.find or transcript.get) in two. Say where with exactly one of: `atText`, a phrase from the segment's text to split before (e.g. the first words of the second speaker's reply; matched word by word ignoring case and punctuation; it must occur exactly once and not at the very start, else bad_request: add words or use atSec); `atSec`, seconds from session start (split before the first word starting at or after it, e.g. a time read from transcript_text `@seconds`); or `atWord`, a 0-based index into the segment's `words` from transcript.get, at least 1 and less than the word count. The original keeps its id and the words before `atWord`; a new segment gets that word and the rest. The split time is that word's start (seconds from session start). Both texts are rebuilt from their words. The new segment keeps the speaker unless `speaker` is given (use it when the speaker changes mid-segment). Change log: one entry per row (an update for the original and a create for the new segment), not one entry for the split; to undo the split, revert both together (any order) to restore the original exactly. Reverting only one leaves duplicate or missing words. Returns both segments in time order, with word timings.",
+    "Split one transcript segment (segmentId from transcript.find or transcript.get, or an \"@<seconds>\" ref from transcript.text with sessionId) in two. Say where with exactly one of: `atText`, a phrase from the segment's text to split before (e.g. the first words of the second speaker's reply; matched word by word ignoring case and punctuation; it must occur exactly once and not at the very start, else bad_request: add words or use atSec); `atSec`, seconds from session start (split before the first word starting at or after it, e.g. a time read from transcript_text `@seconds`); or `atWord`, a 0-based index into the segment's `words` from transcript.get, at least 1 and less than the word count. The original keeps its id and the words before `atWord`; a new segment gets that word and the rest. The split time is that word's start (seconds from session start). Both texts are rebuilt from their words. The new segment keeps the speaker unless `speaker` is given (use it when the speaker changes mid-segment). Change log: one entry per row (an update for the original and a create for the new segment), not one entry for the split; to undo the split, revert both together (any order) to restore the original exactly. Reverting only one leaves duplicate or missing words. Returns both segments in time order, with word timings.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { segmentId, atWord: givenWord, atText, atSec, speaker }) {
-    const [row] = await ctx.db.select().from(ts).where(eq(ts.id, segmentId));
-    if (!row) throw notFound('Transcript segment');
+  async run(ctx, { segmentId: ref, sessionId, atWord: givenWord, atText, atSec, speaker }) {
+    const [segmentId] = await resolveSegmentRefs(ctx, sessionId, [ref]);
+    const [row] = await ctx.db.select().from(ts).where(eq(ts.id, segmentId!));
+    if (!row || (sessionId && row.sessionId !== sessionId)) throw notFound('Transcript segment');
     const { session } = await requireSession(ctx, row.sessionId, 'write');
     const words = timedWords(row);
     const atWord =

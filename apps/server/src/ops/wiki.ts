@@ -19,6 +19,15 @@ import { badRequest, conflict, notFound } from '../core/errors.ts';
 import { newId } from '../core/ids.ts';
 import { type Ctx, defineOp, snapshot } from '../core/op.ts';
 import { type Db, schema } from '../db/client.ts';
+import {
+  deleteObject,
+  getObjectBytes,
+  headObject,
+  presignUpload,
+  requireStorage,
+  UPLOAD_URL_TTL_SEC,
+  wikiUploadKeyFor,
+} from '../media/s3.ts';
 import { iso, userRefs } from './map.ts';
 
 const {
@@ -702,10 +711,71 @@ defineOp({
   },
 });
 
+const UPLOAD_TYPE = 'text/markdown';
+/** Bytes a body upload may hold: 100000 characters of UTF-8 at worst. */
+const UPLOAD_MAX_BYTES = 400_000;
+
+defineOp({
+  name: 'wiki.createUpload',
+  description:
+    'Send a long page body as a file instead of inlining it in a tool call (saves output tokens when you drafted the Markdown in a local file). showId from shows_list; needs write access to the show. Returns { uploadId, uploadUrl, headers, expiresAt }: PUT the UTF-8 Markdown file to uploadUrl with exactly headers within 15 minutes (e.g. `curl -sf -X PUT -H "Content-Type: text/markdown" --data-binary @recap.md "<uploadUrl>"`), then pass uploadId as bodyUploadId to wiki_upsert (instead of bodyMd) or as appendUploadId to wiki_patch (instead of append) for a page of this show. The file is read exactly as bodyMd would be (at most 100000 characters, same citation forms) and deleted once a save uses it, so each uploadId works once; an unused one is removed after a few hours. Writes nothing else.',
+  kind: 'write',
+  surfaces: ['mcp'],
+  async run(ctx, { showId }) {
+    await requireShow(ctx, showId, 'write');
+    requireStorage();
+    const uploadId = newId('wup');
+    return {
+      uploadId,
+      uploadUrl: await presignUpload(wikiUploadKeyFor(showId, uploadId), UPLOAD_TYPE),
+      headers: { 'Content-Type': UPLOAD_TYPE },
+      expiresAt: new Date(Date.now() + UPLOAD_URL_TTL_SEC * 1000).toISOString(),
+    };
+  },
+});
+
+/** The text of a wiki.createUpload file for `showId`, and its key (delete it once saved). */
+async function readUpload(
+  showId: string,
+  uploadId: string,
+  field: string,
+): Promise<{ text: string; key: string }> {
+  requireStorage();
+  const missing = () =>
+    conflict(
+      `Nothing was uploaded for ${field} ${uploadId} in this show: PUT the file to the uploadUrl of wiki_createUpload first (it works for 15 minutes), or it was already used by a save — create a new upload.`,
+    );
+  if (!/^wup_[0-9a-z]+$/.test(uploadId)) throw missing();
+  const key = wikiUploadKeyFor(showId, uploadId);
+  const head = await headObject(key);
+  if (!head) throw missing();
+  if (head.size > UPLOAD_MAX_BYTES)
+    throw badRequest(`The ${field} file is larger than ${UPLOAD_MAX_BYTES} bytes.`);
+  const bytes = await getObjectBytes(key);
+  if (!bytes) throw missing();
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw badRequest(`The ${field} file is not UTF-8 text.`);
+  }
+  text = text.replace(/^\uFEFF/, '');
+  if (text.length > 100_000) throw badRequest(`The ${field} file holds over 100000 characters.`);
+  return { text, key };
+}
+
+/** Remove a body upload once its save went through; a leftover is swept later. */
+async function dropUpload(key: string | undefined) {
+  if (!key) return;
+  await deleteObject(key).catch((e) =>
+    console.warn(`could not delete wiki upload ${key}: ${(e as Error).message}`),
+  );
+}
+
 defineOp({
   name: 'wiki.upsert',
   description:
-    'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated (keeping its title), otherwise a new one is created; pass pageId to rename. bodyMd is raw Markdown, stored as sent (except the citation clamping below): write real newlines and quotes, not JSON escapes like \\n or \\". Link pages with [[Title]] or [[Title|label]]. Kind "session" = a recap tied to sessionId. Kind "question" = an answered question: title = the question as asked (e.g. "When did Dana talk about her dog?"), bodyMd = the answer with a citation for every claim. ' +
+    'Create or update a wiki page. Without pageId, a page with the same title (or alias) is updated (keeping its title), otherwise a new one is created; pass pageId to rename. bodyMd is raw Markdown, stored as sent (except the citation clamping below): write real newlines and quotes, not JSON escapes like \\n or \\". For a long body you drafted in a local file, pass bodyUploadId (from wiki_createUpload, after PUTting the file) instead of bodyMd so you do not resend it inline. Link pages with [[Title]] or [[Title|label]]. Kind "session" = a recap tied to sessionId. Kind "question" = an answered question: title = the question as asked (e.g. "When did Dana talk about her dog?"), bodyMd = the answer with a citation for every claim. ' +
     "Citations (prefer them to bare timecodes on every page kind) link a range of a session: [label](/sessions/<sessionId>?t=<startSec>&to=<endSec>), seconds from the session start (the @seconds of transcript_text), `to` optional and greater than t, e.g. [Dana on the dog](/sessions/ses_abc?t=754.2&to=811). The range must end within the session's audio (audioSeconds in sessions_get / sessions_list); a `to` up to 5 s past the end is clamped to it on save. The web shows a chip that plays the range. Short forms save tokens and work the same: on a page with a sessionId (every recap) [label](@<startSec>-<endSec>) or [@<startSec>-<endSec>] (no label) cite that session; on any page [label](@<sessionId>:<startSec>-<endSec>) or [@<sessionId>:<startSec>-<endSec>]; -<endSec> is optional. A sessionless short form on a page without a sessionId is a bad_request. " +
     'Every save keeps a revision; to change a few sentences use wiki_patch instead of resending the body. baseRevision (optional; `revision` from wiki_get / wiki_list): when the page has moved on since (another save, or an undo) the call fails with conflict naming the current revision and who changed it, and nothing is saved — re-read, redo the edit, retry. Send it when rewriting a page you read earlier so a concurrent human edit is not overwritten; without it the last write wins. ' +
     'Returns the saved page with body and backlinks, but agents get only { id, title, kind, revision, unresolvedLinks, citationCount, badCitations, clampedCitations } by default (compact; pass compact: false for the page), unresolvedLinks = [[link]] targets matching no page title or alias yet (create those pages or fix the links). Both shapes include citationCount (citations in the saved body, repeats counted); badCitations, the citations wiki_lint would flag, in body order: [{ sessionId, startSec, endSec?, label, problem }], problem "unknown_session" | "bad_range" | "past_end" | "label_mismatch" (see wiki_lint; the page is saved anyway, fix with wiki_patch; a `to`-less citation past the audio end is reported as past_end, not clamped); and clampedCitations: [{ sessionId, startSec, endSec (stored), sentEndSec, label }] — when not empty the stored body differs from what you sent, so a later wiki_patch `find` must use the stored `to`.',
@@ -713,6 +783,10 @@ defineOp({
   surfaces: ['web', 'mcp'],
   async run(ctx, input) {
     await requireShow(ctx, input.showId, 'write');
+    const upload = input.bodyUploadId
+      ? await readUpload(input.showId, input.bodyUploadId, 'bodyUploadId')
+      : undefined;
+    const bodyMd = upload?.text ?? input.bodyMd ?? '';
     if (input.kind === 'session' && !input.sessionId)
       throw badRequest('Session pages need a sessionId.');
     if (input.sessionId) {
@@ -738,7 +812,7 @@ defineOp({
     const clamp = await clampCitationEnds(
       ctx,
       input.showId,
-      input.bodyMd,
+      bodyMd,
       input.sessionId ?? existing?.sessionId ?? null,
     );
     const values = {
@@ -792,6 +866,7 @@ defineOp({
     await addRevision(ctx, row);
     await indexWikiLinks(ctx.db, row.id, row.bodyMd, row.sessionId);
     const cited = await savedCitations(ctx, row.showId, row.bodyMd, row.sessionId, clamp.clamped);
+    await dropUpload(upload?.key);
     if (input.compact)
       return {
         id: row.id,
@@ -815,21 +890,30 @@ function occurrences(text: string, find: string): number {
 defineOp({
   name: 'wiki.patch',
   description:
-    "Fix part of a wiki page without resending its body (pageId from wiki_list / wiki_get; no need to read the page first to append). edits: [{ find, replace }] are exact, case-sensitive replacements applied in order; each `find` must occur exactly once at that point (otherwise bad_request saying how often it matched; add surrounding text to make it unique), and nothing is saved unless every edit applies. append (optional) adds Markdown on a new line at the end. Citations and their short forms are as in wiki_upsert; a citation `to` up to 5 s past its session's audio end is clamped (anywhere in the saved body) and listed in clampedCitations, so a `to=` in a later `find` must match the stored end. Saved as one new revision, undoable from the change log. baseRevision (optional, as in wiki_upsert): if the page has moved on since, conflict and nothing is saved; without it the edits apply to whatever the page holds now. Returns the page summary without the body, plus citationCount, badCitations and clampedCitations (as in wiki_upsert); agents get only { id, title, kind, revision, unresolvedLinks, citationCount, badCitations, clampedCitations } by default, like wiki_upsert (pass compact: false for the summary), unresolvedLinks = [[link]] targets in the saved body matching no page yet.",
+    "Fix part of a wiki page without resending its body (pageId from wiki_list / wiki_get; no need to read the page first to append). edits: [{ find, replace, all? }] are exact, case-sensitive replacements applied in order; each `find` must occur exactly once at that point (otherwise bad_request saying how often it matched; add surrounding text to make it unique), and nothing is saved unless every edit applies. all: true replaces every occurrence instead (at least one), e.g. to link every mention at once (find `Dana Lee`, replace `[[Dana Lee]]` — mind text already inside links). append (optional) adds Markdown on a new line at the end; appendUploadId (from wiki_createUpload, after PUTting the file) appends a long section from a file instead. Citations and their short forms are as in wiki_upsert; a citation `to` up to 5 s past its session's audio end is clamped (anywhere in the saved body) and listed in clampedCitations, so a `to=` in a later `find` must match the stored end. Saved as one new revision, undoable from the change log. baseRevision (optional, as in wiki_upsert): if the page has moved on since, conflict and nothing is saved; without it the edits apply to whatever the page holds now. Returns the page summary without the body, plus citationCount, badCitations and clampedCitations (as in wiki_upsert); agents get only { id, title, kind, revision, unresolvedLinks, citationCount, badCitations, clampedCitations } by default, like wiki_upsert (pass compact: false for the summary), unresolvedLinks = [[link]] targets in the saved body matching no page yet.",
   kind: 'write',
   surfaces: ['web', 'mcp'],
-  async run(ctx, { pageId, edits, append, baseRevision, compact }) {
+  async run(ctx, { pageId, edits, append: appendMd, appendUploadId, baseRevision, compact }) {
     const row = await lockAtRevision(ctx, await loadPage(ctx, pageId, 'write'), baseRevision);
-    if (!edits.length && !append) throw badRequest('Give at least one edit or append.');
+    if (!edits.length && !appendMd && !appendUploadId)
+      throw badRequest('Give at least one edit, append or appendUploadId.');
+    const upload = appendUploadId
+      ? await readUpload(row.showId, appendUploadId, 'appendUploadId')
+      : undefined;
+    const append = upload?.text ?? appendMd;
     let body = row.bodyMd;
     for (const [i, e] of edits.entries()) {
       const n = occurrences(body, e.find);
-      if (n !== 1)
+      if (n === 0 || (n > 1 && !e.all))
         throw badRequest(
           n === 0
             ? `edits[${i}].find was not found in the page (it must match exactly, including case and whitespace).`
-            : `edits[${i}].find matches ${n} times; include more surrounding text so it matches once.`,
+            : `edits[${i}].find matches ${n} times; include more surrounding text so it matches once, or pass all: true to replace every one.`,
         );
+      if (e.all) {
+        body = body.split(e.find).join(e.replace);
+        continue;
+      }
       const at = body.indexOf(e.find);
       body = body.slice(0, at) + e.replace + body.slice(at + e.find.length);
     }
@@ -867,6 +951,7 @@ defineOp({
       after.sessionId,
       clamp.clamped,
     );
+    await dropUpload(upload?.key);
     if (compact)
       return {
         id: after.id,
